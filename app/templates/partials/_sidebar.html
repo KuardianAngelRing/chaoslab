@@ -1,0 +1,97 @@
+<aside class="w-64 shrink-0 flex flex-col border-r" style="background: var(--sidebar); border-color: var(--sidebar-border);">
+
+  <!-- 로고 -->
+  <div class="px-4 pt-5 pb-5 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background: var(--primary);">
+        <iconify-icon icon="solar:atom-bold" style="color: white;" width="22"></iconify-icon>
+      </div>
+      <div class="font-extrabold text-base leading-tight" style="color: var(--sidebar-foreground);">ChaosLab</div>
+    </div>
+    <button class="p-1.5 rounded-lg hover:bg-sidebar-accent" title="사이드바 접기" style="color: var(--sidebar-muted);">
+      <iconify-icon icon="solar:sidebar-minimalistic-linear" width="18"></iconify-icon>
+    </button>
+  </div>
+
+  <!-- 네비게이션 (HTMX 부분 스왑) -->
+  <nav class="flex-1 overflow-y-auto px-3 pb-4 space-y-0.5">
+
+    <a hx-get="/" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+       class="sidebar-nav-item {{ 'active' if active_nav == 'dashboard' }}">
+      <iconify-icon icon="solar:widget-bold" width="18"></iconify-icon>
+      <span class="text-sm">대시보드</span>
+    </a>
+
+    <a hx-get="/apps" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+       class="sidebar-nav-item {{ 'active' if active_nav == 'apps' }}">
+      <iconify-icon icon="solar:server-square-bold" width="18"></iconify-icon>
+      <span class="text-sm flex-1">Apps</span>
+      <span class="text-[11px] font-bold px-1.5 py-0.5 rounded-md" style="background: var(--muted); color: var(--muted-foreground);">{{ app_count }}</span>
+    </a>
+
+    <a hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+       class="sidebar-nav-item {{ 'active' if active_nav == 'experiments' }}">
+      <iconify-icon icon="solar:bug-bold" width="18"></iconify-icon>
+      <span class="text-sm flex-1">카오스 테스트</span>
+      <span class="w-2 h-2 rounded-full pulse-dot" style="background: var(--danger);"></span>
+    </a>
+
+    <a hx-get="/infra" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+       class="sidebar-nav-item {{ 'active' if active_nav == 'infra' }}">
+      <iconify-icon icon="logos:aws" width="18"></iconify-icon>
+      <span class="text-sm flex-1">EKS 인프라</span>
+    </a>
+
+    <a hx-get="/settings" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+       class="sidebar-nav-item {{ 'active' if active_nav == 'settings' }}">
+      <iconify-icon icon="solar:settings-bold" width="18"></iconify-icon>
+      <span class="text-sm flex-1">설정</span>
+    </a>
+
+  </nav>
+
+  <!-- 시스템 상태 -->
+  <div class="mx-4 mb-3 p-2.5 rounded-xl" style="background: var(--sidebar-accent);">
+    <div class="flex items-center justify-between text-[11px]">
+      <div class="flex items-center gap-1.5" style="color: var(--sidebar-foreground);">
+        <span class="w-1.5 h-1.5 rounded-full" style="background: var(--success);"></span>
+        <span class="font-semibold">EKS 정상</span>
+      </div>
+      <span style="color: var(--sidebar-muted);">5/5</span>
+    </div>
+  </div>
+
+  <!-- 사용자 프로필 -->
+  <div class="relative px-3 pb-4 border-t pt-3" style="border-color: var(--sidebar-border);">
+    <button id="userMenuBtn" class="w-full flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-sidebar-accent">
+      <div class="w-9 h-9 rounded-full flex items-center justify-center font-extrabold text-white" style="background: linear-gradient(135deg, #004b3e, #0d9488);">
+        태
+      </div>
+      <div class="flex-1 text-left min-w-0">
+        <div class="text-sm font-bold truncate" style="color: var(--sidebar-foreground);">박태윤</div>
+        <div class="text-[11px] truncate" style="color: var(--sidebar-muted);">taeyun02@treenod.com</div>
+      </div>
+      <iconify-icon icon="lucide:chevron-up" width="14" style="color: var(--sidebar-muted);"></iconify-icon>
+    </button>
+
+    <div id="userMenu" class="user-menu mx-3">
+      <div class="user-menu-item">
+        <iconify-icon icon="solar:user-bold" width="16"></iconify-icon>
+        내 프로필
+      </div>
+      <div class="user-menu-item" id="themeToggleBtn">
+        <iconify-icon id="themeIcon" icon="solar:moon-bold" width="16"></iconify-icon>
+        <span id="themeLabel">다크 모드</span>
+      </div>
+      <div class="user-menu-item">
+        <iconify-icon icon="solar:document-bold" width="16"></iconify-icon>
+        문서 보기
+      </div>
+      <hr style="border-color: var(--border); margin: 0.25rem 0;" />
+      <div class="user-menu-item" style="color: var(--danger);">
+        <iconify-icon icon="solar:logout-3-bold" width="16"></iconify-icon>
+        로그아웃
+      </div>
+    </div>
+  </div>
+</aside>

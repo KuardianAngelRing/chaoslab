@@ -1,0 +1,25 @@
+{% macro badge(text, variant="muted") %}
+<span class="tds-badge badge-{{ variant }}">{{ text }}</span>
+{% endmacro %}
+
+{% macro kpi_card(icon, label, value, delta=None, delta_variant="success") %}
+<div class="tds-card p-5 hover-lift">
+  <div class="flex items-center justify-between mb-3">
+    <iconify-icon icon="{{ icon }}" width="22" style="color: var(--primary);"></iconify-icon>
+    {% if delta %}<span class="tds-badge badge-{{ delta_variant }}">{{ delta }}</span>{% endif %}
+  </div>
+  <div class="text-2xl font-extrabold">{{ value }}</div>
+  <div class="text-xs mt-1" style="color: var(--muted-foreground);">{{ label }}</div>
+</div>
+{% endmacro %}
+
+{% macro app_card(app) %}
+<div class="tds-card p-5 hover-lift">
+  <div class="flex items-center justify-between mb-2">
+    <div class="font-bold">{{ app.name }}</div>
+    {{ badge(app.status, "success" if app.status == "healthy" else "warning") }}
+  </div>
+  <div class="text-xs mono" style="color: var(--muted-foreground);">{{ app.framework }} · {{ app.namespace }}</div>
+  <div class="text-xs mono mt-1" style="color: var(--muted-foreground);">{{ app.current_sha[:8] }}</div>
+</div>
+{% endmacro %}

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChaosLab — AI 카오스 자동 개선 플랫폼</title>
+
+  <!-- Tailwind CDN (프로토타입용) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Iconify -->
+  <script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- HTMX -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+
+  <link rel="stylesheet" href="/static/css/tds.css" />
+</head>
+<body>
+  <div class="flex h-screen overflow-hidden">
+    {% include "partials/_sidebar.html" %}
+    <main class="flex-1 overflow-y-auto">
+      <div id="main-content">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
