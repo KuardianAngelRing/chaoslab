@@ -8,7 +8,7 @@ from app.config import settings
 from app.db.database import SessionLocal, init_db
 from app.db.repositories import AppRepository
 from app.db.seed import seed_data
-from app.routers import pages, stream
+from app.routers import apps, pages, stream
 
 
 @asynccontextmanager
@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 app.include_router(pages.router)
+app.include_router(apps.router)
 app.include_router(stream.router)
 
 
