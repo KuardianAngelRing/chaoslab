@@ -85,6 +85,10 @@
         {% endif %}
       </div>
       <div class="flex gap-2">
+        <button class="flex-1 tds-btn-primary text-xs h-9" hx-post="/apps/{{ app.id }}/build" hx-target="#main-content" hx-swap="innerHTML">
+          <iconify-icon icon="solar:cloud-upload-bold" width="14"></iconify-icon>
+          빌드
+        </button>
         <button class="flex-1 tds-btn-muted text-xs h-9" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
           <iconify-icon icon="solar:bug-bold" width="14"></iconify-icon>
           카오스 실험
@@ -123,32 +127,36 @@
         <iconify-icon icon="lucide:x" width="20"></iconify-icon>
       </button>
     </div>
+    <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML">
     <div class="flex-1 overflow-auto px-6 pb-6 space-y-4">
       <p class="text-sm" style="color: var(--muted-foreground);">GitHub URL · 프레임워크 · Health path 만 입력하시면 돼요. 나머지는 플랫폼이 자동으로 처리해요.</p>
       <div>
         <label class="text-xs font-bold mb-1.5 block">GitHub URL</label>
-        <input class="tds-input mono text-sm" value="https://github.com/foo/spring-boot-demo" />
+        <input name="repo_url" required class="tds-input mono text-sm" value="https://github.com/foo/spring-boot-demo" />
       </div>
       <div>
         <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
         <div class="grid grid-cols-3 gap-2">
           <label class="tds-card p-3 cursor-pointer text-center hover-lift border-2" style="border-color: var(--primary); background: var(--primary-soft);">
+            <input type="radio" name="framework" value="spring" class="sr-only" checked />
             <iconify-icon icon="logos:spring-icon" width="32" class="mx-auto mb-1"></iconify-icon>
             <div class="text-xs font-bold" style="color: var(--primary-soft-foreground);">Spring Boot</div>
           </label>
           <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+            <input type="radio" name="framework" value="nextjs" class="sr-only" />
             <iconify-icon icon="simple-icons:nextdotjs" width="28" class="mx-auto mb-1"></iconify-icon>
             <div class="text-xs font-bold">Next.js</div>
           </label>
           <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+            <input type="radio" name="framework" value="fastapi" class="sr-only" />
             <iconify-icon icon="simple-icons:fastapi" width="28" class="mx-auto mb-1" style="color: #009485;"></iconify-icon>
             <div class="text-xs font-bold">FastAPI</div>
           </label>
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input class="tds-input mono text-sm" value="/actuator/health" /></div>
-        <div><label class="text-xs font-bold mb-1.5 block">Port</label><input class="tds-input mono text-sm" value="8080" /></div>
+        <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input name="health_path" class="tds-input mono text-sm" value="/actuator/health" /></div>
+        <div><label class="text-xs font-bold mb-1.5 block">Port</label><input name="port" type="number" class="tds-input mono text-sm" value="8080" /></div>
       </div>
       <div class="p-3 rounded-2xl flex items-start gap-2" style="background: var(--muted);">
         <iconify-icon icon="solar:info-circle-bold" width="18" style="color: var(--info);" class="shrink-0 mt-0.5"></iconify-icon>
@@ -156,12 +164,13 @@
       </div>
     </div>
     <div class="px-6 py-4 flex gap-2 justify-end border-t" style="border-color: var(--border);">
-      <button class="tds-btn-muted text-sm" onclick="closeDialog('newApp')">닫기</button>
-      <button class="tds-btn-primary text-sm">
+      <button type="button" class="tds-btn-muted text-sm" onclick="closeDialog('newApp')">닫기</button>
+      <button type="submit" class="tds-btn-primary text-sm">
         <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
         등록할게요
       </button>
     </div>
+    </form>
   </div>
 </div>
 {% endblock %}
