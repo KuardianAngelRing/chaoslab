@@ -1,9 +1,10 @@
-"""Slice 1 스텁 — mock 데이터 반환. 외부 시스템 호출 없음. 이후 RealXxx로 교체."""
+"""Slice 1 스텁 — mock 데이터 반환. 외부 시스템 호출 없음. 운영은 services/real/ 사용."""
+from app.services.interfaces import BuildRequest
 
 
 class StubBuilder:
-    def trigger_build(self, app_id: int, git_sha: str) -> str:
-        return f"build-{app_id}-{git_sha[:8]}"
+    def trigger_build(self, req: BuildRequest) -> str:
+        return f"build-{req.app_name}-{req.git_sha[:8]}"
 
     def build_status(self, workflow_name: str) -> str:
         return "succeeded"
@@ -13,7 +14,7 @@ class StubGitOps:
     def bootstrap_app(self, name: str, repo_url: str, framework: str) -> None:
         return None
 
-    def update_image_tag(self, name: str, image_tag: str) -> None:
+    def update_image_tag(self, name: str, image: str) -> None:
         return None
 
 

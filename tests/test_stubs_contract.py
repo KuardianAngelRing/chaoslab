@@ -1,9 +1,12 @@
 from app.services import interfaces, stubs
+from app.services.interfaces import BuildRequest
 
 
 def test_stubs_satisfy_protocols():
     b: interfaces.BuilderService = stubs.StubBuilder()
-    assert isinstance(b.trigger_build(1, "abc123"), str)
+    req = BuildRequest(app_name="svc", repo_url="https://x/svc", framework="fastapi",
+                       git_sha="abc123def456", image="reg/svc:abc123de")
+    assert isinstance(b.trigger_build(req), str)
     assert b.build_status("wf") in {"pending", "running", "succeeded", "failed"}
 
     c: interfaces.ChaosService = stubs.StubChaos()
