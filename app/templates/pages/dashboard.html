@@ -1,0 +1,248 @@
+{% extends layout|default("base.html") %}
+{% from "macros/components.html" import kpi_card, badge %}
+{% block content %}
+        <div class="max-w-7xl mx-auto px-8 py-8">
+
+          <!-- Hero -->
+          <div class="mb-8">
+            <div class="flex items-end justify-between mb-2">
+              <div>
+                <div class="text-sm font-semibold mb-2" style="color: var(--primary);">졸업과제 · Phase 4</div>
+                <h1 class="text-3xl font-extrabold mb-2">대시보드 👋</h1>
+                <p class="text-base" style="color: var(--muted-foreground);">현재 카오스 실험 {{ running_count }}개가 진행 중이에요. AI Agent 루프가 R 지수를 자동으로 개선하고 있어요.</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="tds-btn-muted text-sm">
+                  <iconify-icon icon="solar:refresh-bold" width="16"></iconify-icon>
+                  새로고침
+                </button>
+                <button class="tds-btn-primary text-sm" onclick="openDialog('newExperiment')">
+                  <iconify-icon icon="solar:bug-bold" width="16"></iconify-icon>
+                  새 실험 시작
+                </button>
+              </div>
+            </div>
+            <div class="gradient-line mt-6"></div>
+          </div>
+
+          <!-- KPI 카드 4개 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+            <div class="tds-card p-5 hover-lift">
+              <div class="flex items-start justify-between mb-3">
+                <span class="tossface">📦</span>
+                <span class="tds-badge badge-success">+1 어제 대비</span>
+              </div>
+              <div class="text-3xl font-extrabold mb-1">{{ app_count }}</div>
+              <div class="text-sm" style="color: var(--muted-foreground);">배포된 앱</div>
+            </div>
+
+            <div class="tds-card p-5 hover-lift">
+              <div class="flex items-start justify-between mb-3">
+                <span class="tossface">🧪</span>
+                <span class="tds-badge badge-warning">진행 중</span>
+              </div>
+              <div class="text-3xl font-extrabold mb-1">{{ running_count }}</div>
+              <div class="text-sm" style="color: var(--muted-foreground);">활성 실험</div>
+            </div>
+
+            <div class="tds-card p-5 hover-lift">
+              <div class="flex items-start justify-between mb-3">
+                <span class="tossface">📈</span>
+                <span class="tds-badge badge-success">+0.29</span>
+              </div>
+              <div class="text-3xl font-extrabold mb-1">{{ latest_r }}</div>
+              <div class="text-sm" style="color: var(--muted-foreground);">평균 R 지수</div>
+            </div>
+
+            <div class="tds-card p-5 hover-lift">
+              <div class="flex items-start justify-between mb-3">
+                <span class="tossface">💸</span>
+                <span class="tds-badge badge-muted">$5.00 한도</span>
+              </div>
+              <div class="text-3xl font-extrabold mb-1">$2.34</div>
+              <div class="text-sm" style="color: var(--muted-foreground);">이번 세션 LLM 비용</div>
+            </div>
+          </div>
+
+          <!-- 진행 중 카오스 실험 + AI 루프 -->
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-8">
+
+            <!-- Active Experiment -->
+            <div class="xl:col-span-2 tds-card p-6">
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                  <span class="tossface-lg">🧪</span>
+                  <div>
+                    <div class="font-extrabold text-lg">진행 중 실험</div>
+                    {% if running %}
+                    <div class="text-xs" style="color: var(--muted-foreground);">{{ running[0].app.name }} · {{ running[0].chaos_type }} · Iteration 4 / 10</div>
+                    {% else %}
+                    <div class="text-xs" style="color: var(--muted-foreground);">spring-boot-demo · NetworkChaos · Iteration 4 / 10</div>
+                    {% endif %}
+                  </div>
+                </div>
+                <span class="tds-badge badge-warning">
+                  <span class="w-1.5 h-1.5 rounded-full pulse-dot bg-amber-500"></span>
+                  주입 중
+                </span>
+              </div>
+
+              <div class="chart-box mb-4">
+                <canvas id="rIndexChart"></canvas>
+              </div>
+
+              <div class="grid grid-cols-3 gap-3">
+                <div class="p-3 rounded-2xl" style="background: var(--muted);">
+                  <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">에러율</div>
+                  <div class="text-xl font-extrabold mt-1" style="color: var(--danger);">2.1%</div>
+                  <div class="text-[10px]" style="color: var(--muted-foreground);">기준선 0.3%</div>
+                </div>
+                <div class="p-3 rounded-2xl" style="background: var(--muted);">
+                  <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">p99 레이턴시</div>
+                  <div class="text-xl font-extrabold mt-1" style="color: var(--warning);">412ms</div>
+                  <div class="text-[10px]" style="color: var(--muted-foreground);">기준선 89ms</div>
+                </div>
+                <div class="p-3 rounded-2xl" style="background: var(--muted);">
+                  <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">현재 R 지수</div>
+                  <div class="text-xl font-extrabold mt-1" style="color: var(--primary);">{{ latest_r }}</div>
+                  <div class="text-[10px]" style="color: var(--success);">▲ +0.06</div>
+                </div>
+              </div>
+
+              <button hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="w-full mt-4 tds-btn-muted text-sm justify-center">
+                <iconify-icon icon="solar:arrow-right-bold" width="14"></iconify-icon>
+                상세 페이지로 이동
+              </button>
+            </div>
+
+            <!-- LLM 추천 카드 -->
+            <div class="tds-card p-6">
+              <div class="flex items-center gap-2 mb-4">
+                <span class="tossface">🤖</span>
+                <div class="font-extrabold">AI Agent 분석</div>
+              </div>
+
+              <div class="space-y-3">
+                <div class="p-3 rounded-2xl border" style="border-color: var(--border);">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <iconify-icon icon="solar:eye-bold" width="14" style="color: var(--info);"></iconify-icon>
+                    <span class="text-xs font-bold">Observer</span>
+                  </div>
+                  <p class="text-xs" style="color: var(--muted-foreground);">Cart 서비스 timeout 5s 초과 응답 35%, retry 미적용 확인</p>
+                </div>
+
+                <div class="p-3 rounded-2xl border" style="border-color: var(--border);">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <iconify-icon icon="solar:lightbulb-bold" width="14" style="color: var(--warning);"></iconify-icon>
+                    <span class="text-xs font-bold">Analyst</span>
+                  </div>
+                  <p class="text-xs" style="color: var(--muted-foreground);">latency 200ms 주입에 retry 정책 부재로 회복 실패 가설</p>
+                </div>
+
+                <div class="p-3 rounded-2xl border-2" style="border-color: var(--primary); background: var(--primary-soft);">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <iconify-icon icon="solar:magic-stick-3-bold" width="14" style="color: var(--primary);"></iconify-icon>
+                    <span class="text-xs font-bold" style="color: var(--primary-soft-foreground);">Recommender</span>
+                  </div>
+                  <p class="text-xs font-semibold mb-2" style="color: var(--primary-soft-foreground);">Istio DR 권고:</p>
+                  <pre class="mono text-[10px] p-2 rounded-lg" style="background: var(--card); color: var(--foreground);">retries:
+  attempts: 3
+  perTryTimeout: 2s
+  retryOn: 5xx,reset</pre>
+                </div>
+
+                <button class="w-full tds-btn-primary text-sm justify-center">
+                  <iconify-icon icon="solar:check-circle-bold" width="16"></iconify-icon>
+                  자동 적용 + 재실험
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 최근 활동 + 시스템 상태 -->
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+
+            <div class="xl:col-span-2 tds-card p-6">
+              <div class="flex items-center justify-between mb-4">
+                <div class="font-extrabold">최근 활동</div>
+                <button class="text-xs font-semibold" style="color: var(--primary);">전체 보기 →</button>
+              </div>
+              <div class="space-y-3">
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background: var(--primary-soft);">
+                    <iconify-icon icon="solar:check-circle-bold" width="16" style="color: var(--primary);"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm"><b>spring-boot-demo</b> 가 R 지수 0.71 달성 — 자동 개선 완료</div>
+                    <div class="text-xs" style="color: var(--muted-foreground);">2분 전 · iteration 7회 · $1.84</div>
+                  </div>
+                  <span class="tds-badge badge-success">+69%</span>
+                </div>
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background: var(--muted);">
+                    <iconify-icon icon="solar:bug-bold" width="16" style="color: var(--warning);"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm"><b>nextjs-shop</b> 에 PodChaos 주입됨</div>
+                    <div class="text-xs" style="color: var(--muted-foreground);">14분 전 · 의도적 종료 30%</div>
+                  </div>
+                  <span class="tds-badge badge-warning">진행 중</span>
+                </div>
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background: var(--muted);">
+                    <iconify-icon icon="solar:rocket-bold" width="16" style="color: var(--info);"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm"><b>fastapi-api</b> 가 새 SHA <code class="mono text-xs px-1.5 py-0.5 rounded" style="background: var(--muted);">c8e2a4d6</code> 으로 배포됨</div>
+                    <div class="text-xs" style="color: var(--muted-foreground);">28분 전 · 빌드 2분 14초</div>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background: var(--muted);">
+                    <iconify-icon icon="solar:add-circle-bold" width="16" style="color: var(--primary);"></iconify-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm"><b>nextjs-shop</b> 신규 등록됨</div>
+                    <div class="text-xs" style="color: var(--muted-foreground);">2시간 전 · GitHub URL · Next.js · port 3000</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tds-card p-6">
+              <div class="font-extrabold mb-4">시스템 상태</div>
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2"><iconify-icon icon="logos:aws" width="18"></iconify-icon><span class="text-sm">EKS 클러스터</span></div>
+                  <span class="tds-badge badge-success">Healthy</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2"><iconify-icon icon="devicon:argocd" width="18"></iconify-icon><span class="text-sm">ArgoCD</span></div>
+                  <span class="tds-badge badge-success">Synced</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2"><iconify-icon icon="logos:argo" width="18"></iconify-icon><span class="text-sm">Argo Workflows</span></div>
+                  <span class="tds-badge badge-success">Ready</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2"><iconify-icon icon="logos:prometheus" width="18"></iconify-icon><span class="text-sm">Prometheus</span></div>
+                  <span class="tds-badge badge-success">Scraping</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2"><iconify-icon icon="logos:grafana" width="18"></iconify-icon><span class="text-sm">Grafana</span></div>
+                  <span class="tds-badge badge-success">Online</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2"><iconify-icon icon="simple-icons:istio" width="18" style="color: #466bb0;"></iconify-icon><span class="text-sm">Istio Mesh</span></div>
+                  <span class="tds-badge badge-success">{{ node_count }} sidecars</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2"><iconify-icon icon="simple-icons:supabase" width="18" style="color: #3ecf8e;"></iconify-icon><span class="text-sm">Supabase Queue</span></div>
+                  <span class="tds-badge badge-success">2 jobs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+{% endblock %}

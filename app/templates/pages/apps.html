@@ -1,0 +1,167 @@
+{% extends layout|default("base.html") %}
+{% from "macros/components.html" import app_card, badge %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-8 py-8">
+  <div class="flex items-end justify-between mb-2">
+    <div>
+      <div class="text-sm font-semibold mb-2 flex items-center gap-2" style="color: var(--primary);">
+        <iconify-icon icon="solar:server-square-bold" width="14"></iconify-icon>
+        GitOps · 배포 관리
+      </div>
+      <h1 class="text-3xl font-extrabold mb-2">Apps</h1>
+      <p class="text-base" style="color: var(--muted-foreground);">GitHub URL 만 등록하면 자동으로 빌드되고 EKS 에 배포돼요. Dockerfile 작성 불필요!</p>
+    </div>
+    <button class="tds-btn-primary" onclick="openDialog('newApp')">
+      <iconify-icon icon="solar:add-circle-bold" width="18"></iconify-icon>
+      새 앱 등록
+    </button>
+  </div>
+
+  <div class="tds-card p-4 mt-6 mb-6 flex items-start gap-3" style="background: var(--primary-soft); border-color: var(--primary);">
+    <span class="tossface-lg">💡</span>
+    <div class="flex-1">
+      <div class="font-extrabold text-sm mb-1" style="color: var(--primary-soft-foreground);">사내 표준 안내</div>
+      <p class="text-xs" style="color: var(--primary-soft-foreground); opacity: 0.85;">
+        Spring Boot — Gradle 8 + Java 21 / Next.js — Node 20 + standalone / FastAPI — Python 3.11 + main:app 기준입니다.
+        Dockerfile 은 플랫폼이 자동 주입하므로 코드만 push 하시면 돼요.
+      </p>
+    </div>
+    <a class="text-xs font-bold whitespace-nowrap underline" style="color: var(--primary-soft-foreground);" href="#">표준 문서 →</a>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+
+    {% for app in apps %}
+    <div class="tds-card p-5 hover-lift">
+      <div class="flex items-start justify-between mb-3">
+        <div class="flex items-center gap-3">
+          {% if app.framework == "spring" or app.framework == "Spring Boot" or app.framework == "Spring Cloud Gateway" %}
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: #6db33f;">
+            <iconify-icon icon="logos:spring-icon" width="28"></iconify-icon>
+          </div>
+          {% elif app.framework == "nextjs" or app.framework == "Next.js" %}
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: #000;">
+            <iconify-icon icon="simple-icons:nextdotjs" width="22" style="color: white;"></iconify-icon>
+          </div>
+          {% elif app.framework == "fastapi" or app.framework == "FastAPI" %}
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: #009485;">
+            <iconify-icon icon="simple-icons:fastapi" width="24" style="color: white;"></iconify-icon>
+          </div>
+          {% else %}
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: var(--primary-soft);">
+            <iconify-icon icon="solar:server-square-bold" width="24" style="color: var(--primary);"></iconify-icon>
+          </div>
+          {% endif %}
+          <div>
+            <div class="font-extrabold">{{ app.name }}</div>
+            <div class="text-xs" style="color: var(--muted-foreground);">{{ app.framework }}</div>
+          </div>
+        </div>
+        <button class="p-1.5 rounded-lg hover:bg-muted"><iconify-icon icon="solar:menu-dots-bold" width="16"></iconify-icon></button>
+      </div>
+      <div class="flex items-center gap-2 mb-3">
+        {% if app.status == "healthy" %}
+        <span class="tds-badge badge-success"><span class="w-1.5 h-1.5 rounded-full" style="background: var(--success);"></span>배포됨</span>
+        {% elif app.status == "degraded" %}
+        <span class="tds-badge badge-warning"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--warning);"></span>카오스 진행 중</span>
+        {% elif app.status == "building" %}
+        <span class="tds-badge badge-info"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--info);"></span>빌드 중</span>
+        {% else %}
+        <span class="tds-badge badge-muted">{{ app.status }}</span>
+        {% endif %}
+        <span class="tds-badge badge-info">{{ app.namespace }}</span>
+      </div>
+      <div class="space-y-2 text-xs mb-4">
+        <div class="flex items-center justify-between">
+          <span style="color: var(--muted-foreground);">마지막 배포</span>
+          <code class="mono font-bold">{{ app.current_sha[:8] }}</code>
+        </div>
+        {% if app.repo_url %}
+        <div class="flex items-center justify-between">
+          <span style="color: var(--muted-foreground);">저장소</span>
+          <a href="{{ app.repo_url }}" class="mono text-xs truncate max-w-[140px]" style="color: var(--primary);" target="_blank">{{ app.repo_url | replace("https://github.com/", "") }}</a>
+        </div>
+        {% endif %}
+      </div>
+      <div class="flex gap-2">
+        <button class="flex-1 tds-btn-muted text-xs h-9" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+          <iconify-icon icon="solar:bug-bold" width="14"></iconify-icon>
+          카오스 실험
+        </button>
+        {% if app.repo_url %}
+        <a href="{{ app.repo_url }}" target="_blank" class="tds-btn-muted text-xs h-9 px-3 flex items-center justify-center"><iconify-icon icon="mdi:github" width="14"></iconify-icon></a>
+        {% else %}
+        <button class="tds-btn-muted text-xs h-9 px-3"><iconify-icon icon="mdi:github" width="14"></iconify-icon></button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <button class="tds-card p-5 flex flex-col items-center justify-center gap-3 border-dashed cursor-pointer min-h-[260px]" onclick="openDialog('newApp')">
+      <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background: var(--primary-soft);">
+        <iconify-icon icon="solar:add-circle-bold" width="28" style="color: var(--primary);"></iconify-icon>
+      </div>
+      <div class="text-center">
+        <div class="font-extrabold mb-1">새 앱</div>
+        <div class="text-xs" style="color: var(--muted-foreground);">GitHub URL 만 있으면 끝</div>
+      </div>
+    </button>
+
+  </div>
+</div>
+
+<!-- DIALOG: 새 앱 등록 -->
+<div class="dialog-backdrop" id="dialog-newApp">
+  <div class="dialog-card">
+    <div class="px-6 pt-6 pb-4 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="tossface">📦</span>
+        <h2 class="font-extrabold text-xl">새 앱 등록</h2>
+      </div>
+      <button class="p-1 rounded-lg hover:bg-muted" onclick="closeDialog('newApp')">
+        <iconify-icon icon="lucide:x" width="20"></iconify-icon>
+      </button>
+    </div>
+    <div class="flex-1 overflow-auto px-6 pb-6 space-y-4">
+      <p class="text-sm" style="color: var(--muted-foreground);">GitHub URL · 프레임워크 · Health path 만 입력하시면 돼요. 나머지는 플랫폼이 자동으로 처리해요.</p>
+      <div>
+        <label class="text-xs font-bold mb-1.5 block">GitHub URL</label>
+        <input class="tds-input mono text-sm" value="https://github.com/foo/spring-boot-demo" />
+      </div>
+      <div>
+        <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
+        <div class="grid grid-cols-3 gap-2">
+          <label class="tds-card p-3 cursor-pointer text-center hover-lift border-2" style="border-color: var(--primary); background: var(--primary-soft);">
+            <iconify-icon icon="logos:spring-icon" width="32" class="mx-auto mb-1"></iconify-icon>
+            <div class="text-xs font-bold" style="color: var(--primary-soft-foreground);">Spring Boot</div>
+          </label>
+          <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+            <iconify-icon icon="simple-icons:nextdotjs" width="28" class="mx-auto mb-1"></iconify-icon>
+            <div class="text-xs font-bold">Next.js</div>
+          </label>
+          <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+            <iconify-icon icon="simple-icons:fastapi" width="28" class="mx-auto mb-1" style="color: #009485;"></iconify-icon>
+            <div class="text-xs font-bold">FastAPI</div>
+          </label>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input class="tds-input mono text-sm" value="/actuator/health" /></div>
+        <div><label class="text-xs font-bold mb-1.5 block">Port</label><input class="tds-input mono text-sm" value="8080" /></div>
+      </div>
+      <div class="p-3 rounded-2xl flex items-start gap-2" style="background: var(--muted);">
+        <iconify-icon icon="solar:info-circle-bold" width="18" style="color: var(--info);" class="shrink-0 mt-0.5"></iconify-icon>
+        <p class="text-xs" style="color: var(--muted-foreground);">사내 표준(Spring=Gradle+Java 21) 으로 빌드돼요. Dockerfile 은 자동 주입됩니다.</p>
+      </div>
+    </div>
+    <div class="px-6 py-4 flex gap-2 justify-end border-t" style="border-color: var(--border);">
+      <button class="tds-btn-muted text-sm" onclick="closeDialog('newApp')">닫기</button>
+      <button class="tds-btn-primary text-sm">
+        <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
+        등록할게요
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}

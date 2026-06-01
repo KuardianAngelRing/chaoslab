@@ -1,0 +1,193 @@
+{% extends layout|default("base.html") %}
+{% from "macros/components.html" import badge %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-8 py-8">
+
+  <div class="flex items-end justify-between mb-2">
+    <div>
+      <div class="text-sm font-semibold mb-2 flex items-center gap-2" style="color: var(--primary);">
+        <iconify-icon icon="solar:bug-bold" width="14"></iconify-icon>
+        카오스 엔지니어링 · 회복 탄력성 측정
+      </div>
+      <h1 class="text-3xl font-extrabold mb-2">카오스 테스트</h1>
+      <p class="text-base" style="color: var(--muted-foreground);">앱에 일부러 장애를 주입하고 AI Agent 가 R 지수를 자동으로 개선해요. 행을 클릭하면 메트릭과 개선 결과를 볼 수 있어요.</p>
+    </div>
+    <button class="tds-btn-primary" onclick="openDialog('newExperiment')">
+      <iconify-icon icon="solar:bug-bold" width="18"></iconify-icon>
+      새 실험 시작
+    </button>
+  </div>
+  <div class="gradient-line my-6"></div>
+
+  <!-- 필터 -->
+  <div class="tds-card p-4 mb-4 flex items-center gap-3 flex-wrap">
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-bold" style="color: var(--muted-foreground);">앱</span>
+      <select class="tds-input text-sm h-10 w-40">
+        <option>모든 앱</option>
+        <option>spring-boot-demo</option>
+        <option>nextjs-shop</option>
+        <option>fastapi-api</option>
+        <option>gateway</option>
+        <option>cart-service</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-bold" style="color: var(--muted-foreground);">카오스</span>
+      <select class="tds-input text-sm h-10 w-40">
+        <option>모든 종류</option>
+        <option>NetworkChaos</option>
+        <option>PodChaos</option>
+        <option>StressChaos</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-xs font-bold" style="color: var(--muted-foreground);">상태</span>
+      <select class="tds-input text-sm h-10 w-32">
+        <option>전체</option>
+        <option>진행 중</option>
+        <option>완료</option>
+        <option>실패</option>
+      </select>
+    </div>
+    <div class="flex-1"></div>
+    <span class="text-xs" style="color: var(--muted-foreground);">총 12건</span>
+  </div>
+
+  <!-- 실험 리스트 테이블 -->
+  <div class="tds-card overflow-hidden">
+    <table class="w-full text-sm">
+      <thead style="background: var(--muted);">
+        <tr class="text-left text-xs font-bold" style="color: var(--muted-foreground);">
+          <th class="px-6 py-3.5">대상 앱</th>
+          <th class="px-6 py-3.5">카오스 종류</th>
+          <th class="px-6 py-3.5">시작 시각</th>
+          <th class="px-6 py-3.5">기간</th>
+          <th class="px-6 py-3.5">R 지수</th>
+          <th class="px-6 py-3.5">개선 (Δ)</th>
+          <th class="px-6 py-3.5">상태</th>
+          <th class="px-6 py-3.5"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for exp in experiments %}
+        <tr class="border-t hover:bg-[var(--sidebar-accent)] cursor-pointer transition" style="border-color: var(--border);"
+            hx-get="/experiments/{{ exp.id }}"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+            hx-push-url="true">
+          <td class="px-6 py-4">
+            <div class="flex items-center gap-2.5">
+              <iconify-icon icon="solar:server-square-bold" width="22"></iconify-icon>
+              <div>
+                <div class="font-bold">{{ exp.app.name }}</div>
+                <div class="text-[11px]" style="color: var(--muted-foreground);">{{ exp.chaos_type }}</div>
+              </div>
+            </div>
+          </td>
+          <td class="px-6 py-4"><span class="tds-badge badge-info">{{ exp.chaos_type }}</span></td>
+          <td class="px-6 py-4 text-xs"><span class="font-mono" style="color: var(--muted-foreground);">—</span></td>
+          <td class="px-6 py-4 mono">—</td>
+          <td class="px-6 py-4">
+            <div class="font-extrabold" style="color: var(--primary);">{{ "%.2f"|format(exp.r_index) if exp.r_index is not none else "—" }}</div>
+            <div class="text-[11px]" style="color: var(--muted-foreground);">목표 {{ "%.2f"|format(exp.target_r) }}</div>
+          </td>
+          <td class="px-6 py-4">
+            {% if exp.r_index is not none %}
+            <span class="text-xs font-bold" style="color: var(--{% if exp.r_index >= exp.target_r %}success{% else %}warning{% endif %});">
+              {{ "%.2f"|format(exp.r_index - exp.target_r) }}
+            </span>
+            {% else %}
+            <span class="text-xs" style="color: var(--muted-foreground);">—</span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-4">
+            {% if exp.status == "running" %}
+            <span class="tds-badge badge-warning"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--warning);"></span>주입 중</span>
+            {% elif exp.status == "success" %}
+            <span class="tds-badge badge-success">성공</span>
+            {% elif exp.status == "failed" %}
+            <span class="tds-badge badge-danger">목표 미달</span>
+            {% else %}
+            <span class="tds-badge badge-info">{{ exp.status }}</span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-4"><iconify-icon icon="lucide:chevron-right" width="18" style="color: var(--muted-foreground);"></iconify-icon></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="px-6 py-4 flex items-center justify-between border-t" style="border-color: var(--border);">
+      <span class="text-xs" style="color: var(--muted-foreground);">7건 표시 · 전체 12건</span>
+      <div class="flex gap-1">
+        <button class="px-3 py-1 text-xs rounded-lg" style="background: var(--muted);">이전</button>
+        <button class="px-3 py-1 text-xs rounded-lg font-bold" style="background: var(--primary); color: white;">1</button>
+        <button class="px-3 py-1 text-xs rounded-lg" style="background: var(--muted);">2</button>
+        <button class="px-3 py-1 text-xs rounded-lg" style="background: var(--muted);">다음</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- DIALOG: 새 실험 시작 -->
+<div class="dialog-backdrop" id="dialog-newExperiment">
+  <div class="dialog-card">
+    <div class="px-6 pt-6 pb-4 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="tossface">🧪</span>
+        <h2 class="font-extrabold text-xl">새 실험 시작</h2>
+      </div>
+      <button class="p-1 rounded-lg hover:bg-muted" onclick="closeDialog('newExperiment')">
+        <iconify-icon icon="lucide:x" width="20"></iconify-icon>
+      </button>
+    </div>
+    <div class="flex-1 overflow-auto px-6 pb-6 space-y-4">
+      <div><label class="text-xs font-bold mb-1.5 block">대상 앱</label><select class="tds-input"><option>spring-boot-demo</option><option>nextjs-shop</option><option>fastapi-api</option></select></div>
+      <div>
+        <label class="text-xs font-bold mb-1.5 block">카오스 종류</label>
+        <div class="grid grid-cols-3 gap-2">
+          <label class="tds-card p-3 cursor-pointer text-center hover-lift border-2" style="border-color: var(--primary); background: var(--primary-soft);">
+            <iconify-icon icon="solar:wifi-router-minimalistic-bold" width="28" class="mx-auto mb-1" style="color: var(--primary);"></iconify-icon>
+            <div class="text-xs font-bold" style="color: var(--primary-soft-foreground);">NetworkChaos</div>
+            <div class="text-[10px]" style="color: var(--primary-soft-foreground); opacity: 0.7;">latency, loss</div>
+          </label>
+          <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+            <iconify-icon icon="solar:box-bold" width="28" class="mx-auto mb-1"></iconify-icon>
+            <div class="text-xs font-bold">PodChaos</div>
+            <div class="text-[10px]" style="color: var(--muted-foreground);">kill, fail</div>
+          </label>
+          <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+            <iconify-icon icon="solar:cpu-bold" width="28" class="mx-auto mb-1"></iconify-icon>
+            <div class="text-xs font-bold">StressChaos</div>
+            <div class="text-[10px]" style="color: var(--muted-foreground);">CPU, memory</div>
+          </label>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-xs font-bold mb-1.5 block">Latency (ms)</label><input class="tds-input mono text-sm" value="200" /></div>
+        <div><label class="text-xs font-bold mb-1.5 block">Duration</label><input class="tds-input mono text-sm" value="5m" /></div>
+      </div>
+      <div class="p-3 rounded-2xl flex items-start gap-2" style="background: var(--primary-soft);">
+        <span class="tossface">🤖</span>
+        <div class="flex-1">
+          <div class="text-xs font-bold" style="color: var(--primary-soft-foreground);">AI Agent 자동 개선 활성화</div>
+          <div class="text-xs mt-0.5" style="color: var(--primary-soft-foreground); opacity: 0.8;">실험 후 LLM 이 결과를 분석해 R ≥ 0.7 이 될 때까지 파라미터를 자동 개선해요.</div>
+        </div>
+        <label class="relative inline-flex items-center cursor-pointer mt-1">
+          <input type="checkbox" checked class="sr-only peer" />
+          <div class="w-9 h-5 bg-gray-300 rounded-full peer-checked:bg-primary after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
+        </label>
+      </div>
+    </div>
+    <div class="px-6 py-4 flex gap-2 justify-end border-t" style="border-color: var(--border);">
+      <button class="tds-btn-muted text-sm" onclick="closeDialog('newExperiment')">닫기</button>
+      <button class="tds-btn-primary text-sm">
+        <iconify-icon icon="solar:bug-bold" width="14"></iconify-icon>
+        실험 시작할게요
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}

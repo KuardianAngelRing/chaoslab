@@ -1,0 +1,111 @@
+{% extends layout|default("base.html") %}
+{% block content %}
+      <div data-page="settings">
+        <div class="max-w-4xl mx-auto px-8 py-8">
+
+          <div class="mb-2">
+            <div class="text-sm font-semibold mb-2 flex items-center gap-2" style="color: var(--primary);">
+              <iconify-icon icon="solar:settings-bold" width="14"></iconify-icon>
+              플랫폼 설정
+            </div>
+            <h1 class="text-3xl font-extrabold mb-2">설정</h1>
+            <p class="text-base" style="color: var(--muted-foreground);">AI Agent 동작과 알림, 외부 통합을 관리하세요.</p>
+          </div>
+          <div class="gradient-line my-6"></div>
+
+          <!-- AI Agent 설정 -->
+          <div class="tds-card p-6 mb-4">
+            <div class="flex items-center gap-2 mb-4">
+              <span class="tossface">🤖</span>
+              <div class="font-extrabold">AI Agent 루프</div>
+            </div>
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-bold text-sm">LLM 모델</div>
+                  <div class="text-xs" style="color: var(--muted-foreground);">Claude Sonnet 4.6 (1M context)</div>
+                </div>
+                <select class="tds-input text-sm h-10 w-52" name="llm_model">
+                  <option value="claude-sonnet-4-6" {% if llm_model == "claude-sonnet-4-6" %}selected{% endif %}>Claude Sonnet 4.6</option>
+                  <option value="claude-opus-4-7" {% if llm_model == "claude-opus-4-7" %}selected{% endif %}>Claude Opus 4.7</option>
+                  <option value="claude-haiku-4-5" {% if llm_model == "claude-haiku-4-5" %}selected{% endif %}>Claude Haiku 4.5</option>
+                </select>
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-bold text-sm">목표 R 지수</div>
+                  <div class="text-xs" style="color: var(--muted-foreground);">이 값 이상 도달하면 자동 종료</div>
+                </div>
+                <input class="tds-input text-sm h-10 w-32 mono" name="target_r" value="{{ target_r }}" />
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-bold text-sm">최대 iteration</div>
+                  <div class="text-xs" style="color: var(--muted-foreground);">한 세션에서 시도할 최대 개선 횟수</div>
+                </div>
+                <input class="tds-input text-sm h-10 w-32 mono" value="10" />
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-bold text-sm">예산 한도 ($)</div>
+                  <div class="text-xs" style="color: var(--muted-foreground);">한도 초과 시 강제 종료</div>
+                </div>
+                <input class="tds-input text-sm h-10 w-32 mono" value="5.00" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 알림 -->
+          <div class="tds-card p-6 mb-4">
+            <div class="flex items-center gap-2 mb-4">
+              <span class="tossface">🔔</span>
+              <div class="font-extrabold">알림</div>
+            </div>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between p-3 rounded-2xl border" style="border-color: var(--border);">
+                <div class="flex items-center gap-3"><iconify-icon icon="logos:slack-icon" width="22"></iconify-icon><div><div class="font-bold text-sm">Slack 알림</div><div class="text-[11px]" style="color: var(--muted-foreground);">실험 시작/완료/실패 시 알림</div></div></div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" checked class="sr-only peer" />
+                  <div class="w-9 h-5 bg-gray-300 rounded-full peer-checked:bg-primary after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between p-3 rounded-2xl border" style="border-color: var(--border);">
+                <div class="flex items-center gap-3"><iconify-icon icon="solar:letter-bold" width="22"></iconify-icon><div><div class="font-bold text-sm">이메일 리포트</div><div class="text-[11px]" style="color: var(--muted-foreground);">실험 종료 후 R 지수 리포트 송부</div></div></div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" class="sr-only peer" />
+                  <div class="w-9 h-5 bg-gray-300 rounded-full peer-checked:bg-primary after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- 외부 통합 -->
+          <div class="tds-card p-6 mb-4">
+            <div class="flex items-center gap-2 mb-4">
+              <span class="tossface">🔗</span>
+              <div class="font-extrabold">외부 통합</div>
+            </div>
+            <div class="space-y-3 text-sm">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3"><iconify-icon icon="mdi:github" width="22"></iconify-icon><span>GitHub Personal Access Token</span></div>
+                <span class="tds-badge badge-success">연결됨</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3"><iconify-icon icon="logos:aws" width="22"></iconify-icon><span>AWS IAM Role (IRSA)</span></div>
+                <span class="tds-badge badge-success">유효</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3"><iconify-icon icon="simple-icons:anthropic" width="20"></iconify-icon><span>Anthropic API Key</span></div>
+                <span class="tds-badge badge-success">활성</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-2">
+            <button class="tds-btn-muted text-sm">취소</button>
+            <button class="tds-btn-primary text-sm">저장할게요</button>
+          </div>
+
+        </div>
+      </div>
+{% endblock %}
