@@ -1,0 +1,67 @@
+# 재사용 빌드 WorkflowTemplate — 레포 clone → (Dockerfile 없으면 프레임워크 폴백) → Kaniko → ECR push.
+# RealBuilder(2c)가 이 템플릿을 workflowTemplateRef로 참조해 Workflow를 생성한다.
+#
+# 적용: argo/apply.sh (dockerfile-templates ConfigMap + 이 템플릿을 argo 네임스페이스에 apply)
+# 인증: serviceAccountName=argo-workflow → IRSA → ECR push (별도 docker config 불필요, Kaniko 네이티브 ECR)
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: build-and-push
+  namespace: argo
+spec:
+  serviceAccountName: argo-workflow
+  entrypoint: build
+  arguments:
+    parameters:
+      - name: repo_url       # https://github.com/owner/app
+      - name: revision       # git SHA 또는 브랜치 (예: main)
+      - name: image          # ECR_URL/{app}:<sha8>
+      - name: framework      # fastapi | spring | nextjs | go (Dockerfile 폴백용)
+      - name: dockerfile     # 컨텍스트 내 Dockerfile 경로
+        value: Dockerfile
+  templates:
+    - name: build
+      inputs:
+        parameters:
+          - name: repo_url
+          - name: revision
+          - name: image
+          - name: framework
+          - name: dockerfile
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: templates
+          configMap:
+            name: dockerfile-templates
+      # 1) clone + revision 체크아웃 + Dockerfile 폴백 주입
+      initContainers:
+        - name: clone
+          image: alpine/git:2.45.2
+          workingDir: /workspace
+          command: [sh, -c]
+          args:
+            - |
+              set -e
+              git clone "{{inputs.parameters.repo_url}}" .
+              git checkout "{{inputs.parameters.revision}}"
+              if [ ! -f "{{inputs.parameters.dockerfile}}" ]; then
+                echo "Dockerfile 없음 → 프레임워크({{inputs.parameters.framework}}) 템플릿 폴백"
+                cp "/templates/Dockerfile.{{inputs.parameters.framework}}" "{{inputs.parameters.dockerfile}}"
+              fi
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: templates
+              mountPath: /templates
+      # 2) Kaniko 빌드 + ECR push (캐시 on)
+      container:
+        image: gcr.io/kaniko-project/executor:v1.23.2
+        args:
+          - --context=dir:///workspace
+          - --dockerfile={{inputs.parameters.dockerfile}}
+          - --destination={{inputs.parameters.image}}
+          - --cache=true
+        volumeMounts:
+          - name: workspace
+            mountPath: /workspace

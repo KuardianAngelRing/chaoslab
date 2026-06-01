@@ -1,0 +1,27 @@
+# 2b 수동 검증용 예시 Workflow — build-and-push 템플릿을 직접 제출해 빌드→ECR push 확인.
+# <ACCOUNT>/<owner>/<repo>를 실제 값으로 바꾼 뒤:
+#   kubectl create -f argo/build-example.yaml
+#   kubectl -n argo get wf -w           # 진행 관찰
+#   argo logs -n argo @latest           # (argo CLI 있으면)
+# 사전: ECR에 대상 레포 존재해야 함:
+#   aws ecr create-repository --repository-name demo --region ap-northeast-2
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: build-demo-
+  namespace: argo
+spec:
+  workflowTemplateRef:
+    name: build-and-push
+  arguments:
+    parameters:
+      - name: repo_url
+        value: https://github.com/<owner>/<sample-fastapi-app>
+      - name: revision
+        value: main
+      - name: image
+        value: <ACCOUNT>.dkr.ecr.ap-northeast-2.amazonaws.com/demo:test01
+      - name: framework
+        value: fastapi
+      - name: dockerfile
+        value: Dockerfile
