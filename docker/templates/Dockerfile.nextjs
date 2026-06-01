@@ -1,0 +1,18 @@
+# Next.js 표준 — Node 20, next.config.js 에 output: 'standalone'
+# Stage 1: Build
+FROM node:20-slim AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Stage 2: Runtime (standalone 산출물만 복사)
+FROM node:20-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+EXPOSE 3000
+CMD ["node", "server.js"]

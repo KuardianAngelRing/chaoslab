@@ -1,0 +1,12 @@
+# Spring Boot 표준 — Gradle 8.x + Java 21, 산출물 build/libs/*.jar
+# Stage 1: Build
+FROM eclipse-temurin:21-jdk AS builder
+WORKDIR /app
+COPY . .
+RUN ./gradlew bootJar --no-daemon
+
+# Stage 2: Runtime
+FROM eclipse-temurin:21-jre
+COPY --from=builder /app/build/libs/*.jar /app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "/app.jar"]
