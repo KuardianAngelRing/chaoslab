@@ -216,3 +216,34 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ============================================================
+# ChaosLab 프로젝트 (Iac-aws 컨벤션 정렬)
+# ============================================================
+
+# DOCS - 설계 문서는 로컬에만, README 참조 자료(assets)는 push
+docs/*
+!docs/assets/
+!docs/assets/**
+
+# macOS
+.DS_Store
+.DS_Store?
+**/.DS_Store
+
+# SSH 키 / 시크릿
+*.pem
+*.key
+
+# kubeconfig (EKS 접근)
+kubeconfig
+kubeconfig.yaml
+
+# SQLite DB 파일 (런타임 생성 — seed로 재생성)
+*.db
+*.sqlite
+*.sqlite3
+
+# Claude Code 로컬 컨텍스트
+CLAUDE.md
+.omc/
