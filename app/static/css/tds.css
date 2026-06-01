@@ -1,0 +1,277 @@
+    :root {
+      --primary: #004b3e;
+      --primary-foreground: #ffffff;
+      --primary-soft: #ecfdf5;
+      --primary-soft-foreground: #064e3b;
+
+      --background: #f7f7f9;
+      --foreground: #0f172a;
+      --card: #ffffff;
+      --card-foreground: #0f172a;
+
+      --sidebar: #ffffff;
+      --sidebar-foreground: #1f2937;
+      --sidebar-muted: #6b7280;
+      --sidebar-accent: #f3f4f6;
+      --sidebar-border: #e5e7eb;
+
+      --muted: #f1f5f9;
+      --muted-foreground: #64748b;
+      --border: #e2e8f0;
+      --input: #ffffff;
+      --ring: #004b3e;
+
+      --success: #16a34a;
+      --warning: #f59e0b;
+      --danger: #dc2626;
+      --info: #0284c7;
+    }
+
+    [data-theme="dark"] {
+      --primary: #00b894;
+      --primary-foreground: #001a14;
+      --primary-soft: #064e3b;
+      --primary-soft-foreground: #d1fae5;
+
+      --background: #1a1d24;
+      --foreground: #e8eaed;
+      --card: #252830;
+      --card-foreground: #e8eaed;
+
+      --sidebar: #252830;
+      --sidebar-foreground: #e8eaed;
+      --sidebar-muted: #9ca3af;
+      --sidebar-accent: #2d3139;
+      --sidebar-border: #3a3f4a;
+
+      --muted: #2d3139;
+      --muted-foreground: #9ca3af;
+      --border: #3a3f4a;
+      --input: #1a1d24;
+
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --info: #38bdf8;
+    }
+
+    body {
+      background: var(--background);
+      color: var(--foreground);
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .tds-card {
+      background: var(--card);
+      color: var(--card-foreground);
+      border: 1px solid var(--border);
+      border-radius: 1.5rem;
+    }
+
+    .tds-btn-primary {
+      background: var(--primary);
+      color: var(--primary-foreground);
+      height: 2.75rem;
+      padding: 0 1.5rem;
+      border-radius: 1rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.15s;
+    }
+    .tds-btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+
+    .tds-btn-muted {
+      background: var(--muted);
+      color: var(--foreground);
+      height: 2.75rem;
+      padding: 0 1.5rem;
+      border-radius: 1rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      border: 1px solid var(--border);
+    }
+    .tds-btn-muted:hover { background: var(--sidebar-accent); }
+
+    .tds-input {
+      background: var(--input);
+      color: var(--foreground);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      height: 2.75rem;
+      padding: 0 1rem;
+      width: 100%;
+      transition: border-color 0.15s;
+    }
+    .tds-input:focus {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
+      border-color: var(--ring);
+    }
+
+    .tds-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.25rem 0.625rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-success { background: #dcfce7; color: #166534; }
+    .badge-warning { background: #fef3c7; color: #92400e; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .badge-info { background: #dbeafe; color: #1e40af; }
+    .badge-muted { background: var(--muted); color: var(--muted-foreground); }
+
+    [data-theme="dark"] .badge-success { background: rgba(74,222,128,0.15); color: #4ade80; }
+    [data-theme="dark"] .badge-warning { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    [data-theme="dark"] .badge-danger { background: rgba(248,113,113,0.15); color: #f87171; }
+    [data-theme="dark"] .badge-info { background: rgba(56,189,248,0.15); color: #38bdf8; }
+
+    /* 사이드바 */
+    .sidebar-nav-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.625rem 0.875rem;
+      border-radius: 0.875rem;
+      color: var(--sidebar-foreground);
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .sidebar-nav-item:hover { background: var(--sidebar-accent); }
+    .sidebar-nav-item.active {
+      background: var(--primary-soft);
+      color: var(--primary-soft-foreground);
+      font-weight: 700;
+    }
+    [data-theme="dark"] .sidebar-nav-item.active {
+      background: rgba(0, 184, 148, 0.15);
+      color: var(--primary);
+    }
+
+    .tossface { font-size: 1.5rem; line-height: 1; }
+    .tossface-lg { font-size: 2rem; line-height: 1; }
+
+    @keyframes tds-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .pulse-dot { animation: tds-pulse 1.6s ease-in-out infinite; }
+
+    .gradient-line {
+      background: linear-gradient(90deg, transparent 0%, var(--primary) 50%, transparent 100%);
+      height: 1px;
+    }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+    .hover-lift { transition: transform 0.2s, box-shadow 0.2s; }
+    .hover-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
+
+    /* 페이지 전환 */
+    [data-page]:not(.active) { display: none; }
+    [data-page].active { display: block; }
+
+    /* 다이얼로그 */
+    .dialog-backdrop {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+      z-index: 50; display: none; align-items: center; justify-content: center;
+    }
+    .dialog-backdrop.open { display: flex; }
+    .dialog-card {
+      background: var(--card);
+      border-radius: 1.5rem;
+      max-width: 32rem; width: 100%; margin: 1rem;
+      border: 1px solid var(--border);
+      max-height: 90vh; display: flex; flex-direction: column;
+    }
+
+    .chart-box { position: relative; height: 240px; }
+    .chart-box-sm { position: relative; height: 160px; }
+
+    /* 사용자 메뉴 */
+    .user-menu {
+      position: absolute;
+      bottom: calc(100% + 0.5rem);
+      left: 0; right: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 0.5rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+      display: none;
+      z-index: 30;
+    }
+    .user-menu.open { display: block; }
+    .user-menu-item {
+      display: flex; align-items: center; gap: 0.625rem;
+      padding: 0.5rem 0.75rem; border-radius: 0.625rem;
+      cursor: pointer; font-size: 0.875rem;
+    }
+    .user-menu-item:hover { background: var(--sidebar-accent); }
+
+    .progress-track {
+      height: 0.5rem; background: var(--muted);
+      border-radius: 9999px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; background: var(--primary);
+      border-radius: 9999px; transition: width 0.4s ease;
+    }
+
+    /* IDP 탭 패턴 (underline + active primary) */
+    .tabs-list {
+      display: flex;
+      gap: 0.25rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.75rem;
+      overflow-x: auto;
+    }
+    .tab-trigger {
+      padding: 0.75rem 1.25rem;
+      font-weight: 600;
+      font-size: 0.875rem;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: var(--muted-foreground);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+    }
+    .tab-trigger:hover { color: var(--foreground); }
+    .tab-trigger.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+      font-weight: 700;
+    }
+    [data-tab-content]:not(.active) { display: none; }
+
+    /* 탭 카운트 배지 */
+    .tab-count {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      background: var(--muted);
+      color: var(--muted-foreground);
+    }
+    .tab-trigger.active .tab-count {
+      background: var(--primary-soft);
+      color: var(--primary-soft-foreground);
+    }
