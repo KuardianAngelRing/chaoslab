@@ -143,10 +143,14 @@ class RealGitOps:
         self._push()
 
 
-def resolve_head_sha(repo_url: str, branch: str = "main") -> str:
-    """원격 main HEAD의 commit SHA (수동 빌드 트리거 시 태그용)."""
+def resolve_head_sha(repo_url: str, branch: str = "HEAD") -> str:
+    """원격 저장소 기본 브랜치(HEAD)의 commit SHA (수동 빌드 트리거 시 태그용).
+
+    기본값 HEAD = 저장소의 기본 브랜치(main/develop/master 무관). 특정 브랜치명도 허용.
+    """
+    ref = "HEAD" if branch == "HEAD" else f"refs/heads/{branch}"
     out = subprocess.run(
-        ["git", "ls-remote", repo_url, f"refs/heads/{branch}"],
+        ["git", "ls-remote", repo_url, ref],
         check=True, capture_output=True, text=True,
     ).stdout.strip()
     return out.split()[0] if out else ""
