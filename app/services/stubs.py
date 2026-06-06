@@ -11,7 +11,8 @@ class StubBuilder:
 
 
 class StubGitOps:
-    def bootstrap_app(self, name: str, repo_url: str, framework: str) -> None:
+    def bootstrap_app(self, name: str, repo_url: str, framework: str,
+                      env: dict, secret_name: str) -> None:
         return None
 
     def update_image_tag(self, name: str, image: str) -> None:
@@ -37,6 +38,9 @@ class StubLoki:
 
 
 class StubK8s:
+    def apply_env_secret(self, namespace: str, name: str, data: dict) -> None:
+        return None
+
     def nodes(self) -> list[dict]:
         return [
             {"name": "ng-ondemand-1", "type": "m5.large", "status": "Ready", "role": "platform"},
