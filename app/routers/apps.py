@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import datetime, timezone
 
@@ -18,6 +19,7 @@ from app.services.interfaces import BuildRequest
 from app.services.real.gitops import derive_app_name, split_env  # 순수 함수 (IO 의존 없음)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def parse_env_json(raw: str) -> list[dict]:
@@ -96,6 +98,7 @@ def _bootstrap(name: str) -> None:
             gitops.bootstrap_app(name, app.repo_url, app.framework, plain, secret_name)
             status = "ready"
         except Exception:
+            logger.exception("bootstrap failed for app %s", name)
             status = "register-failed"
         app.status = status
         s.commit()
@@ -158,7 +161,7 @@ def _watch_build(build_id: int, app_id: int, app_name: str, image: str, workflow
             try:
                 gitops.update_image_tag(app_name, image)
             except Exception:
-                pass
+                logger.exception("deploy(update_image_tag) failed for app %s", app_name)
             if build:
                 build.status = "succeeded"
                 build.finished_at = datetime.now(timezone.utc)

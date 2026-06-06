@@ -1,9 +1,16 @@
 """앱 등록/빌드 라우트 — stub 모드(기본). 외부 시스템 호출 없이 동작."""
 
 import json
+import logging
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.database import Base
+from app.db.models import App
 from app.db.repositories import AppRepository
-from app.routers.apps import parse_env_json
+from app.routers.apps import _bootstrap, parse_env_json
 
 
 def test_register_app_creates_and_lists(client):
@@ -84,3 +91,78 @@ def test_reregister_replaces_env_vars(client):
         assert rec.env_vars == [{"key": "B", "value": "2", "is_secret": True}]
     finally:
         gen.close()
+
+
+class _SpyGitOps:
+    def __init__(self):
+        self.calls = []
+
+    def bootstrap_app(self, name, repo_url, framework, env, secret_name):
+        self.calls.append((name, repo_url, framework, env, secret_name))
+
+    def update_image_tag(self, name, image):
+        pass
+
+
+class _FailGitOps(_SpyGitOps):
+    def bootstrap_app(self, *a, **k):
+        raise RuntimeError("push failed")
+
+
+class _SpyK8s:
+    def __init__(self):
+        self.calls = []
+
+    def apply_env_secret(self, namespace, name, data):
+        self.calls.append((namespace, name, data))
+
+
+def _engine_with_app(env_vars):
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    s = Session()
+    s.add(App(name="demo", repo_url="https://github.com/x/demo", framework="spring",
+              namespace="sut", env_vars=env_vars, status="registering"))
+    s.commit()
+    s.close()
+    return Session
+
+
+def test_bootstrap_success_splits_and_sets_ready(monkeypatch):
+    Session = _engine_with_app([
+        {"key": "DB_HOST", "value": "mysql", "is_secret": False},
+        {"key": "JWT", "value": "x", "is_secret": True},
+    ])
+    monkeypatch.setattr("app.routers.apps.SessionLocal", Session)
+    gitops, k8s = _SpyGitOps(), _SpyK8s()
+    monkeypatch.setattr("app.routers.apps.make_gitops", lambda: gitops)
+    monkeypatch.setattr("app.routers.apps.make_k8s", lambda: k8s)
+
+    _bootstrap("demo")
+
+    assert k8s.calls == [("sut", "demo-env", {"JWT": "x"})]
+    assert gitops.calls == [
+        ("demo", "https://github.com/x/demo", "spring", {"DB_HOST": "mysql"}, "demo-env")
+    ]
+    s = Session()
+    app = next(a for a in AppRepository(s).list_all() if a.name == "demo")
+    s.close()
+    assert app.status == "ready"
+
+
+def test_bootstrap_failure_logs_and_sets_register_failed(monkeypatch, caplog):
+    Session = _engine_with_app([{"key": "DB_HOST", "value": "mysql", "is_secret": False}])
+    monkeypatch.setattr("app.routers.apps.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.apps.make_gitops", lambda: _FailGitOps())
+    monkeypatch.setattr("app.routers.apps.make_k8s", lambda: _SpyK8s())
+
+    with caplog.at_level(logging.ERROR):
+        _bootstrap("demo")
+
+    s = Session()
+    app = next(a for a in AppRepository(s).list_all() if a.name == "demo")
+    s.close()
+    assert app.status == "register-failed"
+    assert "bootstrap failed" in caplog.text
