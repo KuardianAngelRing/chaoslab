@@ -23,6 +23,7 @@ class App(Base):
     image_repo: Mapped[str] = mapped_column(String(300), default="")
     current_sha: Mapped[str] = mapped_column(String(40), default="")
     status: Mapped[str] = mapped_column(String(30), default="unknown")
+    env_vars: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     builds: Mapped[list["Build"]] = relationship(back_populates="app")

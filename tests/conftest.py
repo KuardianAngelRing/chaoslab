@@ -35,3 +35,16 @@ def client():
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def db_session():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    s = Session()
+    try:
+        yield s
+    finally:
+        s.close()
