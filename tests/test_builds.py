@@ -27,6 +27,7 @@ def test_build_history_lists_builds(client):
     r = client.get("/apps/1/builds")
     assert r.status_code == 200
     assert "a1b2c3d4" in r.text
+    assert "<html" not in r.text  # 부분 렌더(모달 본문) — 풀 셸이면 모달 깨짐
 
 
 def test_build_history_empty_state(client):
