@@ -27,6 +27,24 @@ def derive_app_name(repo_url: str) -> str:
     return name or "app"
 
 
+def split_env(env_vars: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
+    """[{key,value,is_secret}] → (평문 {K:V}, 비밀 {K:V}). 빈 키는 무시."""
+    plain: dict[str, str] = {}
+    secret: dict[str, str] = {}
+    for e in env_vars or []:
+        key = (e.get("key") or "").strip()
+        if not key:
+            continue
+        (secret if e.get("is_secret") else plain)[key] = e.get("value", "")
+    return plain, secret
+
+
+def _yaml_quote(v: str) -> str:
+    """env 값을 안전한 더블쿼트 스칼라로 (콜론·슬래시·특수문자 포함 대비)."""
+    s = str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{s}"'
+
+
 def framework_defaults(framework: str) -> tuple[int, str]:
     return FRAMEWORK_DEFAULTS.get(framework.lower(), (8080, "/healthz"))
 
@@ -60,19 +78,18 @@ spec:
 """
 
 
-def render_values_yaml(name: str, image: str, port: int, health_path: str) -> str:
-    return f"""name: {name}
-image: {image}
-port: {port}
-healthPath: {health_path}
-replicas: 1
-istio:
-  enabled: true
-  timeout: 3s
-  retries:
-    attempts: 2
-    perTryTimeout: 1s
-"""
+def render_values_yaml(name: str, image: str, port: int, health_path: str,
+                       env: dict[str, str] | None = None, secret_name: str = "") -> str:
+    lines = [f"name: {name}", f"image: {image}", f"port: {port}",
+             f"healthPath: {health_path}", "replicas: 1"]
+    if env:
+        lines.append("env:")
+        lines += [f"  {k}: {_yaml_quote(v)}" for k, v in env.items()]
+    if secret_name:
+        lines.append(f"secretName: {secret_name}")
+    lines += ["istio:", "  enabled: true", "  timeout: 3s", "  retries:",
+              "    attempts: 2", "    perTryTimeout: 1s"]
+    return "\n".join(lines) + "\n"
 
 
 def set_image_in_values(values_text: str, new_image: str) -> str:
@@ -117,7 +134,8 @@ class RealGitOps:
                 raise
 
     # ── GitOpsService 인터페이스 ──
-    def bootstrap_app(self, name: str, repo_url: str, framework: str) -> None:
+    def bootstrap_app(self, name: str, repo_url: str, framework: str,
+                      env: dict[str, str], secret_name: str) -> None:
         self._ensure_ecr_repo(name)
         port, health = framework_defaults(framework)
         placeholder = f"{self.s.ecr_registry}/{name}:placeholder"
@@ -129,7 +147,9 @@ class RealGitOps:
         app_file.write_text(
             render_application_yaml(name, self.s.iac_aws_repo_url, self.s.sut_namespace)
         )
-        values_file.write_text(render_values_yaml(name, placeholder, port, health))
+        values_file.write_text(
+            render_values_yaml(name, placeholder, port, health, env, secret_name)
+        )
 
         self._git("add", "argocd/apps", "gitops/apps")
         self._git("commit", "-m", f"feat: register {name}")

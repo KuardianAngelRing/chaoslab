@@ -6,6 +6,7 @@ from app.services.real.gitops import (
     render_application_yaml,
     render_values_yaml,
     set_image_in_values,
+    split_env,
 )
 
 
@@ -36,6 +37,38 @@ def test_render_application_yaml_multisource():
     assert "name: demo" in y
     assert "$values/gitops/apps/demo/values.yaml" in y
     assert "namespace: sut" in y
+
+
+def test_split_env_separates_secret():
+    rows = [{"key": "DB_HOST", "value": "mysql", "is_secret": False},
+            {"key": "JWT", "value": "x", "is_secret": True},
+            {"key": "", "value": "skip", "is_secret": False}]  # 빈 키 무시
+    plain, secret = split_env(rows)
+    assert plain == {"DB_HOST": "mysql"}
+    assert secret == {"JWT": "x"}
+
+
+def test_render_values_yaml_with_env_and_secret():
+    text = render_values_yaml("demo", "reg/demo:abc12345", 8080, "/healthz",
+                              env={"DB_HOST": "mysql:3306"}, secret_name="demo-env")
+    assert 'DB_HOST: "mysql:3306"' in text
+    assert "secretName: demo-env" in text
+    assert "env:" in text
+
+
+def test_render_values_yaml_no_env_omits_blocks():
+    text = render_values_yaml("demo", "reg/demo:abc12345", 8080, "/healthz")
+    assert "env:" not in text
+    assert "secretName" not in text
+
+
+def test_set_image_in_values_preserves_env():
+    before = render_values_yaml("demo", "reg/demo:placeholder", 8080, "/healthz",
+                                env={"DB_HOST": "mysql"}, secret_name="demo-env")
+    after = set_image_in_values(before, "reg/demo:newsha99")
+    assert "image: reg/demo:newsha99" in after
+    assert 'DB_HOST: "mysql"' in after
+    assert "secretName: demo-env" in after
 
 
 def test_build_workflow_manifest():
