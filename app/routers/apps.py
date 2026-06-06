@@ -1,6 +1,7 @@
 """앱 등록(bootstrap) + 수동 빌드 트리거. 무거운 IO는 BackgroundTasks로 위임."""
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone
 
@@ -11,12 +12,28 @@ from app.config import settings
 from app.db.database import SessionLocal, get_session
 from app.db.models import App, Build
 from app.db.repositories import AppRepository, BuildRepository
-from app.deps import get_app_count, make_builder, make_gitops
+from app.deps import get_app_count, make_builder, make_gitops, make_k8s
 from app.rendering import render_page
 from app.services.interfaces import BuildRequest
-from app.services.real.gitops import derive_app_name  # 순수 함수 (IO 의존 없음)
+from app.services.real.gitops import derive_app_name, split_env  # 순수 함수 (IO 의존 없음)
 
 router = APIRouter()
+
+
+def parse_env_json(raw: str) -> list[dict]:
+    """env_json(폼) → [{key,value,is_secret}] 정규화. 깨진 입력은 빈 리스트."""
+    try:
+        data = json.loads(raw or "[]")
+    except (ValueError, TypeError):
+        return []
+    out: list[dict] = []
+    if isinstance(data, list):
+        for e in data:
+            if isinstance(e, dict) and (e.get("key") or "").strip():
+                out.append({"key": e["key"].strip(),
+                            "value": e.get("value", ""),
+                            "is_secret": bool(e.get("is_secret"))})
+    return out
 
 
 def _apps_response(request: Request, session: Session):
@@ -36,34 +53,52 @@ def register_app(
     framework: str = Form(...),
     health_path: str = Form("/healthz"),
     port: int = Form(8080),
+    env_json: str = Form("[]"),
     session: Session = Depends(get_session),
 ):
     name = derive_app_name(repo_url)
+    env_vars = parse_env_json(env_json)
     repo = AppRepository(session)
-    if not any(a.name == name for a in repo.list_all()):
+    existing = next((a for a in repo.list_all() if a.name == name), None)
+    if existing is None:
         repo.create(
             name=name, repo_url=repo_url, framework=framework,
             health_path=health_path, port=port,
             namespace=settings.sut_namespace, status="registering",
+            env_vars=env_vars,
         )
-    background.add_task(_bootstrap, name, repo_url, framework)
+    else:
+        existing.repo_url = repo_url
+        existing.framework = framework
+        existing.health_path = health_path
+        existing.port = port
+        existing.env_vars = env_vars
+        existing.status = "registering"
+        session.commit()
+    background.add_task(_bootstrap, name)
     return _apps_response(request, session)
 
 
-def _bootstrap(name: str, repo_url: str, framework: str) -> None:
-    """ECR + GitOps 매니페스트 커밋/푸시 (Stub면 no-op). 완료 시 status 갱신."""
+def _bootstrap(name: str) -> None:
+    """DB env 기반: 비밀→K8s Secret, 평문→values.yaml. 완료 시 status 갱신."""
     gitops = make_gitops()
+    k8s = make_k8s()
     s = SessionLocal()
     try:
+        app = next((a for a in AppRepository(s).list_all() if a.name == name), None)
+        if app is None:
+            return
+        plain, secret = split_env(app.env_vars or [])
+        secret_name = f"{name}-env" if secret else ""
         try:
-            gitops.bootstrap_app(name, repo_url, framework)
+            if secret:
+                k8s.apply_env_secret(app.namespace, secret_name, secret)
+            gitops.bootstrap_app(name, app.repo_url, app.framework, plain, secret_name)
             status = "ready"
         except Exception:
             status = "register-failed"
-        app = next((a for a in AppRepository(s).list_all() if a.name == name), None)
-        if app:
-            app.status = status
-            s.commit()
+        app.status = status
+        s.commit()
     finally:
         s.close()
 
