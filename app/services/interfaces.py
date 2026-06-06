@@ -1,6 +1,6 @@
 """외부 시스템 계약. 라우터는 이 Protocol에만 의존(DIP). Slice 1=Stub, 이후=Real로 교체."""
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypedDict
 
 
 @dataclass
@@ -14,6 +14,12 @@ class BuildRequest:
     dockerfile: str = "Dockerfile"
 
 
+class EnvVar(TypedDict):
+    key: str
+    value: str
+    is_secret: bool
+
+
 class BuilderService(Protocol):
     def trigger_build(self, req: BuildRequest) -> str:
         """빌드 워크플로 생성. workflow 이름 반환."""
@@ -25,8 +31,9 @@ class BuilderService(Protocol):
 
 
 class GitOpsService(Protocol):
-    def bootstrap_app(self, name: str, repo_url: str, framework: str) -> None:
-        """ECR 레포 생성 + ArgoCD Application + values.yaml 커밋/푸시."""
+    def bootstrap_app(self, name: str, repo_url: str, framework: str,
+                      env: dict[str, str], secret_name: str) -> None:
+        """ECR 레포 + ArgoCD Application + values.yaml(평문 env·secretName 포함) 커밋/푸시."""
         ...
 
     def update_image_tag(self, name: str, image: str) -> None:
@@ -55,6 +62,10 @@ class LokiService(Protocol):
 
 
 class K8sService(Protocol):
+    def apply_env_secret(self, namespace: str, name: str, data: dict[str, str]) -> None:
+        """앱 시크릿을 K8s Secret(Opaque)으로 생성/갱신 (git에 안 들어감)."""
+        ...
+
     def nodes(self) -> list[dict]:
         ...
 
