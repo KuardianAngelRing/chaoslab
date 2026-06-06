@@ -1,0 +1,29 @@
+{% from "macros/components.html" import badge %}
+<div class="px-6 pb-6 pt-2">
+  <div class="text-sm font-bold mb-3" style="color: var(--muted-foreground);">{{ app.name }}</div>
+  {% if builds %}
+  <div class="space-y-2">
+    {% for b in builds %}
+    <div class="tds-card p-3 flex items-center justify-between text-xs">
+      <div class="flex items-center gap-3">
+        {% if b.status == "succeeded" %}{{ badge("성공", "success") }}
+        {% elif b.status == "failed" %}{{ badge("실패", "danger") }}
+        {% elif b.status == "running" %}{{ badge("빌드 중", "info") }}
+        {% else %}{{ badge(b.status, "muted") }}{% endif %}
+        <code class="mono font-bold">{{ b.image_tag or "—" }}</code>
+      </div>
+      <div class="flex items-center gap-4" style="color: var(--muted-foreground);">
+        <span>{{ b.started_at.strftime("%m/%d %H:%M") }}</span>
+        <span>{{ duration(b.started_at, b.finished_at) }}</span>
+        <code class="mono truncate max-w-[160px]">{{ b.workflow_name or "—" }}</code>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-10" style="color: var(--muted-foreground);">
+    <div class="text-3xl mb-2">📜</div>
+    <div class="text-sm">빌드 이력이 없어요. 빌드를 실행하면 여기 기록돼요.</div>
+  </div>
+  {% endif %}
+</div>
