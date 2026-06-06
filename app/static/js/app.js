@@ -184,3 +184,22 @@ document.addEventListener('change', (e) => {
     envSync();
   }
 });
+
+// ── 빌드 상태 watch (building 카드만 EventSource, 완료 시 목록 새로고침) ──
+const _buildStreams = new Set();
+function watchBuilds() {
+  document.querySelectorAll('[data-building-app]').forEach((el) => {
+    const id = el.dataset.buildingApp;
+    if (_buildStreams.has(id)) return;
+    _buildStreams.add(id);
+    const es = new EventSource(`/apps/${id}/builds/stream`);
+    es.addEventListener('completed', () => {
+      es.close(); _buildStreams.delete(id);
+      // 배지 마크업을 JS에 복제하지 않고 서버 렌더로 목록 새로고침(배지·sha 일관)
+      if (window.htmx) htmx.ajax('GET', '/apps', { target: '#main-content', swap: 'innerHTML' });
+    });
+    es.onerror = () => { es.close(); _buildStreams.delete(id); };
+  });
+}
+document.addEventListener('DOMContentLoaded', watchBuilds);
+document.body.addEventListener('htmx:afterSwap', watchBuilds);

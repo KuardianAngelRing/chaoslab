@@ -66,7 +66,7 @@
         {% elif app.status == "degraded" %}
         <span class="tds-badge badge-warning"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--warning);"></span>카오스 진행 중</span>
         {% elif app.status == "building" %}
-        <span class="tds-badge badge-info"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--info);"></span>빌드 중</span>
+        <span class="tds-badge badge-info" data-building-app="{{ app.id }}"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--info);"></span>빌드 중</span>
         {% else %}
         <span class="tds-badge badge-muted">{{ app.status }}</span>
         {% endif %}
@@ -93,6 +93,9 @@
           <iconify-icon icon="solar:bug-bold" width="14"></iconify-icon>
           카오스 실험
         </button>
+        <button class="tds-btn-muted text-xs h-9 px-3" hx-get="/apps/{{ app.id }}/builds" hx-target="#builds-body" hx-swap="innerHTML" onclick="openDialog('builds')" title="빌드 이력">
+          <iconify-icon icon="solar:history-bold" width="14"></iconify-icon>
+        </button>
         {% if app.repo_url %}
         <a href="{{ app.repo_url }}" target="_blank" class="tds-btn-muted text-xs h-9 px-3 flex items-center justify-center"><iconify-icon icon="mdi:github" width="14"></iconify-icon></a>
         {% else %}
@@ -112,6 +115,22 @@
       </div>
     </button>
 
+  </div>
+</div>
+
+<!-- DIALOG: 빌드 이력 (공유, HTMX가 본문 채움) -->
+<div class="dialog-backdrop" id="dialog-builds">
+  <div class="dialog-card">
+    <div class="px-6 pt-6 pb-2 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="tossface">📜</span>
+        <h2 class="font-extrabold text-xl">빌드 이력</h2>
+      </div>
+      <button class="p-1 rounded-lg hover:bg-muted" onclick="closeDialog('builds')">
+        <iconify-icon icon="lucide:x" width="20"></iconify-icon>
+      </button>
+    </div>
+    <div id="builds-body" class="flex-1 overflow-auto"></div>
   </div>
 </div>
 
