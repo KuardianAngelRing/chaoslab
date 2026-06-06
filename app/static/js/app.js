@@ -120,3 +120,67 @@ function initCharts() {
 window._charts = {};
 document.addEventListener('DOMContentLoaded', initCharts);
 document.body.addEventListener('htmx:afterSwap', initCharts);
+
+// ── 등록 폼 env/secret 에디터 (vanilla, HTMX 스왑 안전: 위임 + onclick 전역) ──
+const ENV_SECRET_RE = /(TOKEN|SECRET|PASSWORD|KEY)/i;
+
+function escapeAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+function envRowHtml(key = '', value = '', secret = false) {
+  return `<div class="env-row flex items-center gap-2">
+    <input class="env-key tds-input mono text-xs" placeholder="KEY" value="${escapeAttr(key)}" />
+    <input class="env-val tds-input mono text-xs" placeholder="value" value="${escapeAttr(value)}" />
+    <label class="flex items-center gap-1 text-xs whitespace-nowrap" title="시크릿">
+      <input type="checkbox" class="env-secret" ${secret ? 'checked' : ''} />🔒
+    </label>
+    <button type="button" class="tds-btn-muted text-xs px-2" onclick="this.closest('.env-row').remove(); envSync()">✕</button>
+  </div>`;
+}
+
+function envAddRow(key = '', value = '', secret = false) {
+  const box = document.getElementById('env-rows');
+  if (!box) return;
+  box.insertAdjacentHTML('beforeend', envRowHtml(key, value, secret));
+  envSync();
+}
+
+function envParsePaste() {
+  const ta = document.getElementById('env-paste');
+  if (!ta) return;
+  ta.value.split('\n').forEach((line) => {
+    const i = line.indexOf('=');
+    if (i < 1) return;
+    const key = line.slice(0, i).trim();
+    const val = line.slice(i + 1).trim();
+    if (key) envAddRow(key, val, ENV_SECRET_RE.test(key));
+  });
+  ta.value = '';
+}
+
+function envSync() {
+  const json = document.getElementById('env-json');
+  if (!json) return;
+  const rows = [...document.querySelectorAll('#env-rows .env-row')].map((r) => ({
+    key: r.querySelector('.env-key').value.trim(),
+    value: r.querySelector('.env-val').value,
+    is_secret: r.querySelector('.env-secret').checked,
+  })).filter((e) => e.key);
+  json.value = JSON.stringify(rows);
+}
+
+// 행 입력 시마다 hidden 동기화 + 키 입력 시 시크릿 자동 감지(미수정 시)
+document.addEventListener('input', (e) => {
+  if (!e.target.closest('#env-rows')) return;
+  if (e.target.classList.contains('env-key')) {
+    const row = e.target.closest('.env-row');
+    const cb = row.querySelector('.env-secret');
+    if (!cb.dataset.touched) cb.checked = ENV_SECRET_RE.test(e.target.value);
+  }
+  envSync();
+});
+document.addEventListener('change', (e) => {
+  if (e.target.classList && e.target.classList.contains('env-secret')) {
+    e.target.dataset.touched = '1';  // 수동 토글 후엔 자동감지 중단
+    envSync();
+  }
+});

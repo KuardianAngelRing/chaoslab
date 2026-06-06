@@ -158,6 +158,20 @@
         <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input name="health_path" class="tds-input mono text-sm" value="/actuator/health" /></div>
         <div><label class="text-xs font-bold mb-1.5 block">Port</label><input name="port" type="number" class="tds-input mono text-sm" value="8080" /></div>
       </div>
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-xs font-bold block">환경변수 / 시크릿 <span style="color: var(--muted-foreground);">(선택)</span></label>
+          <button type="button" class="text-xs font-bold" style="color: var(--primary);" onclick="envAddRow()">+ 추가</button>
+        </div>
+        <div id="env-rows" class="space-y-2"></div>
+        <details class="mt-2">
+          <summary class="text-xs cursor-pointer" style="color: var(--muted-foreground);">.env 붙여넣기</summary>
+          <textarea id="env-paste" rows="3" class="tds-input mono text-xs mt-1.5" placeholder="KEY=VALUE 줄단위"></textarea>
+          <button type="button" class="tds-btn-muted text-xs mt-1.5" onclick="envParsePaste()">적용</button>
+        </details>
+        <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">키에 TOKEN/SECRET/PASSWORD/KEY 포함 시 🔒시크릿으로 자동 표시(K8s Secret으로 주입, git 미저장).</p>
+        <input type="hidden" name="env_json" id="env-json" value="[]" />
+      </div>
       <div class="p-3 rounded-2xl flex items-start gap-2" style="background: var(--muted);">
         <iconify-icon icon="solar:info-circle-bold" width="18" style="color: var(--info);" class="shrink-0 mt-0.5"></iconify-icon>
         <p class="text-xs" style="color: var(--muted-foreground);">사내 표준(Spring=Gradle+Java 21) 으로 빌드돼요. Dockerfile 은 자동 주입됩니다.</p>
