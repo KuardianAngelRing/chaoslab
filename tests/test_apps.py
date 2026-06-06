@@ -1,5 +1,10 @@
 """앱 등록/빌드 라우트 — stub 모드(기본). 외부 시스템 호출 없이 동작."""
 
+import json
+
+from app.db.repositories import AppRepository
+from app.routers.apps import parse_env_json
+
 
 def test_register_app_creates_and_lists(client):
     resp = client.post(
@@ -22,12 +27,6 @@ def test_build_unknown_app_404(client):
     assert resp.status_code == 404
 
 
-import json
-
-from app.db.repositories import AppRepository
-from app.routers.apps import parse_env_json
-
-
 def test_parse_env_json_normalizes():
     raw = json.dumps([
         {"key": "DB_HOST", "value": "mysql", "is_secret": False},
@@ -44,6 +43,11 @@ def test_parse_env_json_normalizes():
 def test_parse_env_json_broken_returns_empty():
     assert parse_env_json("not json") == []
     assert parse_env_json("") == []
+
+
+def test_parse_env_json_nonstring_key_coerced():
+    raw = json.dumps([{"key": 123, "value": "v", "is_secret": False}])
+    assert parse_env_json(raw) == [{"key": "123", "value": "v", "is_secret": False}]
 
 
 def test_register_app_stores_env_vars(client):

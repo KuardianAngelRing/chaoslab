@@ -29,8 +29,8 @@ def parse_env_json(raw: str) -> list[dict]:
     out: list[dict] = []
     if isinstance(data, list):
         for e in data:
-            if isinstance(e, dict) and (e.get("key") or "").strip():
-                out.append({"key": e["key"].strip(),
+            if isinstance(e, dict) and str(e.get("key") or "").strip():
+                out.append({"key": str(e["key"]).strip(),
                             "value": e.get("value", ""),
                             "is_secret": bool(e.get("is_secret"))})
     return out
