@@ -25,6 +25,13 @@ def make_gitops() -> interfaces.GitOpsService:
     return stubs.StubGitOps()
 
 
+def make_k8s() -> interfaces.K8sService:
+    if settings.use_real_services:
+        from app.services.real.k8s import RealK8s  # lazy: k8s SDK
+        return RealK8s(settings)
+    return stubs.StubK8s()
+
+
 def get_builder() -> interfaces.BuilderService:
     return make_builder()
 
@@ -46,7 +53,7 @@ def get_loki() -> interfaces.LokiService:
 
 
 def get_k8s() -> interfaces.K8sService:
-    return stubs.StubK8s()
+    return make_k8s()
 
 
 def get_app_count(session: Session = Depends(get_session)) -> int:
