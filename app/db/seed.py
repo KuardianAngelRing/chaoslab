@@ -37,6 +37,8 @@ def seed_data(session: Session) -> None:
         app_id=boutique.id, chaos_type="NetworkChaos",
         params={"action": "delay", "delay": "200ms", "duration": "5m"},
         status="running", baseline_r=0.42, r_index=0.65, target_r=0.7,
+        baseline_metrics={"error": 0.3, "p99": 89},
+        fault_metrics={"error": 2.1, "p99": 412},
     )
     for i, (r, verdict) in enumerate([(0.51, "improved"), (0.59, "improved"), (0.65, "improved")], start=1):
         iters.create(
