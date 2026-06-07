@@ -52,3 +52,24 @@ def test_settings_page(client):
     resp = client.get("/settings")
     assert resp.status_code == 200
     assert "설정" in resp.text and ("목표 R" in resp.text or "GitHub" in resp.text)
+
+
+def test_recent_activity_assembles_and_limits(db_session):
+    from app.db.seed import seed_data
+    from app.routers.pages import _recent_activity
+
+    seed_data(db_session)
+    items = _recent_activity(db_session)
+    assert len(items) <= 5
+    assert all({"icon", "text", "ts"} <= set(it) for it in items)
+    joined = " ".join(it["text"] for it in items)
+    assert "online-boutique" in joined
+
+
+def test_elapsed_min_handles_naive_datetime():
+    from datetime import datetime, timezone, timedelta
+    from app.routers.pages import _elapsed_min
+
+    assert _elapsed_min(None) is None
+    past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=12)
+    assert _elapsed_min(past) >= 11
