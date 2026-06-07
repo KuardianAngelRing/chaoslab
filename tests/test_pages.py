@@ -66,6 +66,24 @@ def test_recent_activity_assembles_and_limits(db_session):
     assert "online-boutique" in joined
 
 
+def test_dashboard_hero_and_kpi_honest(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    # 제거되어야 할 가짜들
+    assert "Phase 4" not in resp.text
+    assert "👋" not in resp.text
+    assert "$5.00 한도" not in resp.text
+    assert "+1 어제 대비" not in resp.text
+    # 새 라벨
+    assert "진행중인 실험" in resp.text
+    assert "총 소요된 LLM 비용" in resp.text
+    assert "최근 R 지수" in resp.text
+    # 실 비용(seed 3 iter × 0.012 = 0.036) → $0.04 표기
+    assert "$0.04" in resp.text
+    # '새 실험 시작' 버튼 제거
+    assert "새 실험 시작" not in resp.text
+
+
 def test_elapsed_min_handles_naive_datetime():
     from datetime import datetime, timezone, timedelta
     from app.routers.pages import _elapsed_min

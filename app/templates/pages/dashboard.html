@@ -7,18 +7,13 @@
           <div class="mb-8">
             <div class="flex items-end justify-between mb-2">
               <div>
-                <div class="text-sm font-semibold mb-2" style="color: var(--primary);">졸업과제 · Phase 4</div>
-                <h1 class="text-3xl font-extrabold mb-2">대시보드 👋</h1>
-                <p class="text-base" style="color: var(--muted-foreground);">현재 카오스 실험 {{ running_count }}개가 진행 중이에요. AI Agent 루프가 R 지수를 자동으로 개선하고 있어요.</p>
+                <h1 class="text-3xl font-extrabold">대시보드</h1>
               </div>
               <div class="flex items-center gap-2">
-                <button class="tds-btn-muted text-sm">
+                <button class="tds-btn-muted text-sm"
+                        hx-get="/" hx-target="#main-content" hx-swap="innerHTML">
                   <iconify-icon icon="solar:refresh-bold" width="16"></iconify-icon>
                   새로고침
-                </button>
-                <button class="tds-btn-primary text-sm" onclick="openDialog('newExperiment')">
-                  <iconify-icon icon="solar:bug-bold" width="16"></iconify-icon>
-                  새 실험 시작
                 </button>
               </div>
             </div>
@@ -30,7 +25,6 @@
             <div class="tds-card p-5 hover-lift">
               <div class="flex items-start justify-between mb-3">
                 <span class="tossface">📦</span>
-                <span class="tds-badge badge-success">+1 어제 대비</span>
               </div>
               <div class="text-3xl font-extrabold mb-1">{{ app_count }}</div>
               <div class="text-sm" style="color: var(--muted-foreground);">배포된 앱</div>
@@ -39,28 +33,26 @@
             <div class="tds-card p-5 hover-lift">
               <div class="flex items-start justify-between mb-3">
                 <span class="tossface">🧪</span>
-                <span class="tds-badge badge-warning">진행 중</span>
+                {% if elapsed_min is not none %}<span class="tds-badge badge-warning">{{ elapsed_min }}분 경과</span>{% endif %}
               </div>
               <div class="text-3xl font-extrabold mb-1">{{ running_count }}</div>
-              <div class="text-sm" style="color: var(--muted-foreground);">활성 실험</div>
+              <div class="text-sm" style="color: var(--muted-foreground);">진행중인 실험</div>
             </div>
 
             <div class="tds-card p-5 hover-lift">
               <div class="flex items-start justify-between mb-3">
                 <span class="tossface">📈</span>
-                <span class="tds-badge badge-success">+0.29</span>
               </div>
               <div class="text-3xl font-extrabold mb-1">{{ latest_r }}</div>
-              <div class="text-sm" style="color: var(--muted-foreground);">평균 R 지수</div>
+              <div class="text-sm" style="color: var(--muted-foreground);">최근 R 지수</div>
             </div>
 
             <div class="tds-card p-5 hover-lift">
               <div class="flex items-start justify-between mb-3">
                 <span class="tossface">💸</span>
-                <span class="tds-badge badge-muted">$5.00 한도</span>
               </div>
-              <div class="text-3xl font-extrabold mb-1">$2.34</div>
-              <div class="text-sm" style="color: var(--muted-foreground);">이번 세션 LLM 비용</div>
+              <div class="text-3xl font-extrabold mb-1">${{ "%.2f"|format(llm_cost_total) }}</div>
+              <div class="text-sm" style="color: var(--muted-foreground);">총 소요된 LLM 비용</div>
             </div>
           </div>
 
