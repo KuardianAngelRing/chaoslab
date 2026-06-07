@@ -34,6 +34,8 @@ def _recent_activity(session, limit: int = 5) -> list[dict]:
         items.append({"icon": "solar:add-circle-bold", "badge": None,
                       "text": f"{app.name} 신규 등록", "ts": app.created_at})
         for b in BuildRepository(session).list_for_app(app.id):
+            if not b.image_tag:  # 빌드 진행/실패 중엔 SHA가 비어 "새 SHA  배포" 오표기 방지
+                continue
             items.append({"icon": "solar:rocket-bold", "badge": b.status,
                           "text": f"{app.name} 새 SHA {b.image_tag[:8]} 배포", "ts": b.started_at})
     for exp in ExperimentRepository(session).list_all():
