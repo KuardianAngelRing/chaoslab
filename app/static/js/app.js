@@ -212,7 +212,10 @@ document.body.addEventListener('htmx:afterSwap', watchBuilds);
 function syncSidebarActive() {
   const path = location.pathname;
   document.querySelectorAll('.sidebar-nav-item').forEach((a) => {
-    a.classList.toggle('active', a.getAttribute('hx-get') === path);
+    const href = a.getAttribute('hx-get');
+    // 루트는 정확히, 나머지는 하위경로(/experiments/3 등)까지 매칭 — 서버 active_nav와 동일
+    const match = href === '/' ? path === '/' : path === href || path.startsWith(href + '/');
+    a.classList.toggle('active', match);
   });
 }
 document.addEventListener('DOMContentLoaded', syncSidebarActive);
