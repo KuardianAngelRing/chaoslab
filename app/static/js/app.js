@@ -81,12 +81,16 @@ function initCharts() {
   const cc = chartCommon();
 
   const rIdx = document.getElementById('rIndexChart');
-  if (rIdx) {
-    window._charts.rIndex = new Chart(rIdx, {
-      type: 'line',
-      data: { labels: ['iter 1', 'iter 2', 'iter 3', 'iter 4'], datasets: [{ data: [0.42, 0.51, 0.59, 0.65], borderColor: '#004b3e', backgroundColor: 'rgba(0,75,62,0.15)', fill: true, tension: 0.3, pointRadius: 5, pointBackgroundColor: '#004b3e', borderWidth: 3 }] },
-      options: { ...cc, scales: { ...cc.scales, y: { ...cc.scales.y, min: 0.3, max: 0.8 } } }
-    });
+  if (rIdx && rIdx.dataset.series) {
+    const data = JSON.parse(rIdx.dataset.series);
+    const labels = JSON.parse(rIdx.dataset.labels || '[]');
+    if (data.length) {
+      window._charts.rIndex = new Chart(rIdx, {
+        type: 'line',
+        data: { labels, datasets: [{ data, borderColor: '#004b3e', backgroundColor: 'rgba(0,75,62,0.15)', fill: true, tension: 0.3, pointRadius: 5, pointBackgroundColor: '#004b3e', borderWidth: 3 }] },
+        options: { ...cc, scales: { ...cc.scales, y: { ...cc.scales.y, min: 0.3, max: 0.8 } } }
+      });
+    }
   }
 
   const agentR = document.getElementById('agentRChart2');
@@ -203,3 +207,14 @@ function watchBuilds() {
 }
 document.addEventListener('DOMContentLoaded', watchBuilds);
 document.body.addEventListener('htmx:afterSwap', watchBuilds);
+
+// ── 사이드바 active 동기화 (HTMX 부분 스왑은 사이드바 DOM을 안 바꿈) ──
+function syncSidebarActive() {
+  const path = location.pathname;
+  document.querySelectorAll('.sidebar-nav-item').forEach((a) => {
+    a.classList.toggle('active', a.getAttribute('hx-get') === path);
+  });
+}
+document.addEventListener('DOMContentLoaded', syncSidebarActive);
+document.body.addEventListener('htmx:afterSwap', syncSidebarActive);
+document.body.addEventListener('htmx:historyRestore', syncSidebarActive);
