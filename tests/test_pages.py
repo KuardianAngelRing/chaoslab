@@ -66,6 +66,21 @@ def test_recent_activity_assembles_and_limits(db_session):
     assert "online-boutique" in joined
 
 
+def test_dashboard_merged_experiment_card(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    # 합친 카드의 실데이터(seed)
+    assert "online-boutique" in resp.text and "NetworkChaos" in resp.text
+    assert "관찰" in resp.text and "가설" in resp.text and "권고" in resp.text
+    assert "timeout 1s→3s" in resp.text  # seed recommender_output
+    # 제거 대상
+    assert "자동 적용" not in resp.text       # Phase 3 버튼 삭제
+    assert "주입 중" not in resp.text          # 상태 배지 삭제
+    assert "Iteration 4 / 10" not in resp.text  # iteration 카운트 줄 삭제
+    # 정직성 라벨
+    assert "Phase 3" in resp.text  # AI 진단 배지
+
+
 def test_dashboard_hero_and_kpi_honest(client):
     resp = client.get("/")
     assert resp.status_code == 200

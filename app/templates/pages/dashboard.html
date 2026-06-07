@@ -56,99 +56,104 @@
             </div>
           </div>
 
-          <!-- 진행 중 카오스 실험 + AI 루프 -->
-          <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-8">
-
-            <!-- Active Experiment -->
-            <div class="xl:col-span-2 tds-card p-6">
-              <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-3">
-                  <span class="tossface-lg">🧪</span>
-                  <div>
-                    <div class="font-extrabold text-lg">진행 중 실험</div>
-                    {% if running %}
-                    <div class="text-xs" style="color: var(--muted-foreground);">{{ running[0].app.name }} · {{ running[0].chaos_type }} · Iteration 4 / 10</div>
-                    {% else %}
-                    <div class="text-xs" style="color: var(--muted-foreground);">spring-boot-demo · NetworkChaos · Iteration 4 / 10</div>
-                    {% endif %}
+          <!-- 진행중 실험 + AI 진단 (단일 반응형 카드) -->
+          <div class="tds-card p-6 mb-8">
+            {% if running_exp %}
+            <!-- 헤더 -->
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center gap-3">
+                <span class="tossface-lg">🧪</span>
+                <div>
+                  <div class="font-extrabold text-lg">{{ running_exp.app.name }} · {{ running_exp.chaos_type }}</div>
+                  <div class="text-xs" style="color: var(--muted-foreground);">
+                    주입: {% for k, v in running_exp.params.items() %}{{ v }}{% if not loop.last %} · {% endif %}{% endfor %}
                   </div>
                 </div>
-                <span class="tds-badge badge-warning">
-                  <span class="w-1.5 h-1.5 rounded-full pulse-dot bg-amber-500"></span>
-                  주입 중
-                </span>
               </div>
-
-              <div class="chart-box mb-4">
-                <canvas id="rIndexChart"></canvas>
-              </div>
-
-              <div class="grid grid-cols-3 gap-3">
-                <div class="p-3 rounded-2xl" style="background: var(--muted);">
-                  <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">에러율</div>
-                  <div class="text-xl font-extrabold mt-1" style="color: var(--danger);">2.1%</div>
-                  <div class="text-[10px]" style="color: var(--muted-foreground);">기준선 0.3%</div>
-                </div>
-                <div class="p-3 rounded-2xl" style="background: var(--muted);">
-                  <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">p99 레이턴시</div>
-                  <div class="text-xl font-extrabold mt-1" style="color: var(--warning);">412ms</div>
-                  <div class="text-[10px]" style="color: var(--muted-foreground);">기준선 89ms</div>
-                </div>
-                <div class="p-3 rounded-2xl" style="background: var(--muted);">
-                  <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">현재 R 지수</div>
-                  <div class="text-xl font-extrabold mt-1" style="color: var(--primary);">{{ latest_r }}</div>
-                  <div class="text-[10px]" style="color: var(--success);">▲ +0.06</div>
-                </div>
-              </div>
-
-              <button hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="w-full mt-4 tds-btn-muted text-sm justify-center">
-                <iconify-icon icon="solar:arrow-right-bold" width="14"></iconify-icon>
-                상세 페이지로 이동
-              </button>
+              {% if elapsed_min is not none %}
+              <span class="tds-badge badge-muted">
+                <iconify-icon icon="solar:clock-circle-bold" width="14"></iconify-icon>
+                {{ elapsed_min }}분 경과
+              </span>
+              {% endif %}
             </div>
 
-            <!-- LLM 추천 카드 -->
-            <div class="tds-card p-6">
-              <div class="flex items-center gap-2 mb-4">
-                <span class="tossface">🤖</span>
-                <div class="font-extrabold">AI Agent 분석</div>
+            <!-- 좌(지표·차트) / 우(AI 진단) : wide=2열, narrow=적층 -->
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <!-- 좌 -->
+              <div>
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                  <div class="p-3 rounded-2xl" style="background: var(--muted);">
+                    <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">에러율</div>
+                    <div class="text-xl font-extrabold mt-1" style="color: var(--danger);">{{ running_exp.fault_metrics.get("error", "—") }}%</div>
+                    <div class="text-[10px]" style="color: var(--muted-foreground);">기준선 {{ running_exp.baseline_metrics.get("error", "—") }}%</div>
+                  </div>
+                  <div class="p-3 rounded-2xl" style="background: var(--muted);">
+                    <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">p99 레이턴시</div>
+                    <div class="text-xl font-extrabold mt-1" style="color: var(--warning);">{{ running_exp.fault_metrics.get("p99", "—") }}ms</div>
+                    <div class="text-[10px]" style="color: var(--muted-foreground);">기준선 {{ running_exp.baseline_metrics.get("p99", "—") }}ms</div>
+                  </div>
+                  <div class="p-3 rounded-2xl" style="background: var(--muted);">
+                    <div class="text-[11px] font-semibold uppercase tracking-wide" style="color: var(--muted-foreground);">현재 R 지수</div>
+                    <div class="text-xl font-extrabold mt-1" style="color: var(--primary);">{{ "%.2f"|format(running_exp.r_index) if running_exp.r_index is not none else "—" }}</div>
+                    <div class="text-[10px]" style="color: var(--muted-foreground);">목표 {{ "%.2f"|format(running_exp.target_r) }}</div>
+                  </div>
+                </div>
+                {% if r_series %}
+                <div class="chart-box">
+                  <canvas id="rIndexChart" data-series='{{ r_series|tojson }}' data-labels='{{ r_labels|tojson }}'></canvas>
+                </div>
+                {% else %}
+                <div class="chart-box flex items-center justify-center text-sm" style="color: var(--muted-foreground);">
+                  아직 iteration 데이터가 없어요
+                </div>
+                {% endif %}
               </div>
 
-              <div class="space-y-3">
-                <div class="p-3 rounded-2xl border" style="border-color: var(--border);">
-                  <div class="flex items-center gap-1.5 mb-1">
-                    <iconify-icon icon="solar:eye-bold" width="14" style="color: var(--info);"></iconify-icon>
-                    <span class="text-xs font-bold">Observer</span>
-                  </div>
-                  <p class="text-xs" style="color: var(--muted-foreground);">Cart 서비스 timeout 5s 초과 응답 35%, retry 미적용 확인</p>
+              <!-- 우: AI 진단 -->
+              <div class="xl:border-l xl:pl-6" style="border-color: var(--border);">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="tossface">🤖</span>
+                  <div class="font-extrabold">AI Agent 진단</div>
+                  <span class="tds-badge badge-info">Phase 3 예정 · seed 예시</span>
                 </div>
-
-                <div class="p-3 rounded-2xl border" style="border-color: var(--border);">
-                  <div class="flex items-center gap-1.5 mb-1">
-                    <iconify-icon icon="solar:lightbulb-bold" width="14" style="color: var(--warning);"></iconify-icon>
-                    <span class="text-xs font-bold">Analyst</span>
+                {% if latest_iter %}
+                <div class="space-y-3">
+                  <div class="p-3 rounded-2xl border" style="border-color: var(--border);">
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <iconify-icon icon="solar:eye-bold" width="14" style="color: var(--info);"></iconify-icon>
+                      <span class="text-xs font-bold">관찰</span>
+                    </div>
+                    <p class="text-xs" style="color: var(--muted-foreground);">{{ latest_iter.observer_output }}</p>
                   </div>
-                  <p class="text-xs" style="color: var(--muted-foreground);">latency 200ms 주입에 retry 정책 부재로 회복 실패 가설</p>
-                </div>
-
-                <div class="p-3 rounded-2xl border-2" style="border-color: var(--primary); background: var(--primary-soft);">
-                  <div class="flex items-center gap-1.5 mb-1">
-                    <iconify-icon icon="solar:magic-stick-3-bold" width="14" style="color: var(--primary);"></iconify-icon>
-                    <span class="text-xs font-bold" style="color: var(--primary-soft-foreground);">Recommender</span>
+                  <div class="p-3 rounded-2xl border" style="border-color: var(--border);">
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <iconify-icon icon="solar:lightbulb-bold" width="14" style="color: var(--warning);"></iconify-icon>
+                      <span class="text-xs font-bold">가설</span>
+                    </div>
+                    <p class="text-xs" style="color: var(--muted-foreground);">{{ latest_iter.analyst_output }}</p>
                   </div>
-                  <p class="text-xs font-semibold mb-2" style="color: var(--primary-soft-foreground);">Istio DR 권고:</p>
-                  <pre class="mono text-[10px] p-2 rounded-lg" style="background: var(--card); color: var(--foreground);">retries:
-  attempts: 3
-  perTryTimeout: 2s
-  retryOn: 5xx,reset</pre>
+                  <div class="p-3 rounded-2xl border-2" style="border-color: var(--primary); background: var(--primary-soft);">
+                    <div class="flex items-center gap-1.5 mb-1">
+                      <iconify-icon icon="solar:magic-stick-3-bold" width="14" style="color: var(--primary);"></iconify-icon>
+                      <span class="text-xs font-bold" style="color: var(--primary-soft-foreground);">권고</span>
+                    </div>
+                    <p class="text-xs font-semibold" style="color: var(--primary-soft-foreground);">{{ latest_iter.recommender_output }}</p>
+                  </div>
                 </div>
-
-                <button class="w-full tds-btn-primary text-sm justify-center">
-                  <iconify-icon icon="solar:check-circle-bold" width="16"></iconify-icon>
-                  자동 적용 + 재실험
-                </button>
+                {% else %}
+                <p class="text-sm" style="color: var(--muted-foreground);">아직 AI 진단 iteration이 없어요.</p>
+                {% endif %}
               </div>
             </div>
+            {% else %}
+            <!-- empty-state: 진행중 실험 없음 -->
+            <div class="py-12 text-center">
+              <span class="tossface-lg">🧪</span>
+              <div class="font-extrabold text-lg mt-2">진행 중인 실험이 없어요</div>
+              <p class="text-sm mt-1" style="color: var(--muted-foreground);">카오스 테스트에서 새 실험을 시작하면 여기에 진단이 표시돼요.</p>
+            </div>
+            {% endif %}
           </div>
 
           <!-- 최근 활동 + 시스템 상태 -->
