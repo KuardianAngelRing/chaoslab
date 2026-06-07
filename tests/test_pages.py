@@ -116,3 +116,9 @@ def test_dashboard_system_status_real(client):
     assert "Chaos Mesh" in resp.text             # components() 실항목
     # 최근 활동이 실데이터(seed 앱명)
     assert "online-boutique 신규 등록" in resp.text or "online-boutique 새 SHA" in resp.text
+
+
+def test_sidebar_no_eks_status_box(client):
+    resp = client.get("/")          # 풀페이지(사이드바 포함)
+    assert resp.status_code == 200
+    assert "EKS 정상" not in resp.text  # 박스를 유일하게 식별하는 라벨 ("5/5"는 Slice4 실 노드수와 충돌 가능해 제외)
