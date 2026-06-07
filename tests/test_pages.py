@@ -106,3 +106,13 @@ def test_elapsed_min_handles_naive_datetime():
     assert _elapsed_min(None) is None
     past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=12)
     assert _elapsed_min(past) >= 11
+
+
+def test_dashboard_system_status_real(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Supabase" not in resp.text          # 스택에 없는 항목 제거
+    assert "sidecars" not in resp.text           # node_count 오표기 제거
+    assert "Chaos Mesh" in resp.text             # components() 실항목
+    # 최근 활동이 실데이터(seed 앱명)
+    assert "online-boutique 신규 등록" in resp.text or "online-boutique 새 SHA" in resp.text
