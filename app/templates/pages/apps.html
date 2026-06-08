@@ -10,7 +10,7 @@
         GitOps · 배포 관리
       </div>
       <h1 class="text-3xl font-extrabold mb-2">Apps</h1>
-      <p class="text-base" style="color: var(--muted-foreground);">GitHub URL 만 등록하면 자동으로 빌드되고 EKS 에 배포돼요. Dockerfile 작성 불필요!</p>
+      <p class="text-base" style="color: var(--muted-foreground);">GitHub 저장소 URL 하나만 등록하면 컨테이너 이미지 빌드부터 EKS 배포까지 자동으로 진행됩니다.</p>
     </div>
     <button class="tds-btn-primary" onclick="openDialog('newApp')">
       <iconify-icon icon="solar:add-circle-bold" width="18"></iconify-icon>
@@ -18,19 +18,7 @@
     </button>
   </div>
 
-  <div class="tds-card p-4 mt-6 mb-6 flex items-start gap-3" style="background: var(--primary-soft); border-color: var(--primary);">
-    <span class="tossface-lg">💡</span>
-    <div class="flex-1">
-      <div class="font-extrabold text-sm mb-1" style="color: var(--primary-soft-foreground);">사내 표준 안내</div>
-      <p class="text-xs" style="color: var(--primary-soft-foreground); opacity: 0.85;">
-        Spring Boot — Gradle 8 + Java 21 / Next.js — Node 20 + standalone / FastAPI — Python 3.11 + main:app 기준입니다.
-        Dockerfile 은 플랫폼이 자동 주입하므로 코드만 push 하시면 돼요.
-      </p>
-    </div>
-    <a class="text-xs font-bold whitespace-nowrap underline" style="color: var(--primary-soft-foreground);" href="#">표준 문서 →</a>
-  </div>
-
-  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-6">
 
     {% for app in apps %}
     <div class="tds-card p-5 hover-lift">
@@ -110,8 +98,8 @@
         <iconify-icon icon="solar:add-circle-bold" width="28" style="color: var(--primary);"></iconify-icon>
       </div>
       <div class="text-center">
-        <div class="font-extrabold mb-1">새 앱</div>
-        <div class="text-xs" style="color: var(--muted-foreground);">GitHub URL 만 있으면 끝</div>
+        <div class="font-extrabold mb-1">새 앱 등록</div>
+        <div class="text-xs" style="color: var(--muted-foreground);">GitHub 저장소 연결로 시작</div>
       </div>
     </button>
 
@@ -134,9 +122,10 @@
   </div>
 </div>
 
-<!-- DIALOG: 새 앱 등록 -->
+<!-- DIALOG: 새 앱 등록 (3-step 위저드) -->
 <div class="dialog-backdrop" id="dialog-newApp">
-  <div class="dialog-card">
+  <div class="dialog-card" data-wizard>
+    <div class="dialog-resize-handle" title="드래그하여 너비 조절"></div>
     <div class="px-6 pt-6 pb-4 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <span class="tossface">📦</span>
@@ -146,62 +135,96 @@
         <iconify-icon icon="lucide:x" width="20"></iconify-icon>
       </button>
     </div>
-    <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML">
-    <div class="flex-1 overflow-auto px-6 pb-6 space-y-4">
-      <p class="text-sm" style="color: var(--muted-foreground);">GitHub URL · 프레임워크 · Health path 만 입력하시면 돼요. 나머지는 플랫폼이 자동으로 처리해요.</p>
-      <div>
-        <label class="text-xs font-bold mb-1.5 block">GitHub URL</label>
-        <input name="repo_url" required class="tds-input mono text-sm" value="https://github.com/foo/spring-boot-demo" />
+
+    <!-- 스텝 인디케이터 -->
+    <div class="px-6 pb-4 flex items-center gap-2 text-xs font-bold" data-wiz-indicator>
+      {% set steps = [("1", "소스 · 프레임워크"), ("2", "빌드 설정"), ("3", "환경변수")] %}
+      {% for num, label in steps %}
+      <div class="flex items-center gap-2" data-wiz-dot="{{ num }}">
+        <span class="w-6 h-6 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span>
+        <span class="hidden sm:inline" data-wiz-label>{{ label }}</span>
       </div>
-      <div>
-        <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
-        <div class="grid grid-cols-3 gap-2">
-          <label class="tds-card p-3 cursor-pointer text-center hover-lift border-2" style="border-color: var(--primary); background: var(--primary-soft);">
-            <input type="radio" name="framework" value="spring" class="sr-only" checked />
-            <iconify-icon icon="logos:spring-icon" width="32" class="mx-auto mb-1"></iconify-icon>
-            <div class="text-xs font-bold" style="color: var(--primary-soft-foreground);">Spring Boot</div>
-          </label>
-          <label class="tds-card p-3 cursor-pointer text-center hover-lift">
-            <input type="radio" name="framework" value="nextjs" class="sr-only" />
-            <iconify-icon icon="simple-icons:nextdotjs" width="28" class="mx-auto mb-1"></iconify-icon>
-            <div class="text-xs font-bold">Next.js</div>
-          </label>
-          <label class="tds-card p-3 cursor-pointer text-center hover-lift">
-            <input type="radio" name="framework" value="fastapi" class="sr-only" />
-            <iconify-icon icon="simple-icons:fastapi" width="28" class="mx-auto mb-1" style="color: #009485;"></iconify-icon>
-            <div class="text-xs font-bold">FastAPI</div>
-          </label>
-        </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input name="health_path" class="tds-input mono text-sm" value="/actuator/health" /></div>
-        <div><label class="text-xs font-bold mb-1.5 block">Port</label><input name="port" type="number" class="tds-input mono text-sm" value="8080" /></div>
-      </div>
-      <div>
-        <div class="flex items-center justify-between mb-1.5">
-          <label class="text-xs font-bold block">환경변수 / 시크릿 <span style="color: var(--muted-foreground);">(선택)</span></label>
-          <button type="button" class="text-xs font-bold" style="color: var(--primary);" onclick="envAddRow()">+ 추가</button>
-        </div>
-        <div id="env-rows" class="space-y-2"></div>
-        <details class="mt-2">
-          <summary class="text-xs cursor-pointer" style="color: var(--muted-foreground);">.env 붙여넣기</summary>
-          <textarea id="env-paste" rows="3" class="tds-input mono text-xs mt-1.5" placeholder="KEY=VALUE 줄단위"></textarea>
-          <button type="button" class="tds-btn-muted text-xs mt-1.5" onclick="envParsePaste()">적용</button>
-        </details>
-        <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">키에 TOKEN/SECRET/PASSWORD/KEY 포함 시 🔒시크릿으로 자동 표시(K8s Secret으로 주입, git 미저장).</p>
-        <input type="hidden" name="env_json" id="env-json" value="[]" />
-      </div>
-      <div class="p-3 rounded-2xl flex items-start gap-2" style="background: var(--muted);">
-        <iconify-icon icon="solar:info-circle-bold" width="18" style="color: var(--info);" class="shrink-0 mt-0.5"></iconify-icon>
-        <p class="text-xs" style="color: var(--muted-foreground);">사내 표준(Spring=Gradle+Java 21) 으로 빌드돼요. Dockerfile 은 자동 주입됩니다.</p>
-      </div>
+      {% if not loop.last %}<iconify-icon icon="solar:alt-arrow-right-linear" width="14" style="color: var(--muted-foreground); opacity: 0.4;"></iconify-icon>{% endif %}
+      {% endfor %}
     </div>
-    <div class="px-6 py-4 flex gap-2 justify-end border-t" style="border-color: var(--border);">
-      <button type="button" class="tds-btn-muted text-sm" onclick="closeDialog('newApp')">닫기</button>
-      <button type="submit" class="tds-btn-primary text-sm">
-        <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
-        등록할게요
-      </button>
+
+    <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML">
+    <div class="flex-1 overflow-auto px-6 pb-6">
+
+      <!-- Step 1: 소스 · 프레임워크 -->
+      <div data-wiz-panel="1" class="space-y-4">
+        <div>
+          <label class="text-xs font-bold mb-1.5 block">GitHub 저장소 URL</label>
+          <input name="repo_url" required class="tds-input mono text-sm" placeholder="https://github.com/org/repo" data-wiz-required />
+          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소를 연결해 주세요.</p>
+        </div>
+        <div>
+          <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
+          <div class="grid grid-cols-3 gap-2">
+            <label class="tds-card p-3 cursor-pointer text-center hover-lift border-2" style="border-color: var(--primary); background: var(--primary-soft);">
+              <input type="radio" name="framework" value="spring" class="sr-only" checked />
+              <iconify-icon icon="logos:spring-icon" width="32" class="mx-auto mb-1"></iconify-icon>
+              <div class="text-xs font-bold" style="color: var(--primary-soft-foreground);">Spring Boot</div>
+            </label>
+            <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+              <input type="radio" name="framework" value="nextjs" class="sr-only" />
+              <iconify-icon icon="simple-icons:nextdotjs" width="28" class="mx-auto mb-1"></iconify-icon>
+              <div class="text-xs font-bold">Next.js</div>
+            </label>
+            <label class="tds-card p-3 cursor-pointer text-center hover-lift">
+              <input type="radio" name="framework" value="fastapi" class="sr-only" />
+              <iconify-icon icon="simple-icons:fastapi" width="28" class="mx-auto mb-1" style="color: #009485;"></iconify-icon>
+              <div class="text-xs font-bold">FastAPI</div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: 빌드 설정 -->
+      <div data-wiz-panel="2" class="space-y-4 hidden">
+        <div>
+          <label class="text-xs font-bold mb-1.5 block">브랜치</label>
+          <input name="branch" class="tds-input mono text-sm" value="main" />
+          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">빌드할 Git 브랜치 (기본 main).</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input name="health_path" class="tds-input mono text-sm" value="/actuator/health" /></div>
+          <div><label class="text-xs font-bold mb-1.5 block">Port</label><input name="port" type="number" class="tds-input mono text-sm" value="8080" /></div>
+        </div>
+        <p class="text-xs" style="color: var(--muted-foreground);">Health Path 가 비어 있으면 TCP 포트 체크로 기동을 감지합니다.</p>
+      </div>
+
+      <!-- Step 3: 환경변수 -->
+      <div data-wiz-panel="3" class="space-y-4 hidden">
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-bold block">환경변수 / 시크릿 <span style="color: var(--muted-foreground);">(선택)</span></label>
+            <button type="button" class="text-xs font-bold" style="color: var(--primary);" onclick="envAddRow()">+ 추가</button>
+          </div>
+          <div id="env-rows" class="space-y-2"></div>
+          <details class="mt-2">
+            <summary class="text-xs cursor-pointer" style="color: var(--muted-foreground);">.env 붙여넣기</summary>
+            <textarea id="env-paste" rows="3" class="tds-input mono text-xs mt-1.5" placeholder="KEY=VALUE 줄단위"></textarea>
+            <button type="button" class="tds-btn-muted text-xs mt-1.5" onclick="envParsePaste()">적용</button>
+          </details>
+          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">키에 TOKEN/SECRET/PASSWORD/KEY 포함 시 🔒시크릿으로 자동 표시(K8s Secret 으로 주입, git 미저장).</p>
+          <input type="hidden" name="env_json" id="env-json" value="[]" />
+        </div>
+      </div>
+
+    </div>
+    <div class="px-6 py-4 flex gap-2 justify-between border-t" style="border-color: var(--border);">
+      <button type="button" class="tds-btn-muted text-sm" data-wiz-prev>이전</button>
+      <div class="flex gap-2">
+        <button type="button" class="tds-btn-muted text-sm" onclick="closeDialog('newApp')">닫기</button>
+        <button type="button" class="tds-btn-primary text-sm" data-wiz-next>
+          다음<iconify-icon icon="solar:alt-arrow-right-linear" width="14"></iconify-icon>
+        </button>
+        <button type="submit" class="tds-btn-primary text-sm hidden" data-wiz-submit>
+          <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
+          등록할게요
+        </button>
+      </div>
     </div>
     </form>
   </div>
