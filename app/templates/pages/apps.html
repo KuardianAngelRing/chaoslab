@@ -10,7 +10,7 @@
         GitOps · 배포 관리
       </div>
       <h1 class="text-3xl font-extrabold mb-2">Apps</h1>
-      <p class="text-base" style="color: var(--muted-foreground);">GitHub 저장소 URL 하나만 등록하면 컨테이너 이미지 빌드부터 EKS 배포까지 자동으로 진행됩니다.</p>
+      <p class="text-base" style="color: var(--muted-foreground);">GitHub 저장소 URL을 등록하여 컨테이너 이미지 빌드부터 EKS 배포까지 자동으로 진행해보세요</p>
     </div>
     <button class="tds-btn-primary" onclick="openDialog('newApp')">
       <iconify-icon icon="solar:add-circle-bold" width="18"></iconify-icon>
@@ -156,7 +156,7 @@
         <div>
           <label class="text-xs font-bold mb-1.5 block">GitHub 저장소 URL</label>
           <input name="repo_url" required class="tds-input mono text-sm" placeholder="https://github.com/org/repo" data-wiz-required />
-          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소를 연결해 주세요.</p>
+          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소를 연결해 주세요</p>
         </div>
         <div>
           <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
@@ -184,14 +184,14 @@
       <div data-wiz-panel="2" class="space-y-4 hidden">
         <div>
           <label class="text-xs font-bold mb-1.5 block">브랜치</label>
+          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
           <input name="branch" class="tds-input mono text-sm" value="main" />
-          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">빌드할 Git 브랜치 (기본 main).</p>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input name="health_path" class="tds-input mono text-sm" value="/actuator/health" /></div>
           <div><label class="text-xs font-bold mb-1.5 block">Port</label><input name="port" type="number" class="tds-input mono text-sm" value="8080" /></div>
         </div>
-        <p class="text-xs" style="color: var(--muted-foreground);">Health Path 가 비어 있으면 TCP 포트 체크로 기동을 감지합니다.</p>
+        <p class="text-xs" style="color: var(--muted-foreground);">Health Path 가 비어 있으면 TCP 포트 체크로 기동을 감지해요</p>
       </div>
 
       <!-- Step 3: 환경변수 -->
@@ -201,13 +201,9 @@
             <label class="text-xs font-bold block">환경변수 / 시크릿 <span style="color: var(--muted-foreground);">(선택)</span></label>
             <button type="button" class="text-xs font-bold" style="color: var(--primary);" onclick="envAddRow()">+ 추가</button>
           </div>
-          <div id="env-rows" class="space-y-2"></div>
-          <details class="mt-2">
-            <summary class="text-xs cursor-pointer" style="color: var(--muted-foreground);">.env 붙여넣기</summary>
-            <textarea id="env-paste" rows="3" class="tds-input mono text-xs mt-1.5" placeholder="KEY=VALUE 줄단위"></textarea>
-            <button type="button" class="tds-btn-muted text-xs mt-1.5" onclick="envParsePaste()">적용</button>
-          </details>
-          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">키에 TOKEN/SECRET/PASSWORD/KEY 포함 시 🔒시크릿으로 자동 표시(K8s Secret 으로 주입, git 미저장).</p>
+          <div id="env-rows" class="space-y-2 mb-2"></div>
+          <textarea id="env-paste" class="env-textarea mono text-xs" placeholder="KEY=VALUE 줄단위로 붙여넣어요"></textarea>
+          <button type="button" class="tds-btn-muted text-xs mt-1.5" onclick="envParsePaste()">붙여넣기 적용</button>
           <input type="hidden" name="env_json" id="env-json" value="[]" />
         </div>
       </div>

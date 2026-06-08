@@ -201,10 +201,27 @@
     }
     /* 우측 가장자리 드래그 리사이즈 핸들 (위저드 모달) */
     .dialog-resize-handle {
-      position: absolute; top: 0; right: 0; width: 10px; height: 100%;
-      cursor: ew-resize; z-index: 1; border-radius: 0 1.5rem 1.5rem 0;
+      position: absolute; top: 0; right: 0; width: 14px; height: 100%;
+      cursor: ew-resize; z-index: 2; border-radius: 0 1.5rem 1.5rem 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .dialog-resize-handle::before {  /* 항상 보이는 그립(세로 알약) */
+      content: ""; width: 4px; height: 36px; border-radius: 999px;
+      background: var(--border); transition: background 0.15s;
     }
     .dialog-resize-handle:hover { background: var(--primary-soft); }
+    .dialog-resize-handle:hover::before { background: var(--primary); }
+
+    /* 환경변수 붙여넣기 — 멀티라인(높이 충분 + 우측하단 드래그 리사이즈) */
+    .env-textarea {
+      background: var(--input); color: var(--foreground);
+      border: 1px solid var(--border); border-radius: 1rem;
+      width: 100%; min-height: 8rem; padding: 0.625rem 1rem;
+      resize: vertical; transition: border-color 0.15s;
+    }
+    .env-textarea:focus {
+      outline: 2px solid var(--ring); outline-offset: 2px; border-color: var(--ring);
+    }
 
     .chart-box { position: relative; height: 240px; }
     .chart-box-sm { position: relative; height: 160px; }
