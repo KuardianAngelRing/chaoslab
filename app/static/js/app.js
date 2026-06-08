@@ -36,10 +36,83 @@ document.addEventListener('click', (e) => {
 });
 
 // ============== 다이얼로그 ==============
-function openDialog(name) { const d = document.getElementById(`dialog-${name}`); if (d) d.classList.add('open'); }
+function openDialog(name) {
+  const d = document.getElementById(`dialog-${name}`);
+  if (!d) return;
+  d.classList.add('open');
+  const card = d.querySelector('[data-wizard]');
+  if (card) { wizReset(card); applyDialogWidth(card); }  // 열 때마다 step1 리셋 + 저장 너비 재적용
+}
 function closeDialog(name) { const d = document.getElementById(`dialog-${name}`); if (d) d.classList.remove('open'); }
 document.addEventListener('click', (e) => {
   if (e.target.classList && e.target.classList.contains('dialog-backdrop')) e.target.classList.remove('open');
+});
+
+// ── 등록 모달: 3-step 위저드 (클라이언트 show/hide, submit은 마지막 1회) ──
+const WIZ_STEPS = 3;
+function wizRender(card) {
+  const step = +(card.dataset.wizStep || 1);
+  card.querySelectorAll('[data-wiz-panel]').forEach((p) =>
+    p.classList.toggle('hidden', +p.dataset.wizPanel !== step));
+  card.querySelectorAll('[data-wiz-dot]').forEach((dot) => {
+    const on = +dot.dataset.wizDot <= step;  // 현재·완료 스텝 강조
+    const c = dot.querySelector('[data-wiz-circle]');
+    c.style.background = on ? 'var(--primary)' : 'var(--muted)';
+    c.style.color = on ? 'var(--primary-foreground)' : 'var(--muted-foreground)';
+  });
+  const prev = card.querySelector('[data-wiz-prev]');
+  const next = card.querySelector('[data-wiz-next]');
+  const submit = card.querySelector('[data-wiz-submit]');
+  if (prev) prev.classList.toggle('invisible', step === 1);
+  if (next) next.classList.toggle('hidden', step === WIZ_STEPS);
+  if (submit) submit.classList.toggle('hidden', step !== WIZ_STEPS);
+}
+function wizReset(card) { card.dataset.wizStep = '1'; wizRender(card); }
+function wizGo(card, dir) {
+  let step = +(card.dataset.wizStep || 1);
+  if (dir > 0) {  // 다음 누를 때 현재 패널 필수값 검증
+    const panel = card.querySelector(`[data-wiz-panel="${step}"]`);
+    const bad = [...panel.querySelectorAll('[data-wiz-required]')].find((i) => !i.value.trim());
+    if (bad) { bad.reportValidity ? bad.reportValidity() : bad.focus(); return; }
+  }
+  card.dataset.wizStep = String(Math.min(WIZ_STEPS, Math.max(1, step + dir)));
+  wizRender(card);
+}
+document.addEventListener('click', (e) => {
+  const next = e.target.closest('[data-wiz-next]');
+  const prev = e.target.closest('[data-wiz-prev]');
+  if (next) wizGo(next.closest('[data-wizard]'), +1);
+  else if (prev) wizGo(prev.closest('[data-wizard]'), -1);
+});
+
+// ── 모달 우측 가장자리 드래그 리사이즈 ──
+// 너비는 모듈 변수에 보관 → HTMX 스왑 간에는 유지, 풀 리프레시 시 초기화.
+let _dialogWidth = null;
+function applyDialogWidth(card) {
+  if (_dialogWidth && card) { card.style.maxWidth = 'none'; card.style.width = `${_dialogWidth}px`; }
+}
+document.addEventListener('mousedown', (e) => {
+  const handle = e.target.closest('.dialog-resize-handle');
+  if (!handle) return;
+  e.preventDefault();
+  const card = handle.closest('.dialog-card');
+  const startX = e.clientX;
+  const startW = card.offsetWidth;
+  card.style.maxWidth = 'none';
+  document.body.style.userSelect = 'none';
+  const onMove = (ev) => {
+    // flex-center 보정: 카드가 양쪽으로 커지므로 delta를 2배 적용해 핸들이 커서를 따라오게
+    const w = Math.round(startW + 2 * (ev.clientX - startX));
+    _dialogWidth = Math.max(360, Math.min(window.innerWidth - 32, w));
+    card.style.width = `${_dialogWidth}px`;
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.userSelect = '';
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 });
 
 // ============== Chart.js ==============

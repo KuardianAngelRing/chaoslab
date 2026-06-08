@@ -192,12 +192,19 @@
     }
     .dialog-backdrop.open { display: flex; }
     .dialog-card {
+      position: relative;
       background: var(--card);
       border-radius: 1.5rem;
       max-width: 32rem; width: 100%; margin: 1rem;
       border: 1px solid var(--border);
       max-height: 90vh; display: flex; flex-direction: column;
     }
+    /* 우측 가장자리 드래그 리사이즈 핸들 (위저드 모달) */
+    .dialog-resize-handle {
+      position: absolute; top: 0; right: 0; width: 10px; height: 100%;
+      cursor: ew-resize; z-index: 1; border-radius: 0 1.5rem 1.5rem 0;
+    }
+    .dialog-resize-handle:hover { background: var(--primary-soft); }
 
     .chart-box { position: relative; height: 240px; }
     .chart-box-sm { position: relative; height: 160px; }
