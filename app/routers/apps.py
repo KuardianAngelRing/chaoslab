@@ -52,6 +52,7 @@ def register_app(
     request: Request,
     background: BackgroundTasks,
     repo_url: str = Form(...),
+    branch: str = Form("main"),
     framework: str = Form(...),
     health_path: str = Form("/healthz"),
     port: int = Form(8080),
@@ -64,13 +65,14 @@ def register_app(
     existing = next((a for a in repo.list_all() if a.name == name), None)
     if existing is None:
         repo.create(
-            name=name, repo_url=repo_url, framework=framework,
+            name=name, repo_url=repo_url, branch=branch, framework=framework,
             health_path=health_path, port=port,
             namespace=settings.sut_namespace, status="registering",
             env_vars=env_vars,
         )
     else:
         existing.repo_url = repo_url
+        existing.branch = branch
         existing.framework = framework
         existing.health_path = health_path
         existing.port = port
@@ -120,7 +122,7 @@ def build_app(
 
     if settings.use_real_services:
         from app.services.real.gitops import resolve_head_sha
-        sha = resolve_head_sha(app.repo_url) or "unknown00"
+        sha = resolve_head_sha(app.repo_url, app.branch or "HEAD") or "unknown00"
     else:
         sha = "manual00"
     sha8 = sha[:8]

@@ -75,6 +75,39 @@ def test_register_app_stores_env_vars(client):
         gen.close()
 
 
+def test_register_app_stores_branch(client):
+    resp = client.post("/apps", data={
+        "repo_url": "https://github.com/foo/branch-svc", "branch": "develop",
+        "framework": "spring", "health_path": "/h", "port": "8080",
+    })
+    assert resp.status_code == 200
+    from app.main import app as fastapi_app
+    from app.db.database import get_session
+    gen = fastapi_app.dependency_overrides[get_session]()
+    session = next(gen)
+    try:
+        rec = next(a for a in AppRepository(session).list_all() if a.name == "branch-svc")
+        assert rec.branch == "develop"
+    finally:
+        gen.close()
+
+
+def test_register_app_defaults_branch_main(client):
+    resp = client.post("/apps", data={
+        "repo_url": "https://github.com/foo/nobr-svc", "framework": "spring",
+    })
+    assert resp.status_code == 200
+    from app.main import app as fastapi_app
+    from app.db.database import get_session
+    gen = fastapi_app.dependency_overrides[get_session]()
+    session = next(gen)
+    try:
+        rec = next(a for a in AppRepository(session).list_all() if a.name == "nobr-svc")
+        assert rec.branch == "main"
+    finally:
+        gen.close()
+
+
 def test_reregister_replaces_env_vars(client):
     base = {"repo_url": "https://github.com/foo/up-svc", "framework": "spring",
             "health_path": "/h", "port": "8080"}
