@@ -73,7 +73,7 @@ function wizGo(card, dir) {
   if (dir > 0) {  // 다음 누를 때 현재 패널 필수값 검증
     const panel = card.querySelector(`[data-wiz-panel="${step}"]`);
     const bad = [...panel.querySelectorAll('[data-wiz-required]')].find((i) => !i.value.trim());
-    if (bad) { bad.reportValidity ? bad.reportValidity() : bad.focus(); return; }
+    if (bad) { showFieldTooltip(bad, bad.dataset.wizMsg || '입력해 주세요'); bad.focus(); return; }
   }
   card.dataset.wizStep = String(Math.min(WIZ_STEPS, Math.max(1, step + dir)));
   wizRender(card);
@@ -84,6 +84,25 @@ document.addEventListener('click', (e) => {
   if (next) wizGo(next.closest('[data-wizard]'), +1);
   else if (prev) wizGo(prev.closest('[data-wizard]'), -1);
 });
+
+// ── 필드 검증 툴팁 (브라우저 기본 대신 커스텀, mate 스타일) ──
+function hideFieldTooltip() {
+  const t = document.getElementById('field-tooltip');
+  if (t) t.remove();
+}
+function showFieldTooltip(target, message) {
+  hideFieldTooltip();
+  const tip = document.createElement('div');
+  tip.id = 'field-tooltip';
+  tip.className = 'field-tooltip';
+  tip.textContent = message;
+  document.body.appendChild(tip);
+  const r = target.getBoundingClientRect();  // 모달은 fixed → 스크롤 보정 불필요
+  tip.style.top = `${r.top - tip.offsetHeight - 8}px`;
+  tip.style.left = `${r.left + r.width / 2 - tip.offsetWidth / 2}px`;
+  target.addEventListener('input', hideFieldTooltip, { once: true });
+  setTimeout(hideFieldTooltip, 3000);
+}
 
 // ── 모달 우측 하단 모서리 드래그 리사이즈 (가로·세로) ──
 // 크기는 모듈 변수에 보관 → HTMX 스왑 간에는 유지, 풀 리프레시 시 초기화.
@@ -100,6 +119,8 @@ document.addEventListener('mousedown', (e) => {
   const card = handle.closest('.dialog-card');
   const startX = e.clientX, startY = e.clientY;
   const startW = card.offsetWidth, startH = card.offsetHeight;
+  // 현재 크기를 먼저 px로 고정 → max 해제 시 width:100%로 순간 확대되는 '팍 튀는' 현상 방지
+  card.style.width = `${startW}px`; card.style.height = `${startH}px`;
   card.style.maxWidth = 'none'; card.style.maxHeight = 'none';
   document.body.style.userSelect = 'none';
   const onMove = (ev) => {
@@ -201,68 +222,24 @@ window._charts = {};
 document.addEventListener('DOMContentLoaded', initCharts);
 document.body.addEventListener('htmx:afterSwap', initCharts);
 
-// ── 등록 폼 env/secret 에디터 (vanilla, HTMX 스왑 안전: 위임 + onclick 전역) ──
+// ── 등록 폼 환경변수: KEY=VALUE 텍스트 → env_json (시크릿은 키 이름으로 자동 감지) ──
 const ENV_SECRET_RE = /(TOKEN|SECRET|PASSWORD|KEY)/i;
 
-function escapeAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
-
-function envRowHtml(key = '', value = '', secret = false) {
-  return `<div class="env-row flex items-center gap-2">
-    <input class="env-key tds-input mono text-xs" placeholder="KEY" value="${escapeAttr(key)}" />
-    <input class="env-val tds-input mono text-xs" placeholder="value" value="${escapeAttr(value)}" />
-    <label class="flex items-center gap-1 text-xs whitespace-nowrap" title="시크릿">
-      <input type="checkbox" class="env-secret" ${secret ? 'checked' : ''} />🔒
-    </label>
-    <button type="button" class="tds-btn-muted text-xs px-2" onclick="this.closest('.env-row').remove(); envSync()">✕</button>
-  </div>`;
-}
-
-function envAddRow(key = '', value = '', secret = false) {
-  const box = document.getElementById('env-rows');
-  if (!box) return;
-  box.insertAdjacentHTML('beforeend', envRowHtml(key, value, secret));
-  envSync();
-}
-
-function envParsePaste() {
+function envSyncFromText() {
   const ta = document.getElementById('env-paste');
-  if (!ta) return;
-  ta.value.split('\n').forEach((line) => {
-    const i = line.indexOf('=');
-    if (i < 1) return;
-    const key = line.slice(0, i).trim();
-    const val = line.slice(i + 1).trim();
-    if (key) envAddRow(key, val, ENV_SECRET_RE.test(key));
-  });
-  ta.value = '';
-}
-
-function envSync() {
   const json = document.getElementById('env-json');
-  if (!json) return;
-  const rows = [...document.querySelectorAll('#env-rows .env-row')].map((r) => ({
-    key: r.querySelector('.env-key').value.trim(),
-    value: r.querySelector('.env-val').value,
-    is_secret: r.querySelector('.env-secret').checked,
-  })).filter((e) => e.key);
+  if (!ta || !json) return;
+  const rows = ta.value.split('\n').map((line) => {
+    const i = line.indexOf('=');
+    if (i < 1) return null;
+    const key = line.slice(0, i).trim();
+    if (!key) return null;
+    return { key, value: line.slice(i + 1).trim(), is_secret: ENV_SECRET_RE.test(key) };
+  }).filter(Boolean);
   json.value = JSON.stringify(rows);
 }
-
-// 행 입력 시마다 hidden 동기화 + 키 입력 시 시크릿 자동 감지(미수정 시)
 document.addEventListener('input', (e) => {
-  if (!e.target.closest('#env-rows')) return;
-  if (e.target.classList.contains('env-key')) {
-    const row = e.target.closest('.env-row');
-    const cb = row.querySelector('.env-secret');
-    if (!cb.dataset.touched) cb.checked = ENV_SECRET_RE.test(e.target.value);
-  }
-  envSync();
-});
-document.addEventListener('change', (e) => {
-  if (e.target.classList && e.target.classList.contains('env-secret')) {
-    e.target.dataset.touched = '1';  // 수동 토글 후엔 자동감지 중단
-    envSync();
-  }
+  if (e.target.id === 'env-paste') envSyncFromText();
 });
 
 // ── 빌드 상태 watch (building 카드만 EventSource, 완료 시 목록 새로고침) ──

@@ -125,7 +125,11 @@
 <!-- DIALOG: 새 앱 등록 (3-step 위저드) -->
 <div class="dialog-backdrop" id="dialog-newApp">
   <div class="dialog-card" data-wizard>
-    <div class="dialog-resize-handle" title="드래그하여 크기 조절"></div>
+    <div class="dialog-resize-handle" title="드래그하여 크기 조절">
+      <svg width="20" height="20" viewBox="-2 -2 40 40" fill="none" style="color: var(--primary);">
+        <path d="M 10 34 Q 30 30 34 10" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" />
+      </svg>
+    </div>
     <div class="px-6 pt-6 pb-4 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <span class="tossface">📦</span>
@@ -148,15 +152,15 @@
       {% endfor %}
     </div>
 
-    <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML" class="flex-1 min-h-0 flex flex-col">
-    <div class="flex-1 min-h-0 overflow-auto px-6 pb-6">
+    <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML" novalidate class="flex-1 min-h-0 flex flex-col">
+    <div class="flex-1 min-h-0 overflow-auto px-6 pb-6 flex flex-col">
 
       <!-- Step 1: 소스 · 프레임워크 -->
       <div data-wiz-panel="1" class="space-y-4">
         <div>
           <label class="text-xs font-bold mb-1.5 block">GitHub 저장소 URL</label>
           <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소를 연결해 주세요</p>
-          <input name="repo_url" required class="tds-input mono text-sm" placeholder="https://github.com/org/repo" data-wiz-required />
+          <input name="repo_url" class="tds-input mono text-sm" placeholder="https://github.com/org/repo" data-wiz-required data-wiz-msg="GitHub 저장소 URL을 입력해 주세요" />
         </div>
         <div>
           <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
@@ -189,7 +193,7 @@
         </div>
         <div>
           <label class="text-xs font-bold mb-1.5 block">Health Path</label>
-          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">비우면 TCP 포트 체크로 기동을 감지해요</p>
+          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">컨테이너 상태를 확인할 HTTP 경로예요 (비우면 TCP 포트로 확인해요)</p>
           <input name="health_path" class="tds-input mono text-sm" value="/actuator/health" />
         </div>
         <div>
@@ -199,18 +203,12 @@
         </div>
       </div>
 
-      <!-- Step 3: 환경변수 -->
-      <div data-wiz-panel="3" class="space-y-4 hidden">
-        <div>
-          <div class="flex items-center justify-between mb-1.5">
-            <label class="text-xs font-bold block">환경변수 / 시크릿 <span style="color: var(--muted-foreground);">(선택)</span></label>
-            <button type="button" class="text-xs font-bold" style="color: var(--primary);" onclick="envAddRow()">+ 추가</button>
-          </div>
-          <div id="env-rows" class="space-y-2 mb-2"></div>
-          <textarea id="env-paste" class="env-textarea mono text-xs" placeholder="KEY=VALUE 줄단위로 붙여넣어요"></textarea>
-          <button type="button" class="tds-btn-muted text-xs mt-1.5" onclick="envParsePaste()">붙여넣기 적용</button>
-          <input type="hidden" name="env_json" id="env-json" value="[]" />
-        </div>
+      <!-- Step 3: 환경변수 (단일 입력, 모달 높이에 맞춰 늘어남) -->
+      <div data-wiz-panel="3" class="hidden flex-1 min-h-0 flex flex-col">
+        <label class="text-xs font-bold mb-1.5 block">환경변수 <span style="color: var(--muted-foreground);">(선택)</span></label>
+        <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">KEY=VALUE 형식으로 한 줄에 하나씩 입력해요</p>
+        <textarea id="env-paste" class="env-textarea mono text-xs flex-1" placeholder="DB_HOST=mysql&#10;API_TOKEN=xxxxx"></textarea>
+        <input type="hidden" name="env_json" id="env-json" value="[]" />
       </div>
 
     </div>
