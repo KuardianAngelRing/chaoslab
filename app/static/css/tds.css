@@ -199,18 +199,19 @@
       border: 1px solid var(--border);
       max-height: 90vh; display: flex; flex-direction: column;
     }
-    /* 우측 가장자리 드래그 리사이즈 핸들 (위저드 모달) */
+    /* 우측 하단 모서리 드래그 리사이즈 그립 (위저드 모달) */
+    .dialog-card[data-wizard] { height: 30rem; }  /* 스텝 전환 시 높이 고정(점프 방지) */
     .dialog-resize-handle {
-      position: absolute; top: 0; right: 0; width: 14px; height: 100%;
-      cursor: ew-resize; z-index: 2; border-radius: 0 1.5rem 1.5rem 0;
-      display: flex; align-items: center; justify-content: center;
+      position: absolute; bottom: 6px; right: 6px; width: 16px; height: 16px;
+      cursor: nwse-resize; z-index: 3; opacity: 0.55; transition: opacity 0.15s;
     }
-    .dialog-resize-handle::before {  /* 항상 보이는 그립(세로 알약) */
-      content: ""; width: 4px; height: 36px; border-radius: 999px;
-      background: var(--border); transition: background 0.15s;
+    .dialog-resize-handle::before {  /* 대각 그립 라인 2줄 (textarea 그립과 동일 관용 표현) */
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(135deg,
+        transparent 0 42%, var(--muted-foreground) 42% 52%,
+        transparent 52% 66%, var(--muted-foreground) 66% 76%, transparent 76% 100%);
     }
-    .dialog-resize-handle:hover { background: var(--primary-soft); }
-    .dialog-resize-handle:hover::before { background: var(--primary); }
+    .dialog-resize-handle:hover { opacity: 1; }
 
     /* 환경변수 붙여넣기 — 멀티라인(높이 충분 + 우측하단 드래그 리사이즈) */
     .env-textarea {

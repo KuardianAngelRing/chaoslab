@@ -41,7 +41,7 @@ function openDialog(name) {
   if (!d) return;
   d.classList.add('open');
   const card = d.querySelector('[data-wizard]');
-  if (card) { wizReset(card); applyDialogWidth(card); }  // 열 때마다 step1 리셋 + 저장 너비 재적용
+  if (card) { wizReset(card); applyDialogSize(card); }  // 열 때마다 step1 리셋 + 저장 크기 재적용
 }
 function closeDialog(name) { const d = document.getElementById(`dialog-${name}`); if (d) d.classList.remove('open'); }
 document.addEventListener('click', (e) => {
@@ -85,26 +85,29 @@ document.addEventListener('click', (e) => {
   else if (prev) wizGo(prev.closest('[data-wizard]'), -1);
 });
 
-// ── 모달 우측 가장자리 드래그 리사이즈 ──
-// 너비는 모듈 변수에 보관 → HTMX 스왑 간에는 유지, 풀 리프레시 시 초기화.
-let _dialogWidth = null;
-function applyDialogWidth(card) {
-  if (_dialogWidth && card) { card.style.maxWidth = 'none'; card.style.width = `${_dialogWidth}px`; }
+// ── 모달 우측 하단 모서리 드래그 리사이즈 (가로·세로) ──
+// 크기는 모듈 변수에 보관 → HTMX 스왑 간에는 유지, 풀 리프레시 시 초기화.
+let _dialogW = null, _dialogH = null;
+function applyDialogSize(card) {
+  if (!card) return;
+  if (_dialogW) { card.style.maxWidth = 'none'; card.style.width = `${_dialogW}px`; }
+  if (_dialogH) { card.style.maxHeight = 'none'; card.style.height = `${_dialogH}px`; }
 }
 document.addEventListener('mousedown', (e) => {
   const handle = e.target.closest('.dialog-resize-handle');
   if (!handle) return;
   e.preventDefault();
   const card = handle.closest('.dialog-card');
-  const startX = e.clientX;
-  const startW = card.offsetWidth;
-  card.style.maxWidth = 'none';
+  const startX = e.clientX, startY = e.clientY;
+  const startW = card.offsetWidth, startH = card.offsetHeight;
+  card.style.maxWidth = 'none'; card.style.maxHeight = 'none';
   document.body.style.userSelect = 'none';
   const onMove = (ev) => {
-    // flex-center 보정: 카드가 양쪽으로 커지므로 delta를 2배 적용해 핸들이 커서를 따라오게
-    const w = Math.round(startW + 2 * (ev.clientX - startX));
-    _dialogWidth = Math.max(360, Math.min(window.innerWidth - 32, w));
-    card.style.width = `${_dialogWidth}px`;
+    // flex-center 보정: 카드가 양쪽으로 커지므로 delta를 2배 적용해 모서리가 커서를 따라오게
+    _dialogW = Math.max(360, Math.min(window.innerWidth - 32, Math.round(startW + 2 * (ev.clientX - startX))));
+    _dialogH = Math.max(280, Math.min(window.innerHeight - 32, Math.round(startH + 2 * (ev.clientY - startY))));
+    card.style.width = `${_dialogW}px`;
+    card.style.height = `${_dialogH}px`;
   };
   const onUp = () => {
     document.removeEventListener('mousemove', onMove);

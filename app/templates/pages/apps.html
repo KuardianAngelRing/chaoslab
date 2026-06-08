@@ -125,7 +125,7 @@
 <!-- DIALOG: 새 앱 등록 (3-step 위저드) -->
 <div class="dialog-backdrop" id="dialog-newApp">
   <div class="dialog-card" data-wizard>
-    <div class="dialog-resize-handle" title="드래그하여 너비 조절"></div>
+    <div class="dialog-resize-handle" title="드래그하여 크기 조절"></div>
     <div class="px-6 pt-6 pb-4 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <span class="tossface">📦</span>
@@ -148,15 +148,15 @@
       {% endfor %}
     </div>
 
-    <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML">
-    <div class="flex-1 overflow-auto px-6 pb-6">
+    <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML" class="flex-1 min-h-0 flex flex-col">
+    <div class="flex-1 min-h-0 overflow-auto px-6 pb-6">
 
       <!-- Step 1: 소스 · 프레임워크 -->
       <div data-wiz-panel="1" class="space-y-4">
         <div>
           <label class="text-xs font-bold mb-1.5 block">GitHub 저장소 URL</label>
+          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소를 연결해 주세요</p>
           <input name="repo_url" required class="tds-input mono text-sm" placeholder="https://github.com/org/repo" data-wiz-required />
-          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소를 연결해 주세요</p>
         </div>
         <div>
           <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
@@ -187,11 +187,16 @@
           <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
           <input name="branch" class="tds-input mono text-sm" value="main" />
         </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div><label class="text-xs font-bold mb-1.5 block">Health Path</label><input name="health_path" class="tds-input mono text-sm" value="/actuator/health" /></div>
-          <div><label class="text-xs font-bold mb-1.5 block">Port</label><input name="port" type="number" class="tds-input mono text-sm" value="8080" /></div>
+        <div>
+          <label class="text-xs font-bold mb-1.5 block">Health Path</label>
+          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">비우면 TCP 포트 체크로 기동을 감지해요</p>
+          <input name="health_path" class="tds-input mono text-sm" value="/actuator/health" />
         </div>
-        <p class="text-xs" style="color: var(--muted-foreground);">Health Path 가 비어 있으면 TCP 포트 체크로 기동을 감지해요</p>
+        <div>
+          <label class="text-xs font-bold mb-1.5 block">Port</label>
+          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">컨테이너가 listen 하는 포트예요</p>
+          <input name="port" type="number" class="tds-input mono text-sm" value="8080" />
+        </div>
       </div>
 
       <!-- Step 3: 환경변수 -->
