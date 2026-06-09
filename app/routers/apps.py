@@ -60,6 +60,9 @@ def register_app(
     session: Session = Depends(get_session),
 ):
     name = derive_app_name(repo_url)
+    if settings.use_real_services:
+        from app.services.real.gitops import detect_framework
+        framework = detect_framework(repo_url, branch, settings.github_token)
     env_vars = parse_env_json(env_json)
     repo = AppRepository(session)
     existing = next((a for a in repo.list_all() if a.name == name), None)

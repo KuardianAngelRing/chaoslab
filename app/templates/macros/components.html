@@ -2,6 +2,16 @@
 <span class="tds-badge badge-{{ variant }}">{{ text }}</span>
 {% endmacro %}
 
+{# git URL에서 자동 감지된 프레임워크 키 → 로고 아이콘 (감지 실패는 docker) #}
+{% macro framework_icon(framework, size=28) %}
+{%- set icons = {
+  "spring": "logos:spring-icon", "nextjs": "logos:nextjs-icon",
+  "node": "logos:nodejs-icon", "python": "logos:python",
+  "go": "logos:go", "rust": "logos:rust", "fastapi": "simple-icons:fastapi"
+} -%}
+<iconify-icon icon="{{ icons.get(framework | lower, 'logos:docker-icon') }}" width="{{ size }}"></iconify-icon>
+{%- endmacro %}
+
 {% macro kpi_card(icon, label, value, delta=None, delta_variant="success") %}
 <div class="tds-card p-5 hover-lift">
   <div class="flex items-center justify-between mb-3">

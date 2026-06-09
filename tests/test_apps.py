@@ -75,6 +75,26 @@ def test_register_app_stores_env_vars(client):
         gen.close()
 
 
+def test_classify_framework_by_signature_files():
+    from app.services.real.gitops import classify_framework
+    assert classify_framework({"build.gradle", "src"}) == "spring"
+    assert classify_framework({"pom.xml"}) == "spring"
+    assert classify_framework({"package.json", "next.config.ts"}) == "nextjs"  # next 우선
+    assert classify_framework({"package.json"}) == "node"
+    assert classify_framework({"go.mod", "main.go"}) == "go"
+    assert classify_framework({"requirements.txt"}) == "python"
+    assert classify_framework({"pyproject.toml"}) == "python"
+    assert classify_framework({"Cargo.toml"}) == "rust"
+    assert classify_framework({"README.md"}) == "docker"  # 미인식 fallback
+    assert classify_framework(set()) == "docker"
+
+
+def test_fetch_repo_root_files_bad_url_returns_empty():
+    from app.services.real.gitops import fetch_repo_root_files
+    assert fetch_repo_root_files("not-a-github-url") == set()
+    assert fetch_repo_root_files("https://gitlab.com/x/y") == set()
+
+
 def test_register_app_stores_branch(client):
     resp = client.post("/apps", data={
         "repo_url": "https://github.com/foo/branch-svc", "branch": "develop",

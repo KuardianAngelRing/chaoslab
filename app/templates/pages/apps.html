@@ -1,5 +1,5 @@
 {% extends layout|default("base.html") %}
-{% from "macros/components.html" import app_card, badge %}
+{% from "macros/components.html" import app_card, badge, framework_icon %}
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-8 py-8">
@@ -25,7 +25,7 @@
       <div class="flex items-start justify-between mb-3">
         <div class="flex items-center gap-3">
           <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: var(--muted);">
-            <iconify-icon icon="logos:docker-icon" width="28"></iconify-icon>
+            {{ framework_icon(app.framework) }}
           </div>
           <div>
             <div class="font-extrabold">{{ app.name }}</div>

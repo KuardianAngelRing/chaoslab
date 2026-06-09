@@ -5,8 +5,10 @@ boto3/git 호출은 메서드 안에서만 → stub 모드/테스트는 의존�
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
+import urllib.request
 from pathlib import Path
 
 
@@ -161,3 +163,46 @@ def resolve_head_sha(repo_url: str, branch: str = "HEAD") -> str:
         check=True, capture_output=True, text=True,
     ).stdout.strip()
     return out.split()[0] if out else ""
+
+
+# 저장소 루트 시그니처 파일 → 프레임워크 키 (카드 아이콘 매핑). 우선순위 = 위에서부터.
+def classify_framework(filenames: set[str]) -> str:
+    """루트 파일 목록으로 프레임워크 추정 (단일 앱 레포·루트만 검사). 미인식은 'docker'."""
+    f = {n.lower() for n in filenames}
+    if {"next.config.js", "next.config.ts", "next.config.mjs"} & f:
+        return "nextjs"
+    if {"build.gradle", "build.gradle.kts", "pom.xml"} & f:
+        return "spring"
+    if "go.mod" in f:
+        return "go"
+    if "cargo.toml" in f:
+        return "rust"
+    if "package.json" in f:
+        return "node"
+    if {"requirements.txt", "pyproject.toml", "pipfile"} & f:
+        return "python"
+    return "docker"
+
+
+def fetch_repo_root_files(repo_url: str, branch: str = "", token: str = "") -> set[str]:
+    """GitHub Contents API로 저장소 루트 파일명 집합. 실패(404/403/네트워크)는 빈 집합."""
+    m = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url.strip())
+    if not m:
+        return set()
+    ref = branch or "HEAD"
+    url = f"https://api.github.com/repos/{m.group(1)}/{m.group(2)}/contents?ref={ref}"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "chaoslab"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        return {item["name"] for item in data if item.get("type") == "file"}
+    except (OSError, ValueError, KeyError, TypeError):
+        return set()
+
+
+def detect_framework(repo_url: str, branch: str = "", token: str = "") -> str:
+    """git URL → 프레임워크 키 (네트워크 실패/미인식 시 'docker')."""
+    return classify_framework(fetch_repo_root_files(repo_url, branch, token))
