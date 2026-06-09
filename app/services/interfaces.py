@@ -31,7 +31,7 @@ class BuilderService(Protocol):
 
 
 class GitOpsService(Protocol):
-    def bootstrap_app(self, name: str, repo_url: str, framework: str,
+    def bootstrap_app(self, name: str, repo_url: str, port: int, health: str,
                       env: dict[str, str], secret_name: str) -> None:
         """ECR 레포 + ArgoCD Application + values.yaml(평문 env·secretName 포함) 커밋/푸시."""
         ...

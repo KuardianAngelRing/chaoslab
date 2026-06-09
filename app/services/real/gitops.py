@@ -9,14 +9,6 @@ import re
 import subprocess
 from pathlib import Path
 
-# 프레임워크별 기본 (port, healthPath) — values.yaml 생성에 사용.
-FRAMEWORK_DEFAULTS: dict[str, tuple[int, str]] = {
-    "fastapi": (8080, "/healthz"),
-    "spring": (8080, "/actuator/health"),
-    "nextjs": (3000, "/"),
-    "go": (8080, "/healthz"),
-}
-
 
 def derive_app_name(repo_url: str) -> str:
     """GitHub URL 마지막 세그먼트 → 소문자 kebab 앱 이름."""
@@ -43,10 +35,6 @@ def _yaml_quote(v: str) -> str:
     """env 값을 안전한 더블쿼트 스칼라로 (콜론·슬래시·특수문자 포함 대비)."""
     s = str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
     return f'"{s}"'
-
-
-def framework_defaults(framework: str) -> tuple[int, str]:
-    return FRAMEWORK_DEFAULTS.get(framework.lower(), (8080, "/healthz"))
 
 
 def render_application_yaml(name: str, iac_repo_url: str, sut_namespace: str) -> str:
@@ -134,10 +122,9 @@ class RealGitOps:
                 raise
 
     # ── GitOpsService 인터페이스 ──
-    def bootstrap_app(self, name: str, repo_url: str, framework: str,
+    def bootstrap_app(self, name: str, repo_url: str, port: int, health: str,
                       env: dict[str, str], secret_name: str) -> None:
         self._ensure_ecr_repo(name)
-        port, health = framework_defaults(framework)
         placeholder = f"{self.s.ecr_registry}/{name}:placeholder"
 
         app_file = self.repo / "argocd" / "apps" / f"{name}.yaml"

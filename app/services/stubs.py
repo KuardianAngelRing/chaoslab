@@ -11,7 +11,7 @@ class StubBuilder:
 
 
 class StubGitOps:
-    def bootstrap_app(self, name: str, repo_url: str, framework: str,
+    def bootstrap_app(self, name: str, repo_url: str, port: int, health: str,
                       env: dict, secret_name: str) -> None:
         return None
 

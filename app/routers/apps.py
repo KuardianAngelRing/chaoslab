@@ -53,7 +53,7 @@ def register_app(
     background: BackgroundTasks,
     repo_url: str = Form(...),
     branch: str = Form("main"),
-    framework: str = Form(...),
+    framework: str = Form("docker"),  # Dockerfile 전제 — 빌드 워크플로 파라미터용 기본값
     health_path: str = Form("/healthz"),
     port: int = Form(8080),
     env_json: str = Form("[]"),
@@ -97,7 +97,7 @@ def _bootstrap(name: str) -> None:
         try:
             if secret:
                 k8s.apply_env_secret(app.namespace, secret_name, secret)
-            gitops.bootstrap_app(name, app.repo_url, app.framework, plain, secret_name)
+            gitops.bootstrap_app(name, app.repo_url, app.port, app.health_path, plain, secret_name)
             status = "ready"
         except Exception:
             logger.exception("bootstrap failed for app %s", name)

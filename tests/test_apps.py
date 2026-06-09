@@ -130,8 +130,8 @@ class _SpyGitOps:
     def __init__(self):
         self.calls = []
 
-    def bootstrap_app(self, name, repo_url, framework, env, secret_name):
-        self.calls.append((name, repo_url, framework, env, secret_name))
+    def bootstrap_app(self, name, repo_url, port, health, env, secret_name):
+        self.calls.append((name, repo_url, port, health, env, secret_name))
 
     def update_image_tag(self, name, image):
         pass
@@ -156,7 +156,8 @@ def _engine_with_app(env_vars):
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     s = Session()
-    s.add(App(name="demo", repo_url="https://github.com/x/demo", framework="spring",
+    s.add(App(name="demo", repo_url="https://github.com/x/demo", framework="docker",
+              health_path="/actuator/health", port=9000,
               namespace="sut", env_vars=env_vars, status="registering"))
     s.commit()
     s.close()
@@ -176,8 +177,9 @@ def test_bootstrap_success_splits_and_sets_ready(monkeypatch):
     _bootstrap("demo")
 
     assert k8s.calls == [("sut", "demo-env", {"JWT": "x"})]
+    # bootstrap는 framework가 아니라 사용자가 입력한 port/health를 values.yaml에 써야 함
     assert gitops.calls == [
-        ("demo", "https://github.com/x/demo", "spring", {"DB_HOST": "mysql"}, "demo-env")
+        ("demo", "https://github.com/x/demo", 9000, "/actuator/health", {"DB_HOST": "mysql"}, "demo-env")
     ]
     s = Session()
     app = next(a for a in AppRepository(s).list_all() if a.name == "demo")
