@@ -19,7 +19,7 @@
     <div class="font-bold">{{ app.name }}</div>
     {{ badge(app.status, "success" if app.status == "healthy" else "warning") }}
   </div>
-  <div class="text-xs mono" style="color: var(--muted-foreground);">{{ app.framework }} · {{ app.namespace }}</div>
+  <div class="text-xs mono" style="color: var(--muted-foreground);">{{ app.namespace }}</div>
   <div class="text-xs mono mt-1" style="color: var(--muted-foreground);">{{ app.current_sha[:8] }}</div>
 </div>
 {% endmacro %}

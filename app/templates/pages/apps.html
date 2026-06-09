@@ -24,26 +24,12 @@
     <div class="tds-card p-5 hover-lift">
       <div class="flex items-start justify-between mb-3">
         <div class="flex items-center gap-3">
-          {% if app.framework == "spring" or app.framework == "Spring Boot" or app.framework == "Spring Cloud Gateway" %}
-          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: #6db33f;">
-            <iconify-icon icon="logos:spring-icon" width="28"></iconify-icon>
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: var(--muted);">
+            <iconify-icon icon="logos:docker-icon" width="28"></iconify-icon>
           </div>
-          {% elif app.framework == "nextjs" or app.framework == "Next.js" %}
-          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: #000;">
-            <iconify-icon icon="simple-icons:nextdotjs" width="22" style="color: white;"></iconify-icon>
-          </div>
-          {% elif app.framework == "fastapi" or app.framework == "FastAPI" %}
-          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: #009485;">
-            <iconify-icon icon="simple-icons:fastapi" width="24" style="color: white;"></iconify-icon>
-          </div>
-          {% else %}
-          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: var(--primary-soft);">
-            <iconify-icon icon="solar:server-square-bold" width="24" style="color: var(--primary);"></iconify-icon>
-          </div>
-          {% endif %}
           <div>
             <div class="font-extrabold">{{ app.name }}</div>
-            <div class="text-xs" style="color: var(--muted-foreground);">{{ app.framework }}</div>
+            <div class="text-xs mono" style="color: var(--muted-foreground);">{{ app.branch }}</div>
           </div>
         </div>
         <button class="p-1.5 rounded-lg hover:bg-muted"><iconify-icon icon="solar:menu-dots-bold" width="16"></iconify-icon></button>
@@ -142,7 +128,7 @@
 
     <!-- 스텝 인디케이터 -->
     <div class="px-6 pb-4 flex items-center gap-2 text-xs font-bold" data-wiz-indicator>
-      {% set steps = [("1", "소스 · 프레임워크"), ("2", "빌드 설정"), ("3", "환경변수")] %}
+      {% set steps = [("1", "소스"), ("2", "빌드 설정"), ("3", "환경변수")] %}
       {% for num, label in steps %}
       <div class="flex items-center gap-2" data-wiz-dot="{{ num }}">
         <span class="w-6 h-6 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span>
@@ -155,7 +141,7 @@
     <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML" novalidate class="flex-1 min-h-0 flex flex-col">
     <div class="flex-1 min-h-0 overflow-auto px-6 pb-6 flex flex-col">
 
-      <!-- Step 1: 소스 · 프레임워크 -->
+      <!-- Step 1: 소스 -->
       <div data-wiz-panel="1" class="space-y-4">
         <div>
           <label class="text-xs font-bold mb-1.5 block">GitHub 저장소 URL</label>
@@ -163,34 +149,14 @@
           <input name="repo_url" class="tds-input mono text-sm" placeholder="https://github.com/org/repo" data-wiz-required data-wiz-msg="GitHub 저장소 URL을 입력해 주세요" />
         </div>
         <div>
-          <label class="text-xs font-bold mb-1.5 block">프레임워크</label>
-          <div class="grid grid-cols-3 gap-2">
-            <label class="tds-card p-3 cursor-pointer text-center hover-lift border-2" style="border-color: var(--primary); background: var(--primary-soft);">
-              <input type="radio" name="framework" value="spring" class="sr-only" checked />
-              <iconify-icon icon="logos:spring-icon" width="32" class="mx-auto mb-1"></iconify-icon>
-              <div class="text-xs font-bold" style="color: var(--primary-soft-foreground);">Spring Boot</div>
-            </label>
-            <label class="tds-card p-3 cursor-pointer text-center hover-lift">
-              <input type="radio" name="framework" value="nextjs" class="sr-only" />
-              <iconify-icon icon="simple-icons:nextdotjs" width="28" class="mx-auto mb-1"></iconify-icon>
-              <div class="text-xs font-bold">Next.js</div>
-            </label>
-            <label class="tds-card p-3 cursor-pointer text-center hover-lift">
-              <input type="radio" name="framework" value="fastapi" class="sr-only" />
-              <iconify-icon icon="simple-icons:fastapi" width="28" class="mx-auto mb-1" style="color: #009485;"></iconify-icon>
-              <div class="text-xs font-bold">FastAPI</div>
-            </label>
-          </div>
+          <label class="text-xs font-bold mb-1.5 block">브랜치</label>
+          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
+          <input name="branch" class="tds-input mono text-sm" value="main" />
         </div>
       </div>
 
       <!-- Step 2: 빌드 설정 -->
       <div data-wiz-panel="2" class="space-y-4 hidden">
-        <div>
-          <label class="text-xs font-bold mb-1.5 block">브랜치</label>
-          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
-          <input name="branch" class="tds-input mono text-sm" value="main" />
-        </div>
         <div>
           <label class="text-xs font-bold mb-1.5 block">Health Path</label>
           <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">컨테이너 상태를 확인할 HTTP 경로예요 (비우면 TCP 포트로 확인해요)</p>
