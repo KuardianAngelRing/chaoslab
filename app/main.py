@@ -14,12 +14,14 @@ from app.routers import apps, builds, pages, stream
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    session = SessionLocal()
-    try:
-        if not AppRepository(session).list_all():
-            seed_data(session)
-    finally:
-        session.close()
+    # mock seed는 stub 모드 전용 — real 모드는 실제 등록 데이터만 표시
+    if not settings.use_real_services:
+        session = SessionLocal()
+        try:
+            if not AppRepository(session).list_all():
+                seed_data(session)
+        finally:
+            session.close()
     yield
 
 

@@ -18,6 +18,14 @@
 
   <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
+    {% if not apps %}
+    <div class="tds-card p-12 text-center col-span-full">
+      <span class="tossface-lg">📦</span>
+      <div class="font-extrabold text-lg mt-2">아직 등록된 앱이 없어요</div>
+      <p class="text-sm mt-1" style="color: var(--muted-foreground);">우측 상단 "새 앱 등록"으로 GitHub 저장소를 연결해 보세요</p>
+    </div>
+    {% endif %}
+
     {% for app in apps %}
     {% set building = app.status == "building" %}
     {% set stopped = app.status == "stopped" %}
