@@ -15,7 +15,7 @@ from app.config import settings
 from app.db.database import SessionLocal, get_session
 from app.db.models import Experiment
 from app.db.repositories import AppRepository, ExperimentRepository
-from app.deps import get_app_count, make_chaos
+from app.deps import make_chaos
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
 
@@ -80,7 +80,11 @@ def create_experiment(
 
 
 def _watch_experiment(exp_id: int) -> None:
-    """duration 경과·회복 확인 → CRD 삭제 + completed. 오류/상한 → failed."""
+    """duration 경과·회복 확인 → CRD 삭제 + completed. 오류/상한 → failed.
+
+    매 폴링마다 DB의 status를 재조회 — stop으로 이미 중지된 경우(CRD는
+    stop 라우트가 이미 삭제 처리함) 즉시 return하고 재삭제·완료 처리는 생략.
+    """
     chaos = make_chaos()
     s = SessionLocal()
     try:
@@ -90,13 +94,23 @@ def _watch_experiment(exp_id: int) -> None:
         chaos_type, crd_name = exp.chaos_type, exp.crd_name
         duration = int(exp.params.get("duration_s") or _PODKILL_GRACE_S)
 
+        def _still_running() -> bool:
+            # identity map 캐시 무시하고 최신 DB status를 읽기 위해 expire 후 재조회
+            s.expire_all()
+            cur = s.get(Experiment, exp_id)
+            return bool(cur and cur.status == "running")
+
         status = "completed"
         try:
             waited = 0
             while waited < duration:          # 장애 지속 구간
+                if not _still_running():
+                    return
                 time.sleep(_POLL_S)
                 waited += _POLL_S
             for _ in range(_RECOVER_CAP):     # 회복 대기 (최대 5분)
+                if not _still_running():
+                    return
                 if chaos.phase(chaos_type, crd_name) == "recovered":
                     break
                 time.sleep(_POLL_S)

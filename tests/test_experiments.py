@@ -1,6 +1,6 @@
 """실험 생성/중지/워처/SSE — stub 모드(기본)."""
-import json
 import logging
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -150,6 +150,98 @@ def test_watch_experiment_failure_marks_failed(monkeypatch, caplog):
     assert ExperimentRepository(s).get(exp_id).status == "failed"
     s.close()
     assert "experiment watch failed" in caplog.text
+
+
+def test_watch_skips_when_already_stopped(monkeypatch):
+    """이미 stopped인 실험 → 워처가 즉시 종료하고 CRD 재삭제·완료 처리를 하지 않음."""
+    from app.routers.experiments import _watch_experiment
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        status="stopped", crd_name="exp-demo-abc")
+    exp_id = exp.id
+    s.close()
+
+    class _SpyChaos:
+        def __init__(self):
+            self.phase_calls = 0
+            self.delete_calls = 0
+        def phase(self, chaos_type, crd_name):
+            self.phase_calls += 1
+            return "recovered"
+        def delete(self, chaos_type, crd_name):
+            self.delete_calls += 1
+
+    spy = _SpyChaos()
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: spy)
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+
+    _watch_experiment(exp_id)
+
+    assert spy.phase_calls == 0
+    assert spy.delete_calls == 0  # CRD 재삭제 없음 — stop이 이미 처리함
+    s = Session()
+    exp = ExperimentRepository(s).get(exp_id)
+    assert exp.status == "stopped"
+    assert exp.finished_at is None
+    s.close()
+
+
+def test_watch_early_exits_when_stopped_midway(monkeypatch):
+    """워처 실행 도중 stop이 처리되면(status running→stopped) 즉시 종료하고 덮어쓰지 않음."""
+    from app.routers.experiments import _watch_experiment
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="NetworkChaos",
+        params={"action": "delay", "latency_ms": 200, "duration_s": 30},
+        status="running", crd_name="exp-demo-abc")
+    exp_id = exp.id
+    s.close()
+
+    class _SpyChaos:
+        def __init__(self):
+            self.phase_calls = 0
+            self.delete_calls = 0
+        def phase(self, chaos_type, crd_name):
+            self.phase_calls += 1
+            return "recovered"
+        def delete(self, chaos_type, crd_name):
+            self.delete_calls += 1
+
+    spy = _SpyChaos()
+    sleep_calls = []
+
+    def _fake_sleep(n):
+        sleep_calls.append(n)
+        if len(sleep_calls) == 1:
+            # 첫 폴링 직후 stop 라우트가 처리한 것처럼 DB 상태를 바꿈
+            stop_s = Session()
+            stopped_exp = ExperimentRepository(stop_s).get(exp_id)
+            stopped_exp.status = "stopped"
+            stopped_exp.finished_at = datetime.now(timezone.utc)
+            stop_s.commit()
+            stop_s.close()
+
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: spy)
+    monkeypatch.setattr("app.routers.experiments.time.sleep", _fake_sleep)
+
+    _watch_experiment(exp_id)
+
+    assert sleep_calls  # 최소 한 번은 폴링했음
+    assert spy.phase_calls == 0  # 회복 폴링 루프까지 도달하지 않음
+    assert spy.delete_calls == 0  # CRD 재삭제 없음 — stop이 이미 처리함
+    s = Session()
+    exp = ExperimentRepository(s).get(exp_id)
+    assert exp.status == "stopped"
+    s.close()
 
 
 def _engine_with_experiment(status: str):
