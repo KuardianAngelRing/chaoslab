@@ -89,7 +89,9 @@ def experiments_page(
     app_count: int = Depends(get_app_count),
 ):
     exps = ExperimentRepository(session).list_all()
-    ctx = {"active_nav": "experiments", "app_count": app_count, "experiments": exps}
+    apps = AppRepository(session).list_all()
+    ctx = {"active_nav": "experiments", "app_count": app_count,
+           "experiments": exps, "apps": apps}
     return render_page(request, "pages/experiments.html", ctx)
 
 

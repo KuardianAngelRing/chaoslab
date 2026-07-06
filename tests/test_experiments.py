@@ -36,6 +36,16 @@ def _reset_sse_app_status():
         pass
 
 
+def test_experiments_page_shows_real_apps_and_no_mock(client):
+    resp = client.get("/experiments")
+    assert resp.status_code == 200
+    assert "online-boutique" in resp.text      # 실제 등록 앱이 select에
+    assert "spring-boot-demo" not in resp.text  # 하드코딩 mock 제거
+    assert "총 12건" not in resp.text           # 가짜 카운트 제거
+    assert 'name="chaos_type"' in resp.text
+    assert "실험 중지" in resp.text              # running 행 중지 버튼 (seed 1건 running)
+
+
 def test_create_experiment_success(client):
     # seed의 online-boutique(1)에는 running 실험이 이미 있어(409 대상) → 실험 없는 앱(2)으로 검증
     resp = client.post("/experiments", data={

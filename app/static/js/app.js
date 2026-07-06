@@ -264,6 +264,49 @@ function watchBuilds() {
 document.addEventListener('DOMContentLoaded', watchBuilds);
 document.body.addEventListener('htmx:afterSwap', watchBuilds);
 
+// ── 새 실험 다이얼로그: 카오스 타입 선택 → 해당 파라미터 패널만 표시 ──
+function chaosTypeSync(root) {
+  const checked = root.querySelector('input[name="chaos_type"]:checked');
+  if (!checked) return;
+  root.querySelectorAll('.chaos-type-card').forEach((card) => {
+    const on = card.querySelector('input').checked;
+    card.style.borderColor = on ? 'var(--primary)' : '';
+    card.style.background = on ? 'var(--primary-soft)' : '';
+  });
+  root.querySelectorAll('[data-chaos-fields]').forEach((panel) => {
+    const on = panel.dataset.chaosFields === checked.value;
+    panel.classList.toggle('hidden', !on);
+    panel.querySelectorAll('input').forEach((i) => { i.disabled = !on; });
+  });
+}
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'chaos_type') chaosTypeSync(e.target.closest('form'));
+});
+document.body.addEventListener('htmx:afterSwap', () => {
+  document.querySelectorAll('#dialog-newExperiment form').forEach(chaosTypeSync);
+});
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('#dialog-newExperiment form').forEach(chaosTypeSync);
+});
+
+// ── 실험 상태 watch (running 행만 EventSource, 종료 시 목록 새로고침) ──
+const _expStreams = new Set();
+function watchExperiments() {
+  document.querySelectorAll('[data-running-exp]').forEach((el) => {
+    const id = el.dataset.runningExp;
+    if (_expStreams.has(id)) return;
+    _expStreams.add(id);
+    const es = new EventSource(`/experiments/${id}/stream`);
+    es.addEventListener('completed', () => {
+      es.close(); _expStreams.delete(id);
+      if (window.htmx) htmx.ajax('GET', '/experiments', { target: '#main-content', swap: 'innerHTML' });
+    });
+    es.onerror = () => { es.close(); _expStreams.delete(id); };
+  });
+}
+document.addEventListener('DOMContentLoaded', watchExperiments);
+document.body.addEventListener('htmx:afterSwap', watchExperiments);
+
 // ── 사이드바 active 동기화 (HTMX 부분 스왑은 사이드바 DOM을 안 바꿈) ──
 function syncSidebarActive() {
   const path = location.pathname;
