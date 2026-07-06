@@ -29,6 +29,10 @@ class BuilderService(Protocol):
         """빌드 상태 문자열 반환 (pending/running/succeeded/failed)."""
         ...
 
+    def stop_build(self, workflow_name: str) -> None:
+        """진행 중인 빌드 워크플로 중지."""
+        ...
+
 
 class GitOpsService(Protocol):
     def bootstrap_app(self, name: str, repo_url: str, port: int, health: str,
@@ -38,6 +42,10 @@ class GitOpsService(Protocol):
 
     def update_image_tag(self, name: str, image: str) -> None:
         """gitops values.yaml 의 image를 갱신하고 커밋/푸시 (= 배포 트리거)."""
+        ...
+
+    def set_replicas(self, name: str, replicas: int) -> None:
+        """gitops values.yaml 의 replicas 변경 커밋/푸시 (0=배포 중지, 1=재개)."""
         ...
 
 
@@ -64,6 +72,10 @@ class LokiService(Protocol):
 class K8sService(Protocol):
     def apply_env_secret(self, namespace: str, name: str, data: dict[str, str]) -> None:
         """앱 시크릿을 K8s Secret(Opaque)으로 생성/갱신 (git에 안 들어감)."""
+        ...
+
+    def restart_deployment(self, namespace: str, name: str) -> None:
+        """Deployment rollout restart — 파드 재기동(재배포)."""
         ...
 
     def nodes(self) -> list[dict]:

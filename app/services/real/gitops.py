@@ -82,6 +82,17 @@ def render_values_yaml(name: str, image: str, port: int, health_path: str,
     return "\n".join(lines) + "\n"
 
 
+def set_replicas_in_values(values_text: str, replicas: int) -> str:
+    """values.yaml 의 'replicas:' 줄만 교체 (다른 줄 보존)."""
+    return re.sub(
+        r"^replicas:.*$",
+        f"replicas: {replicas}",
+        values_text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+
 def set_image_in_values(values_text: str, new_image: str) -> str:
     """values.yaml 의 'image:' 줄만 새 이미지로 교체 (다른 줄 보존)."""
     return re.sub(
@@ -149,6 +160,13 @@ class RealGitOps:
         values_file.write_text(set_image_in_values(values_file.read_text(), image))
         self._git("add", f"gitops/apps/{name}/values.yaml")
         self._git("commit", "-m", f"deploy: {name} → {image.rsplit(':', 1)[-1]}")
+        self._push()
+
+    def set_replicas(self, name: str, replicas: int) -> None:
+        values_file = self.repo / "gitops" / "apps" / name / "values.yaml"
+        values_file.write_text(set_replicas_in_values(values_file.read_text(), replicas))
+        self._git("add", f"gitops/apps/{name}/values.yaml")
+        self._git("commit", "-m", f"chore: {name} replicas → {replicas}")
         self._push()
 
 

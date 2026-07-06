@@ -37,3 +37,21 @@ class RealK8s:
                 api.replace_namespaced_secret(name=name, namespace=namespace, body=body)
             else:
                 raise
+
+    def restart_deployment(self, namespace: str, name: str) -> None:
+        """kubectl rollout restart와 동일 — 파드 템플릿 annotation 갱신으로 재기동."""
+        from datetime import datetime, timezone
+
+        from kubernetes import client, config  # lazy
+
+        try:
+            config.load_incluster_config()
+        except config.ConfigException:
+            config.load_kube_config()
+        client.AppsV1Api().patch_namespaced_deployment(
+            name=name, namespace=namespace,
+            body={"spec": {"template": {"metadata": {"annotations": {
+                "kubectl.kubernetes.io/restartedAt":
+                    datetime.now(timezone.utc).isoformat()
+            }}}}},
+        )

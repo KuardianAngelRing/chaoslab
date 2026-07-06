@@ -72,3 +72,11 @@ class RealBuilder:
         )
         phase = (obj.get("status") or {}).get("phase", "")
         return _PHASE_MAP.get(phase, "pending")
+
+    def stop_build(self, workflow_name: str) -> None:
+        """spec.shutdown=Stop 패치 → Argo가 실행 중 스텝을 정리하며 워크플로 종료(Failed)."""
+        self._api().patch_namespaced_custom_object(
+            group=_GROUP, version=_VERSION, namespace=self.s.argo_namespace,
+            plural=_PLURAL, name=workflow_name,
+            body={"spec": {"shutdown": "Stop"}},
+        )

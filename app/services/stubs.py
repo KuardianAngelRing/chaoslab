@@ -9,6 +9,9 @@ class StubBuilder:
     def build_status(self, workflow_name: str) -> str:
         return "succeeded"
 
+    def stop_build(self, workflow_name: str) -> None:
+        return None
+
 
 class StubGitOps:
     def bootstrap_app(self, name: str, repo_url: str, port: int, health: str,
@@ -16,6 +19,9 @@ class StubGitOps:
         return None
 
     def update_image_tag(self, name: str, image: str) -> None:
+        return None
+
+    def set_replicas(self, name: str, replicas: int) -> None:
         return None
 
 
@@ -39,6 +45,9 @@ class StubLoki:
 
 class StubK8s:
     def apply_env_secret(self, namespace: str, name: str, data: dict) -> None:
+        return None
+
+    def restart_deployment(self, namespace: str, name: str) -> None:
         return None
 
     def nodes(self) -> list[dict]:

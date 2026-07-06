@@ -38,11 +38,38 @@ def parse_env_json(raw: str) -> list[dict]:
     return out
 
 
+def _ago(dt: datetime | None) -> str | None:
+    """상대시각 한국어 표기 (방금 전 / N분 전 / N시간 전 / N일 전)."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    s = (datetime.now(timezone.utc) - dt).total_seconds()
+    if s < 60:
+        return "방금 전"
+    if s < 3600:
+        return f"{int(s // 60)}분 전"
+    if s < 86400:
+        return f"{int(s // 3600)}시간 전"
+    return f"{int(s // 86400)}일 전"
+
+
+def deploy_ago_map(apps) -> dict[int, str | None]:
+    """앱별 마지막 배포(성공 빌드) 상대시각. 성공 빌드가 없으면 None."""
+    out: dict[int, str | None] = {}
+    for a in apps:
+        done = [b.finished_at or b.started_at
+                for b in a.builds if b.status == "succeeded" and b.image_tag]
+        out[a.id] = _ago(max(done)) if done else None
+    return out
+
+
 def _apps_response(request: Request, session: Session):
     apps = AppRepository(session).list_all()
     return render_page(
         request, "pages/apps.html",
-        {"active_nav": "apps", "app_count": len(apps), "apps": apps},
+        {"active_nav": "apps", "app_count": len(apps), "apps": apps,
+         "deployed_ago": deploy_ago_map(apps)},
     )
 
 
@@ -144,6 +171,87 @@ def build_app(
     session.commit()
 
     background.add_task(_watch_build, build.id, app.id, app.name, image, wf)
+    return _apps_response(request, session)
+
+
+# ── 카드 드롭다운 액션: 재배포 / 배포 중지 / 빌드 중지 ────────────
+def _restart_task(namespace: str, name: str) -> None:
+    try:
+        make_k8s().restart_deployment(namespace, name)
+    except Exception:
+        logger.exception("redeploy(restart) failed for app %s", name)
+
+
+def _set_replicas_task(name: str, replicas: int) -> None:
+    try:
+        make_gitops().set_replicas(name, replicas)
+    except Exception:
+        logger.exception("set_replicas(%s) failed for app %s", replicas, name)
+
+
+def _stop_build_task(workflow_name: str) -> None:
+    try:
+        make_builder().stop_build(workflow_name)
+    except Exception:
+        logger.exception("stop_build failed for workflow %s", workflow_name)
+
+
+@router.post("/apps/{app_id}/redeploy")
+def redeploy_app(
+    app_id: int,
+    request: Request,
+    background: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
+    """중지 상태면 replicas 1로 재개(GitOps), 아니면 rollout restart(파드 재기동)."""
+    app = AppRepository(session).get(app_id)
+    if app is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    if app.status == "building":
+        raise HTTPException(status_code=409, detail="build in progress")
+    if app.status == "stopped":
+        app.status = "ready"
+        session.commit()
+        background.add_task(_set_replicas_task, app.name, 1)
+    else:
+        background.add_task(_restart_task, app.namespace, app.name)
+    return _apps_response(request, session)
+
+
+@router.post("/apps/{app_id}/deploy/stop")
+def stop_deploy(
+    app_id: int,
+    request: Request,
+    background: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
+    """배포 중지 = gitops replicas 0 커밋 (selfHeal이라 직접 scale은 되돌려짐)."""
+    app = AppRepository(session).get(app_id)
+    if app is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    if app.status != "stopped":
+        app.status = "stopped"
+        session.commit()
+        background.add_task(_set_replicas_task, app.name, 0)
+    return _apps_response(request, session)
+
+
+@router.post("/apps/{app_id}/build/stop")
+def stop_build(
+    app_id: int,
+    request: Request,
+    background: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
+    """진행 중 워크플로 shutdown → _watch_build가 terminal(Failed)을 보고 상태 정리."""
+    app = AppRepository(session).get(app_id)
+    if app is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    active = [b for b in BuildRepository(session).list_for_app(app_id)
+              if b.status in ("pending", "running") and b.workflow_name]
+    if not active:
+        raise HTTPException(status_code=409, detail="no build in progress")
+    background.add_task(_stop_build_task, active[0].workflow_name)
     return _apps_response(request, session)
 
 

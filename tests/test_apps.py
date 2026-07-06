@@ -221,3 +221,50 @@ def test_bootstrap_failure_logs_and_sets_register_failed(monkeypatch, caplog):
     s.close()
     assert app.status == "register-failed"
     assert "bootstrap failed" in caplog.text
+
+
+def test_ago_korean_relative_time():
+    from datetime import datetime, timedelta, timezone
+
+    from app.routers.apps import _ago
+
+    now = datetime.now(timezone.utc)
+    assert _ago(None) is None
+    assert _ago(now) == "방금 전"
+    assert _ago(now - timedelta(minutes=5)) == "5분 전"
+    assert _ago(now - timedelta(hours=3)) == "3시간 전"
+    # naive datetime도 UTC로 간주
+    assert _ago((now - timedelta(days=2)).replace(tzinfo=None)) == "2일 전"
+
+
+def test_apps_page_shows_deploy_ago(client):
+    resp = client.get("/apps")
+    assert resp.status_code == 200
+    assert "마지막 배포 커밋" in resp.text
+    # seed 성공 빌드(방금 seed됨) → 상대시각 표기
+    assert "방금 전" in resp.text or "분 전" in resp.text
+
+
+def test_set_replicas_in_values_only_touches_replicas_line():
+    from app.services.real.gitops import render_values_yaml, set_replicas_in_values
+
+    y = render_values_yaml("demo", "img:abc", 8080, "/healthz", {"A": "1"}, "demo-env")
+    out = set_replicas_in_values(y, 0)
+    assert "replicas: 0" in out and "replicas: 1" not in out
+    assert "image: img:abc" in out and 'A: "1"' in out  # 다른 줄 보존
+
+
+def test_stop_deploy_marks_stopped_then_redeploy_resumes(client):
+    r = client.post("/apps/1/deploy/stop")
+    assert r.status_code == 200
+    assert "중지됨" in r.text
+
+    r = client.post("/apps/1/redeploy")
+    assert r.status_code == 200
+    assert "중지됨" not in r.text
+
+
+def test_stop_build_conflicts_without_active_build(client):
+    # seed 빌드는 succeeded뿐 → 진행 중 빌드 없음
+    assert client.post("/apps/1/build/stop").status_code == 409
+    assert client.post("/apps/99999/build/stop").status_code == 404
