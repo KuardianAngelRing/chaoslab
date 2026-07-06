@@ -71,14 +71,22 @@ def test_dashboard_merged_experiment_card(client):
     assert resp.status_code == 200
     # 합친 카드의 실데이터(seed)
     assert "online-boutique" in resp.text and "NetworkChaos" in resp.text
+    # 상태 배지 (seed 실험은 running)
+    assert "진행중" in resp.text
+    # 주입 파라미터 줄은 미노출
+    assert "주입 설정" not in resp.text
+    # R 지수 추이 차트 제목 + 회차 라벨 (data-labels는 tojson이 \u 이스케이프)
+    assert "R 지수 추이" in resp.text
+    assert "기준선" in resp.text  # 지표 타일의 기준선 표기
+    assert "\\uac1c\\uc120 1\\ud68c\\ucc28" in resp.text  # 차트 라벨 "개선 1회차"
+    # AI 진단은 iteration이 있으면 진행중이어도 표시 (seed는 3회차 보유)
+    assert "AI Agent 진단" in resp.text
     assert "관찰" in resp.text and "가설" in resp.text and "권고" in resp.text
     assert "timeout 1s→3s" in resp.text  # seed recommender_output
     # 제거 대상
     assert "자동 적용" not in resp.text       # Phase 3 버튼 삭제
-    assert "주입 중" not in resp.text          # 상태 배지 삭제
+    assert "분 경과" not in resp.text          # 경과 배지 → 상태 배지로 대체
     assert "Iteration 4 / 10" not in resp.text  # iteration 카운트 줄 삭제
-    # 정직성 라벨
-    assert "Phase 3" in resp.text  # AI 진단 배지
 
 
 def test_dashboard_hero_and_kpi_honest(client):
@@ -97,15 +105,6 @@ def test_dashboard_hero_and_kpi_honest(client):
     assert "$0.04" in resp.text
     # '새 실험 시작' 버튼 제거
     assert "새 실험 시작" not in resp.text
-
-
-def test_elapsed_min_handles_naive_datetime():
-    from datetime import datetime, timezone, timedelta
-    from app.routers.pages import _elapsed_min
-
-    assert _elapsed_min(None) is None
-    past = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=12)
-    assert _elapsed_min(past) >= 11
 
 
 def test_dashboard_system_status_real(client):

@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -16,15 +14,6 @@ from app.rendering import render_page
 from app.services import interfaces
 
 router = APIRouter()
-
-
-def _elapsed_min(started_at) -> int | None:
-    """started_at(naive/aware 모두) ~ 현재의 경과 분. None이면 None."""
-    if started_at is None:
-        return None
-    if started_at.tzinfo is None:
-        started_at = started_at.replace(tzinfo=timezone.utc)
-    return int((datetime.now(timezone.utc) - started_at).total_seconds() // 60)
 
 
 def _recent_activity(session, limit: int = 5) -> list[dict]:
@@ -54,23 +43,22 @@ def dashboard(
 ):
     exps = ExperimentRepository(session).list_all()
     running = [e for e in exps if e.status == "running"]
-    running_exp = running[0] if running else None
-    iterations = sorted(running_exp.iterations, key=lambda i: i.iteration) if running_exp else []
+    latest_exp = max(exps, key=lambda e: e.started_at) if exps else None
+    iterations = sorted(latest_exp.iterations, key=lambda i: i.iteration) if latest_exp else []
     latest_iter = iterations[-1] if iterations else None
-    r_series = ([running_exp.baseline_r] + [it.r_index for it in iterations]) if running_exp else []
-    r_labels = (["기준"] + [f"iter {it.iteration}" for it in iterations]) if running_exp else []
+    r_series = ([latest_exp.baseline_r] + [it.r_index for it in iterations]) if latest_exp else []
+    r_labels = (["기준선"] + [f"개선 {it.iteration}회차" for it in iterations]) if latest_exp else []
     llm_cost_total = sum(it.llm_cost_usd for e in exps for it in e.iterations)
     latest_r = next((f"{e.r_index:.2f}" for e in exps if e.r_index is not None), "—")
     ctx = {
         "active_nav": "dashboard",
         "app_count": app_count,
         "running_count": len(running),
-        "running_exp": running_exp,
+        "latest_exp": latest_exp,
         "iterations": iterations,
         "latest_iter": latest_iter,
         "r_series": r_series,
         "r_labels": r_labels,
-        "elapsed_min": _elapsed_min(running_exp.started_at) if running_exp else None,
         "llm_cost_total": llm_cost_total,
         "latest_r": latest_r,
         "components": k8s.components(),
@@ -86,8 +74,11 @@ def apps_page(
     session: Session = Depends(get_session),
     app_count: int = Depends(get_app_count),
 ):
+    from app.routers.apps import deploy_ago_map
+
     apps = AppRepository(session).list_all()
-    ctx = {"active_nav": "apps", "app_count": app_count, "apps": apps}
+    ctx = {"active_nav": "apps", "app_count": app_count, "apps": apps,
+           "deployed_ago": deploy_ago_map(apps)}
     return render_page(request, "pages/apps.html", ctx)
 
 
