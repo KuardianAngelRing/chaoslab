@@ -50,11 +50,15 @@ class GitOpsService(Protocol):
 
 
 class ChaosService(Protocol):
-    def inject(self, namespace: str, chaos_type: str, params: dict) -> str:
-        """Chaos CRD 주입. CRD 이름 반환."""
+    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
+        """Chaos CRD 생성 (selector = app 라벨). CRD 이름 반환."""
         ...
 
-    def delete(self, crd_name: str) -> None:
+    def phase(self, chaos_type: str, crd_name: str) -> str:
+        """injecting | running | recovered (CRD conditions 기반)."""
+        ...
+
+    def delete(self, chaos_type: str, crd_name: str) -> None:
         ...
 
 

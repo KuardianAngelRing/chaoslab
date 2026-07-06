@@ -26,10 +26,13 @@ class StubGitOps:
 
 
 class StubChaos:
-    def inject(self, namespace: str, chaos_type: str, params: dict) -> str:
-        return f"{chaos_type.lower()}-{namespace}-stub"
+    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
+        return f"exp-{app_name}-stub"
 
-    def delete(self, crd_name: str) -> None:
+    def phase(self, chaos_type: str, crd_name: str) -> str:
+        return "recovered"
+
+    def delete(self, chaos_type: str, crd_name: str) -> None:
         return None
 
 

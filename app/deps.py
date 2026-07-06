@@ -32,6 +32,13 @@ def make_k8s() -> interfaces.K8sService:
     return stubs.StubK8s()
 
 
+def make_chaos() -> interfaces.ChaosService:
+    if settings.use_real_services:
+        from app.services.real.chaos import RealChaos  # lazy: k8s SDK
+        return RealChaos(settings)
+    return stubs.StubChaos()
+
+
 def get_builder() -> interfaces.BuilderService:
     return make_builder()
 
@@ -41,7 +48,7 @@ def get_gitops() -> interfaces.GitOpsService:
 
 
 def get_chaos() -> interfaces.ChaosService:
-    return stubs.StubChaos()
+    return make_chaos()
 
 
 def get_prometheus() -> interfaces.PrometheusService:

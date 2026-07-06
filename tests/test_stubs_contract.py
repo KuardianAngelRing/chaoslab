@@ -10,7 +10,7 @@ def test_stubs_satisfy_protocols():
     assert b.build_status("wf") in {"pending", "running", "succeeded", "failed"}
 
     c: interfaces.ChaosService = stubs.StubChaos()
-    assert isinstance(c.inject("ns", "NetworkChaos", {"delay": "1s"}), str)
+    assert isinstance(c.inject("ns", "app", "NetworkChaos", {"delay": "1s"}), str)
 
     p: interfaces.PrometheusService = stubs.StubPrometheus()
     red = p.red_metrics("ns")
@@ -24,3 +24,20 @@ def test_stubs_satisfy_protocols():
 def test_stub_loki_returns_lines():
     lines = stubs.StubLoki().tail("ns", limit=5)
     assert isinstance(lines, list) and len(lines) == 5
+
+
+def test_stub_chaos_matches_new_protocol():
+    from app.services.stubs import StubChaos
+
+    stub = StubChaos()
+    name = stub.inject("sut", "demo", "NetworkChaos", {"action": "delay"})
+    assert isinstance(name, str) and name
+    assert stub.phase("NetworkChaos", name) == "recovered"
+    assert stub.delete("NetworkChaos", name) is None
+
+
+def test_make_chaos_returns_stub_in_stub_mode():
+    from app.deps import make_chaos
+    from app.services.stubs import StubChaos
+
+    assert isinstance(make_chaos(), StubChaos)
