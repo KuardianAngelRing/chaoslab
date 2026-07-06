@@ -1,10 +1,15 @@
-// ============== 유저 메뉴 ==============
+// ============== 카드 ... 드롭다운 메뉴 (이벤트 위임) ==============
 document.addEventListener('click', (e) => {
-  const btn = document.getElementById('userMenuBtn');
-  const menu = document.getElementById('userMenu');
-  if (!menu) return;
-  if (btn && btn.contains(e.target)) { e.stopPropagation(); menu.classList.toggle('open'); return; }
-  if (!menu.contains(e.target)) menu.classList.remove('open');
+  const btn = e.target.closest && e.target.closest('[data-card-menu-btn]');
+  const openMenus = document.querySelectorAll('[data-card-menu].open');
+  if (btn) {
+    const menu = btn.parentElement.querySelector('[data-card-menu]');
+    openMenus.forEach((m) => { if (m !== menu) m.classList.remove('open'); });
+    if (menu) menu.classList.toggle('open');
+    return;
+  }
+  // 메뉴 항목 클릭 포함, 그 외 어디를 눌러도 닫힘
+  openMenus.forEach((m) => m.classList.remove('open'));
 });
 
 // ============== 테마 토글 ==============
@@ -16,9 +21,7 @@ document.addEventListener('click', (e) => {
   const next = cur === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   const icon = document.getElementById('themeIcon');
-  const label = document.getElementById('themeLabel');
   if (icon) icon.setAttribute('icon', next === 'dark' ? 'solar:sun-bold' : 'solar:moon-bold');
-  if (label) label.textContent = next === 'dark' ? '라이트 모드' : '다크 모드';
   Object.values(window._charts || {}).forEach(c => c && c.update());
 });
 

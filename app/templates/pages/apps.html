@@ -3,25 +3,25 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-8 py-8">
-  <div class="flex items-end justify-between mb-2">
-    <div>
-      <div class="text-sm font-semibold mb-2 flex items-center gap-2" style="color: var(--primary);">
-        <iconify-icon icon="solar:server-square-bold" width="14"></iconify-icon>
-        GitOps · 배포 관리
-      </div>
-      <h1 class="text-3xl font-extrabold mb-2">Apps</h1>
-      <p class="text-base" style="color: var(--muted-foreground);">GitHub 저장소 URL을 등록하여 컨테이너 이미지 빌드부터 EKS 배포까지 자동으로 진행해보세요</p>
+  <!-- Hero (제목 행 h-11 고정 + hero-line — 전 페이지 동일 배치) -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between h-11">
+      <h1 class="text-3xl font-extrabold flex items-center gap-4"><iconify-icon icon="solar:server-square-bold" width="30" style="color: var(--primary); margin-top: 4px;"></iconify-icon>Apps</h1>
+      <button class="tds-btn-primary" onclick="openDialog('newApp')">
+        <iconify-icon icon="solar:add-circle-bold" width="18"></iconify-icon>
+        새 앱 등록
+      </button>
     </div>
-    <button class="tds-btn-primary" onclick="openDialog('newApp')">
-      <iconify-icon icon="solar:add-circle-bold" width="18"></iconify-icon>
-      새 앱 등록
-    </button>
+    <div class="hero-line mt-4"></div>
+    <p class="text-base mt-4" style="color: var(--muted-foreground);">GitHub 저장소 URL을 등록하여 컨테이너 이미지 빌드부터 EKS 배포까지 자동으로 진행해보세요</p>
   </div>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-6">
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
     {% for app in apps %}
-    <div class="tds-card p-5 hover-lift">
+    {% set building = app.status == "building" %}
+    {% set stopped = app.status == "stopped" %}
+    <div class="tds-card p-6 hover-lift flex flex-col min-h-[250px]">
       <div class="flex items-start justify-between mb-3">
         <div class="flex items-center gap-3">
           <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background: var(--muted);">
@@ -32,24 +32,66 @@
             <div class="text-xs mono" style="color: var(--muted-foreground);">{{ app.branch }}</div>
           </div>
         </div>
-        <button class="p-1.5 rounded-lg hover:bg-muted"><iconify-icon icon="solar:menu-dots-bold" width="16"></iconify-icon></button>
+        <div class="relative">
+          <button class="p-1.5 rounded-lg hover:bg-muted" data-card-menu-btn title="더보기">
+            <iconify-icon icon="solar:menu-dots-bold" width="16"></iconify-icon>
+          </button>
+          <div class="card-menu" data-card-menu>
+            <button class="card-menu-item" hx-get="/apps/{{ app.id }}/builds" hx-target="#builds-body" hx-swap="innerHTML" onclick="openDialog('builds')">
+              <iconify-icon icon="solar:history-bold" width="16"></iconify-icon>
+              빌드 히스토리
+            </button>
+            <button class="card-menu-item" hx-get="/apps/{{ app.id }}/deploys" hx-target="#deploys-body" hx-swap="innerHTML" onclick="openDialog('deploys')">
+              <iconify-icon icon="solar:rocket-bold" width="16"></iconify-icon>
+              배포 히스토리
+            </button>
+            {% if app.repo_url %}
+            <a class="card-menu-item" href="{{ app.repo_url }}" target="_blank">
+              <iconify-icon icon="mdi:github" width="16"></iconify-icon>
+              GitHub 저장소
+            </a>
+            {% endif %}
+            <hr class="card-menu-sep" />
+            <button class="card-menu-item" {% if building %}disabled{% endif %}
+                    hx-post="/apps/{{ app.id }}/build" hx-target="#main-content" hx-swap="innerHTML">
+              <iconify-icon icon="solar:refresh-square-bold" width="16"></iconify-icon>
+              재빌드
+            </button>
+            <button class="card-menu-item" {% if building %}disabled{% endif %}
+                    hx-post="/apps/{{ app.id }}/redeploy" hx-target="#main-content" hx-swap="innerHTML">
+              <iconify-icon icon="solar:restart-bold" width="16"></iconify-icon>
+              재배포
+            </button>
+            <hr class="card-menu-sep" />
+            <button class="card-menu-item item-danger" {% if not building %}disabled{% endif %}
+                    hx-post="/apps/{{ app.id }}/build/stop" hx-target="#main-content" hx-swap="innerHTML">
+              <iconify-icon icon="solar:stop-circle-bold" width="16"></iconify-icon>
+              빌드 중지
+            </button>
+            <button class="card-menu-item item-danger" {% if building or stopped %}disabled{% endif %}
+                    hx-post="/apps/{{ app.id }}/deploy/stop" hx-target="#main-content" hx-swap="innerHTML">
+              <iconify-icon icon="solar:stop-circle-bold" width="16"></iconify-icon>
+              배포 중지
+            </button>
+          </div>
+        </div>
       </div>
+      {% if building %}
       <div class="flex items-center gap-2 mb-3">
-        {% if app.status == "healthy" %}
-        <span class="tds-badge badge-success"><span class="w-1.5 h-1.5 rounded-full" style="background: var(--success);"></span>배포됨</span>
-        {% elif app.status == "degraded" %}
-        <span class="tds-badge badge-warning"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--warning);"></span>카오스 진행 중</span>
-        {% elif app.status == "building" %}
         <span class="tds-badge badge-info" data-building-app="{{ app.id }}"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--info);"></span>빌드 중</span>
-        {% else %}
-        <span class="tds-badge badge-muted">{{ app.status }}</span>
-        {% endif %}
-        <span class="tds-badge badge-info">{{ app.namespace }}</span>
       </div>
-      <div class="space-y-2 text-xs mb-4">
+      {% elif stopped %}
+      <div class="flex items-center gap-2 mb-3">
+        <span class="tds-badge badge-muted"><span class="w-1.5 h-1.5 rounded-full" style="background: var(--muted-foreground);"></span>중지됨</span>
+      </div>
+      {% endif %}
+      <div class="space-y-2 text-xs my-auto py-2">
         <div class="flex items-center justify-between">
-          <span style="color: var(--muted-foreground);">마지막 배포</span>
-          <code class="mono font-bold">{{ app.current_sha[:8] }}</code>
+          <span style="color: var(--muted-foreground);">마지막 배포 커밋</span>
+          <span>
+            <code class="mono font-bold">{{ app.current_sha[:8] }}</code>
+            {% if deployed_ago and deployed_ago.get(app.id) %}<span style="color: var(--muted-foreground);"> · {{ deployed_ago.get(app.id) }}</span>{% endif %}
+          </span>
         </div>
         {% if app.repo_url %}
         <div class="flex items-center justify-between">
@@ -59,52 +101,50 @@
         {% endif %}
       </div>
       <div class="flex gap-2">
-        <button class="flex-1 tds-btn-primary text-xs h-9" hx-post="/apps/{{ app.id }}/build" hx-target="#main-content" hx-swap="innerHTML">
+        <button class="flex-1 tds-btn-primary text-xs h-9 justify-center" hx-post="/apps/{{ app.id }}/build" hx-target="#main-content" hx-swap="innerHTML">
           <iconify-icon icon="solar:cloud-upload-bold" width="14"></iconify-icon>
           빌드
         </button>
-        <button class="flex-1 tds-btn-muted text-xs h-9" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+        <button class="flex-1 tds-btn-muted text-xs h-9 justify-center" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
           <iconify-icon icon="solar:bug-bold" width="14"></iconify-icon>
           카오스 실험
         </button>
-        <button class="tds-btn-muted text-xs h-9 px-3" hx-get="/apps/{{ app.id }}/builds" hx-target="#builds-body" hx-swap="innerHTML" onclick="openDialog('builds')" title="빌드 이력">
-          <iconify-icon icon="solar:history-bold" width="14"></iconify-icon>
-        </button>
-        {% if app.repo_url %}
-        <a href="{{ app.repo_url }}" target="_blank" class="tds-btn-muted text-xs h-9 px-3 flex items-center justify-center"><iconify-icon icon="mdi:github" width="14"></iconify-icon></a>
-        {% else %}
-        <button class="tds-btn-muted text-xs h-9 px-3"><iconify-icon icon="mdi:github" width="14"></iconify-icon></button>
-        {% endif %}
       </div>
     </div>
     {% endfor %}
 
-    <button class="tds-card p-5 flex flex-col items-center justify-center gap-3 border-dashed cursor-pointer min-h-[260px]" onclick="openDialog('newApp')">
-      <div class="w-14 h-14 rounded-2xl flex items-center justify-center" style="background: var(--primary-soft);">
-        <iconify-icon icon="solar:add-circle-bold" width="28" style="color: var(--primary);"></iconify-icon>
-      </div>
-      <div class="text-center">
-        <div class="font-extrabold mb-1">새 앱 등록</div>
-        <div class="text-xs" style="color: var(--muted-foreground);">GitHub 저장소 연결로 시작</div>
-      </div>
-    </button>
-
   </div>
 </div>
 
-<!-- DIALOG: 빌드 이력 (공유, HTMX가 본문 채움) -->
+<!-- DIALOG: 빌드 히스토리 (공유, HTMX가 본문 채움) -->
 <div class="dialog-backdrop" id="dialog-builds">
   <div class="dialog-card">
     <div class="px-6 pt-6 pb-2 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <span class="tossface">📜</span>
-        <h2 class="font-extrabold text-xl">빌드 이력</h2>
+        <h2 class="font-extrabold text-xl">빌드 히스토리</h2>
       </div>
       <button class="p-1 rounded-lg hover:bg-muted" onclick="closeDialog('builds')">
         <iconify-icon icon="lucide:x" width="20"></iconify-icon>
       </button>
     </div>
     <div id="builds-body" class="flex-1 overflow-auto"></div>
+  </div>
+</div>
+
+<!-- DIALOG: 배포 히스토리 (공유, HTMX가 본문 채움) -->
+<div class="dialog-backdrop" id="dialog-deploys">
+  <div class="dialog-card">
+    <div class="px-6 pt-6 pb-2 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="tossface">🚀</span>
+        <h2 class="font-extrabold text-xl">배포 히스토리</h2>
+      </div>
+      <button class="p-1 rounded-lg hover:bg-muted" onclick="closeDialog('deploys')">
+        <iconify-icon icon="lucide:x" width="20"></iconify-icon>
+      </button>
+    </div>
+    <div id="deploys-body" class="flex-1 overflow-auto"></div>
   </div>
 </div>
 
@@ -116,10 +156,10 @@
         <path d="M 10 34 Q 30 30 34 10" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" />
       </svg>
     </div>
-    <div class="px-6 pt-6 pb-4 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <span class="tossface">📦</span>
-        <h2 class="font-extrabold text-xl">새 앱 등록</h2>
+    <div class="px-8 pt-7 pb-4 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <span class="tossface-lg">📦</span>
+        <h2 class="font-extrabold text-2xl">새 앱 등록</h2>
       </div>
       <button class="p-1 rounded-lg hover:bg-muted" onclick="closeDialog('newApp')">
         <iconify-icon icon="lucide:x" width="20"></iconify-icon>
@@ -127,11 +167,11 @@
     </div>
 
     <!-- 스텝 인디케이터 -->
-    <div class="px-6 pb-4 flex items-center gap-2 text-xs font-bold" data-wiz-indicator>
+    <div class="px-8 pb-4 flex items-center justify-center gap-2.5 text-sm font-bold" data-wiz-indicator>
       {% set steps = [("1", "소스"), ("2", "빌드 설정"), ("3", "환경변수")] %}
       {% for num, label in steps %}
       <div class="flex items-center gap-2" data-wiz-dot="{{ num }}">
-        <span class="w-6 h-6 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span>
+        <span class="w-7 h-7 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span>
         <span class="hidden sm:inline" data-wiz-label>{{ label }}</span>
       </div>
       {% if not loop.last %}<iconify-icon icon="solar:alt-arrow-right-linear" width="14" style="color: var(--muted-foreground); opacity: 0.4;"></iconify-icon>{% endif %}
@@ -139,53 +179,53 @@
     </div>
 
     <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML" novalidate class="flex-1 min-h-0 flex flex-col">
-    <div class="flex-1 min-h-0 overflow-auto px-6 pb-6 flex flex-col">
+    <div class="flex-1 min-h-0 overflow-auto px-8 pb-8 flex flex-col">
 
       <!-- Step 1: 소스 -->
-      <div data-wiz-panel="1" class="space-y-4">
+      <div data-wiz-panel="1" class="flex-1 flex flex-col justify-center space-y-6">
         <div>
-          <label class="text-xs font-bold mb-1.5 block">GitHub 저장소 URL</label>
-          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소를 연결해 주세요</p>
-          <input name="repo_url" class="tds-input mono text-sm" placeholder="https://github.com/org/repo" data-wiz-required data-wiz-msg="GitHub 저장소 URL을 입력해 주세요" />
+          <label class="text-base font-bold mb-2 block">GitHub 저장소 URL</label>
+          <p class="text-sm mb-2" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소 URL을 입력해주세요</p>
+          <input name="repo_url" class="tds-input mono text-base" placeholder="https://github.com/org/repo" data-wiz-required data-wiz-msg="GitHub 저장소 URL을 입력해 주세요" />
         </div>
         <div>
-          <label class="text-xs font-bold mb-1.5 block">브랜치</label>
-          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
-          <input name="branch" class="tds-input mono text-sm" value="main" />
+          <label class="text-base font-bold mb-2 block">브랜치</label>
+          <p class="text-sm mb-2" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
+          <input name="branch" class="tds-input mono text-base" value="main" />
         </div>
       </div>
 
       <!-- Step 2: 빌드 설정 -->
-      <div data-wiz-panel="2" class="space-y-4 hidden">
+      <div data-wiz-panel="2" class="hidden flex-1 flex flex-col justify-center space-y-6">
         <div>
-          <label class="text-xs font-bold mb-1.5 block">Health Path</label>
-          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">컨테이너 상태를 확인할 HTTP 경로예요 (비우면 TCP 포트로 확인해요)</p>
-          <input name="health_path" class="tds-input mono text-sm" value="/actuator/health" />
+          <label class="text-base font-bold mb-2 block">Health Path</label>
+          <p class="text-sm mb-2" style="color: var(--muted-foreground);">컨테이너 상태를 확인할 HTTP 경로예요 (비우면 TCP 포트로 확인해요)</p>
+          <input name="health_path" class="tds-input mono text-base" value="/actuator/health" />
         </div>
         <div>
-          <label class="text-xs font-bold mb-1.5 block">Port</label>
-          <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">컨테이너가 listen 하는 포트예요</p>
-          <input name="port" type="number" class="tds-input mono text-sm" value="8080" />
+          <label class="text-base font-bold mb-2 block">Port</label>
+          <p class="text-sm mb-2" style="color: var(--muted-foreground);">컨테이너가 listen 하는 포트예요</p>
+          <input name="port" type="number" class="tds-input mono text-base" value="8080" />
         </div>
       </div>
 
       <!-- Step 3: 환경변수 (단일 입력, 모달 높이에 맞춰 늘어남) -->
       <div data-wiz-panel="3" class="hidden flex-1 min-h-0 flex flex-col">
-        <label class="text-xs font-bold mb-1.5 block">환경변수 <span style="color: var(--muted-foreground);">(선택)</span></label>
-        <p class="text-xs mb-1.5" style="color: var(--muted-foreground);">KEY=VALUE 형식으로 한 줄에 하나씩 입력해요</p>
-        <textarea id="env-paste" class="env-textarea mono text-xs flex-1" placeholder="DB_HOST=mysql&#10;API_TOKEN=xxxxx"></textarea>
+        <label class="text-base font-bold mb-2 block">환경변수 <span style="color: var(--muted-foreground);">(선택)</span></label>
+        <p class="text-sm mb-2" style="color: var(--muted-foreground);">KEY=VALUE 형식으로 한 줄에 하나씩 입력해요</p>
+        <textarea id="env-paste" class="env-textarea mono text-sm flex-1" placeholder="DB_HOST=mysql&#10;API_TOKEN=xxxxx"></textarea>
         <input type="hidden" name="env_json" id="env-json" value="[]" />
       </div>
 
     </div>
-    <div class="px-6 py-4 flex gap-2 justify-between border-t" style="border-color: var(--border);">
-      <button type="button" class="tds-btn-muted text-sm" data-wiz-prev>이전</button>
+    <div class="px-8 py-4 flex gap-2 justify-between border-t" style="border-color: var(--border);">
+      <button type="button" class="tds-btn-muted text-base" data-wiz-prev>이전</button>
       <div class="flex gap-2">
-        <button type="button" class="tds-btn-muted text-sm" onclick="closeDialog('newApp')">닫기</button>
-        <button type="button" class="tds-btn-primary text-sm" data-wiz-next>
+        <button type="button" class="tds-btn-muted text-base" onclick="closeDialog('newApp')">닫기</button>
+        <button type="button" class="tds-btn-primary text-base" data-wiz-next>
           다음<iconify-icon icon="solar:alt-arrow-right-linear" width="14"></iconify-icon>
         </button>
-        <button type="submit" class="tds-btn-primary text-sm hidden" data-wiz-submit>
+        <button type="submit" class="tds-btn-primary text-base hidden" data-wiz-submit>
           <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
           등록할게요
         </button>

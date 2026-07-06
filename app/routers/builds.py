@@ -38,6 +38,22 @@ def build_history(app_id: int, request: Request, session: Session = Depends(get_
     )
 
 
+@router.get("/apps/{app_id}/deploys")
+def deploy_history(app_id: int, request: Request, session: Session = Depends(get_session)):
+    """배포 히스토리 = 이미지 태그가 생긴 성공 빌드 목록 (최신순)."""
+    from app.routers.apps import _ago
+
+    app = AppRepository(session).get(app_id)
+    if app is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    deploys = [b for b in BuildRepository(session).list_for_app(app_id)
+               if b.status == "succeeded" and b.image_tag]
+    return templates.TemplateResponse(
+        request, "partials/_deploy_history.html",
+        {"app": app, "deploys": deploys, "ago": _ago},
+    )
+
+
 @router.get("/apps/{app_id}/builds/stream")
 async def build_stream(app_id: int, request: Request):
     """App.status를 폴링해 빌드 완료(=building 벗어남) 시 completed 발송·종료.

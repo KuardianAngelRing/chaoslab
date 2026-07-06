@@ -124,3 +124,17 @@ def test_build_stream_completed_after_transition(monkeypatch, client):
     assert "event: status" in body          # building 동안 status 이벤트
     assert "event: completed" in body        # healthy 전이 시 completed
     assert '"status": "healthy"' in body
+
+
+def test_deploy_history_lists_succeeded_builds(client):
+    # seed: boutique(1)에 succeeded 빌드 1건
+    r = client.get("/apps/1/deploys")
+    assert r.status_code == 200
+    assert "배포됨" in r.text and "a1b2c3d4" in r.text
+
+
+def test_deploy_history_empty_and_404(client):
+    r = client.get("/apps/2/deploys")
+    assert r.status_code == 200
+    assert "배포 히스토리가 없어요" in r.text
+    assert client.get("/apps/99999/deploys").status_code == 404

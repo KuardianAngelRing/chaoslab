@@ -1,0 +1,24 @@
+<div class="px-6 pb-6 pt-2">
+  <div class="text-sm font-bold mb-3" style="color: var(--muted-foreground);">{{ app.name }}</div>
+  {% if deploys %}
+  <div class="space-y-2">
+    {% for d in deploys %}
+    <div class="tds-card p-3 flex items-center justify-between text-xs">
+      <div class="flex items-center gap-3">
+        <span class="tds-badge badge-success"><span class="w-1.5 h-1.5 rounded-full" style="background: var(--success);"></span>배포됨</span>
+        <code class="mono font-bold">{{ d.image_tag[:8] }}</code>
+      </div>
+      <div class="flex items-center gap-4" style="color: var(--muted-foreground);">
+        <span>{{ (d.finished_at or d.started_at).strftime("%m/%d %H:%M") }}</span>
+        <span>{{ ago(d.finished_at or d.started_at) }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-10" style="color: var(--muted-foreground);">
+    <div class="text-3xl mb-2">🚀</div>
+    <div class="text-sm">배포 히스토리가 없어요. 빌드가 성공하면 여기 기록돼요</div>
+  </div>
+  {% endif %}
+</div>
