@@ -106,6 +106,8 @@
             <span class="tds-badge badge-success">성공</span>
             {% elif exp.status == "failed" %}
             <span class="tds-badge badge-danger">목표 미달</span>
+            {% elif exp.status == "stopped" %}
+            <span class="tds-badge badge-muted">중지됨</span>
             {% else %}
             <span class="tds-badge badge-info">{{ exp.status }}</span>
             {% endif %}

@@ -1,0 +1,183 @@
+"""실험 생성/중지/워처/SSE — stub 모드(기본)."""
+import json
+import logging
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.database import Base
+from app.db.models import App, Experiment
+from app.db.repositories import AppRepository, ExperimentRepository
+
+
+@pytest.fixture(autouse=True)
+def _reset_sse_app_status():
+    """sse_starlette의 AppStatus.should_exit_event를 테스트 간 초기화.
+
+    TestClient가 테스트마다 새 이벤트 루프를 생성하므로, 이전 루프에서
+    만들어진 anyio.Event는 재사용 시 RuntimeError(bound to different loop)를
+    일으킨다. 각 테스트 전·후 None으로 리셋해 다음 루프에서 새로 생성되게 함.
+    (tests/test_builds.py와 동일 패턴.)
+    """
+    try:
+        from sse_starlette.sse import AppStatus
+        AppStatus.should_exit_event = None
+        AppStatus.should_exit = False
+    except ImportError:
+        pass
+    yield
+    try:
+        from sse_starlette.sse import AppStatus
+        AppStatus.should_exit_event = None
+        AppStatus.should_exit = False
+    except ImportError:
+        pass
+
+
+def test_create_experiment_success(client):
+    # seed의 online-boutique(1)에는 running 실험이 이미 있어(409 대상) → 실험 없는 앱(2)으로 검증
+    resp = client.post("/experiments", data={
+        "app_id": "2", "chaos_type": "NetworkChaos",
+        "latency_ms": "200", "duration_s": "30",
+    })
+    assert resp.status_code == 200
+    assert "NetworkChaos" in resp.text  # 실험 목록 리렌더
+
+
+def test_create_experiment_validation_error_422(client):
+    resp = client.post("/experiments", data={
+        "app_id": "1", "chaos_type": "NetworkChaos",
+        "latency_ms": "5", "duration_s": "30",  # latency min 10 미만
+    })
+    assert resp.status_code == 422
+
+
+def test_create_experiment_conflict_409_when_app_busy(client):
+    # seed의 online-boutique(1)에는 running 실험이 이미 있음
+    resp = client.post("/experiments", data={
+        "app_id": "1", "chaos_type": "PodChaos",
+    })
+    assert resp.status_code == 409
+
+
+def test_create_experiment_unknown_app_404(client):
+    resp = client.post("/experiments", data={"app_id": "99999", "chaos_type": "PodChaos"})
+    assert resp.status_code == 404
+
+
+def test_stop_running_experiment(client):
+    # seed 실험 1번이 running
+    resp = client.post("/experiments/1/stop")
+    assert resp.status_code == 200
+    assert "중지됨" in resp.text
+
+
+def test_stop_non_running_409(client):
+    client.post("/experiments/1/stop")            # running → stopped
+    assert client.post("/experiments/1/stop").status_code == 409
+
+
+def _engine_session():
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+def test_watch_experiment_completes_and_cleans(monkeypatch):
+    from app.routers.experiments import _watch_experiment
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        status="running", crd_name="exp-demo-abc")
+    exp_id = exp.id
+    s.close()
+
+    deleted = []
+
+    class _SpyChaos:
+        def phase(self, chaos_type, crd_name):
+            return "recovered"
+        def delete(self, chaos_type, crd_name):
+            deleted.append((chaos_type, crd_name))
+
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: _SpyChaos())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+
+    _watch_experiment(exp_id)
+
+    s = Session()
+    exp = ExperimentRepository(s).get(exp_id)
+    assert exp.status == "completed"
+    assert exp.finished_at is not None
+    s.close()
+    assert deleted == [("PodChaos", "exp-demo-abc")]
+
+
+def test_watch_experiment_failure_marks_failed(monkeypatch, caplog):
+    from app.routers.experiments import _watch_experiment
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="NetworkChaos",
+        params={"action": "delay", "latency_ms": 200, "duration_s": 30},
+        status="running", crd_name="exp-demo-abc")
+    exp_id = exp.id
+    s.close()
+
+    class _BoomChaos:
+        def phase(self, chaos_type, crd_name):
+            raise RuntimeError("boom")
+        def delete(self, chaos_type, crd_name):
+            return None
+
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: _BoomChaos())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+
+    with caplog.at_level(logging.ERROR):
+        _watch_experiment(exp_id)
+
+    s = Session()
+    assert ExperimentRepository(s).get(exp_id).status == "failed"
+    s.close()
+    assert "experiment watch failed" in caplog.text
+
+
+def _engine_with_experiment(status: str):
+    """단일 App+Experiment(id=1, 주어진 status)를 가진 격리 엔진의 세션메이커.
+
+    tests/test_builds.py의 _engine_with_status와 동일 패턴 — SSE 라우트가
+    쓰는 SessionLocal은 client 픽스처의 override와 분리된 DB를 보므로,
+    라우트가 실제로 조회할 엔진에 직접 시드한다.
+    """
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    s = Session()
+    app = App(name="demo", repo_url="https://github.com/x/demo", framework="docker")
+    s.add(app)
+    s.commit()
+    s.add(Experiment(app_id=app.id, chaos_type="PodChaos", status=status))
+    s.commit()
+    s.close()
+    return Session
+
+
+def test_experiment_stream_completed_immediately(monkeypatch, client):
+    # 격리 엔진에 stopped 실험(id=1)을 시드하고 스트림 접속 → 즉시 completed 이벤트
+    Session = _engine_with_experiment("stopped")
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    with client.stream("GET", "/experiments/1/stream") as r:
+        body = "".join(chunk for chunk in r.iter_text())
+    assert "event: completed" in body
+    assert '"status": "stopped"' in body
