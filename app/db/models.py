@@ -54,6 +54,7 @@ class Experiment(Base):
     chaos_type: Mapped[str] = mapped_column(String(40))
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(30), default="pending")
+    crd_name: Mapped[str] = mapped_column(String(120), default="")
     baseline_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     fault_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     recovery_metrics: Mapped[dict] = mapped_column(JSON, default=dict)

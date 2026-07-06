@@ -1,5 +1,5 @@
 """App.env_vars JSON 컬럼 — 등록 시 env/secret 보관."""
-from app.db.models import App
+from app.db.models import App, Experiment
 
 
 def test_app_has_env_vars_default_empty(db_session):
@@ -19,3 +19,13 @@ def test_app_env_vars_roundtrip(db_session):
     db_session.refresh(app)
     assert app.env_vars[1]["key"] == "JWT_SECRET"
     assert app.env_vars[1]["is_secret"] is True
+
+
+def test_experiment_has_crd_name_default_empty(db_session):
+    app = App(name="test-app", repo_url="https://github.com/x/test", framework="docker")
+    db_session.add(app)
+    db_session.commit()
+    exp = Experiment(app_id=app.id, chaos_type="PodChaos")
+    db_session.add(exp)
+    db_session.commit()
+    assert exp.crd_name == ""
