@@ -15,16 +15,20 @@ CHAOS_PLURALS = {
 
 
 def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params: dict) -> dict:
-    """Chaos Mesh CRD 매니페스트. selector는 generic-app 차트의 `app:` 라벨."""
+    """Chaos Mesh CRD 매니페스트. selector는 generic-app 차트의 `app:` 라벨.
+
+    params는 chaos_specs.validate_params로 사전 검증된 값이어야 한다.
+    """
     spec: dict = {
         "selector": {"namespaces": [namespace], "labelSelectors": {"app": app_name}},
         "mode": "all",
-        "action": params["action"],
     }
     if chaos_type == "NetworkChaos":
+        spec["action"] = params["action"]
         spec["delay"] = {"latency": f"{params['latency_ms']}ms"}
+    elif chaos_type == "PodChaos":
+        spec["action"] = params["action"]
     elif chaos_type == "StressChaos":
-        del spec["action"]  # StressChaos는 action 대신 stressors
         spec["stressors"] = {"cpu": {"workers": 1, "load": params["cpu_load"]}}
     if "duration_s" in params:
         spec["duration"] = f"{params['duration_s']}s"
@@ -37,6 +41,8 @@ def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params
 
 
 class RealChaos:
+    """Chaos Mesh CRD 주입/조회/삭제. namespace 인자는 항상 settings.sut_namespace와 같아야 한다 (phase/delete가 sut_namespace를 쓰므로)."""
+
     def __init__(self, settings):
         self.s = settings
 
@@ -50,6 +56,7 @@ class RealChaos:
         return client.CustomObjectsApi()
 
     def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
+        assert namespace == self.s.sut_namespace, "chaos CRD는 sut_namespace에만 생성해야 함"
         manifest = render_chaos_manifest(chaos_type, namespace, app_name, params)
         resp = self._api().create_namespaced_custom_object(
             group=_GROUP, version=_VERSION, namespace=namespace,
