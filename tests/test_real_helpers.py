@@ -81,3 +81,37 @@ def test_build_workflow_manifest():
     assert params["image"] == "reg/demo:abc123de"
     assert params["framework"] == "fastapi"
     assert params["dockerfile"] == "Dockerfile"
+
+
+def test_render_chaos_manifest_network_delay():
+    from app.services.real.chaos import render_chaos_manifest
+
+    m = render_chaos_manifest("NetworkChaos", "sut", "demo",
+                              {"action": "delay", "latency_ms": 200, "duration_s": 300})
+    assert m["kind"] == "NetworkChaos"
+    assert m["metadata"]["generateName"] == "exp-demo-"
+    assert m["metadata"]["namespace"] == "sut"
+    assert m["spec"]["selector"] == {"namespaces": ["sut"], "labelSelectors": {"app": "demo"}}
+    assert m["spec"]["mode"] == "all"
+    assert m["spec"]["action"] == "delay"
+    assert m["spec"]["delay"] == {"latency": "200ms"}
+    assert m["spec"]["duration"] == "300s"
+
+
+def test_render_chaos_manifest_pod_kill_has_no_duration():
+    from app.services.real.chaos import render_chaos_manifest
+
+    m = render_chaos_manifest("PodChaos", "sut", "demo", {"action": "pod-kill"})
+    assert m["kind"] == "PodChaos"
+    assert m["spec"]["action"] == "pod-kill"
+    assert "duration" not in m["spec"]
+
+
+def test_render_chaos_manifest_stress_cpu():
+    from app.services.real.chaos import render_chaos_manifest
+
+    m = render_chaos_manifest("StressChaos", "sut", "demo",
+                              {"action": "cpu", "cpu_load": 80, "duration_s": 60})
+    assert m["kind"] == "StressChaos"
+    assert m["spec"]["stressors"] == {"cpu": {"workers": 1, "load": 80}}
+    assert m["spec"]["duration"] == "60s"
