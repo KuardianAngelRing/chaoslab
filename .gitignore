@@ -242,7 +242,6 @@ kubeconfig.yaml
 *.sqlite
 *.sqlite3
 
-# Claude Code — CLAUDE.md는 팀 공유(커밋), 개인 메모는 CLAUDE.local.md
-CLAUDE.local.md
+# Claude Code — CLAUDE.md는 팀 공유(커밋), 로컬 세션 상태만 제외
 .omc/
 .superpowers/
