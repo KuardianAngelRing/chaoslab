@@ -222,10 +222,7 @@ __marimo__/
 # ChaosLab 프로젝트 (Iac-aws 컨벤션 정렬)
 # ============================================================
 
-# DOCS - 설계 문서는 로컬에만, README 참조 자료(assets)는 push
-docs/*
-!docs/assets/
-!docs/assets/**
+# DOCS - private 레포: 설계 문서·보고서·회의 자료 팀 공유 (커밋)
 
 # macOS
 .DS_Store
@@ -245,6 +242,7 @@ kubeconfig.yaml
 *.sqlite
 *.sqlite3
 
-# Claude Code 로컬 컨텍스트
-CLAUDE.md
+# Claude Code — CLAUDE.md는 팀 공유(커밋), 개인 메모는 CLAUDE.local.md
+CLAUDE.local.md
 .omc/
+.superpowers/
