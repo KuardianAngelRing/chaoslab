@@ -180,6 +180,44 @@ def test_experiment_candidates_page(client):
     assert resp.text.count('<input type="radio" name="candidate"') == 4  # 후보 3 + 직접 입력
 
 
+def test_plan_review_page(client):
+    resp = client.get("/experiments/plan-review",
+                      params={"app_id": 1, "candidate": "1", "objective": "주문 흐름 검증"})
+    assert resp.status_code == 200
+    assert "실험 계획 검토" in resp.text
+    # 레이아웃 시안 3종 세그먼트 (팀 결정 전)
+    assert "seg-control" in resp.text
+    assert "요약 + YAML" in resp.text and "체크리스트" in resp.text and "타임라인" in resp.text
+    # 공유 stub 데이터: 사람말 요약 + 조건 + YAML + 검증 배지
+    assert "이렇게 진행돼요" in resp.text
+    assert "labelSelectors" in resp.text            # Chaos Mesh CR 전문
+    assert "보정 1회" in resp.text
+    # 시안 C 체크리스트 / 시안 E 타임라인 요소
+    assert "대상이 맞나요?" in resp.text
+    assert "계획이 완성됐어요" in resp.text
+    assert "실험 실행할게요" in resp.text
+
+
+def test_plan_review_candidate_types(client):
+    # 후보 2 = NetworkChaos → 스펙과 ADR-0005 경고 문구
+    resp = client.get("/experiments/plan-review", params={"app_id": 1, "candidate": "2"})
+    assert "NetworkChaos" in resp.text and "delay" in resp.text
+    assert "ADR-0005" in resp.text
+    # 직접 입력 → 서술 에코
+    resp = client.get("/experiments/plan-review",
+                      params={"app_id": 1, "candidate": "custom", "custom_text": "트래픽 절반 유실"})
+    assert "직접 입력 실험" in resp.text and "트래픽 절반 유실" in resp.text
+
+
+def test_plan_review_unknown_app_404(client):
+    assert client.get("/experiments/plan-review", params={"app_id": 9999}).status_code == 404
+
+
+def test_candidates_approve_navigates_to_plan_review(client):
+    resp = client.get("/experiments/candidates", params={"app_id": 1})
+    assert "/experiments/plan-review" in resp.text   # 승인 버튼이 검토 화면으로 이동
+
+
 def test_experiment_candidates_unknown_app_404(client):
     assert client.get("/experiments/candidates", params={"app_id": 9999}).status_code == 404
 

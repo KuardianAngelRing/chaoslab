@@ -133,6 +133,105 @@ def experiment_candidates(
     return render_page(request, "pages/experiment_candidates.html", ctx)
 
 
+def _plan_stub(app, candidate: str, custom_text: str) -> dict:
+    """계획 구체화 목업 — 검토 화면 시안 3종(B/C/E)이 공유하는 데이터.
+
+    실배선 시 ExperimentPlanAgent 결과 + ce_agents 이벤트로 대체.
+    """
+    ns = f"exp-{app.name}-a1b2"
+    cands = _candidate_stub(app)
+    idx = {"1": 0, "2": 1, "3": 2}.get(candidate)
+    if candidate == "custom":
+        cand = {"type": "PodChaos", "title": "직접 입력 실험",
+                "hypothesis": custom_text or "직접 서술한 장애 방향", "target": f"{app.namespace}/{app.name}"}
+    elif idx is not None:
+        cand = cands[idx]
+    else:
+        cand = cands[0]
+
+    yaml_by_type = {
+        "PodChaos": (
+            f"apiVersion: chaos-mesh.org/v1alpha1\nkind: PodChaos\nmetadata:\n"
+            f"  name: {ns}-podkill\n  namespace: {ns}\nspec:\n  action: pod-kill\n  mode: one\n"
+            f"  selector:\n    namespaces:\n      - {ns}\n    labelSelectors:\n      app: {app.name}\n"
+            f"  duration: \"30s\""),
+        "NetworkChaos": (
+            f"apiVersion: chaos-mesh.org/v1alpha1\nkind: NetworkChaos\nmetadata:\n"
+            f"  name: {ns}-netdelay\n  namespace: {ns}\nspec:\n  action: delay\n  mode: all\n"
+            f"  selector:\n    namespaces:\n      - {ns}\n    labelSelectors:\n      app: {app.name}\n"
+            f"  delay:\n    latency: \"200ms\"\n    jitter: \"50ms\"\n  duration: \"60s\""),
+        "StressChaos": (
+            f"apiVersion: chaos-mesh.org/v1alpha1\nkind: StressChaos\nmetadata:\n"
+            f"  name: {ns}-cpustress\n  namespace: {ns}\nspec:\n  mode: one\n"
+            f"  selector:\n    namespaces:\n      - {ns}\n    labelSelectors:\n      app: {app.name}\n"
+            f"  stressors:\n    cpu:\n      workers: 2\n      load: 80\n  duration: \"60s\""),
+    }
+    fault_by_type = {
+        "PodChaos": ("pod-kill · 30초", "파드 1개를 강제종료"),
+        "NetworkChaos": ("delay 200ms(±50ms) · 60초", "서비스 간 지연 200ms를 주입"),
+        "StressChaos": ("CPU 80% · worker 2 · 60초", "CPU 부하 80%를 주입"),
+    }
+    fault, action_ko = fault_by_type[cand["type"]]
+
+    conditions = [
+        {"label": "대상", "value": f"app={app.name} · {cand['target']}", "mono": True},
+        {"label": "장애", "value": f"{cand['type']} · {fault}"},
+        {"label": "부하", "value": "k6 · 10 VUs · 60초 · GET /healthz", "mono": True,
+         "warn": "부하 경로 /healthz 잠정 — ADR-0005 재논의 대상" if cand["type"] == "NetworkChaos" else None},
+        {"label": "격리 namespace", "value": f"{ns} (실험 후 자동 삭제)", "mono": True},
+        {"label": "판정 기준", "value": "장애 중 ready 파드 유지 · 60초 내 복구 · 에러율 5% 미만"},
+    ]
+    events = [
+        {"emoji": "🙋", "text": f"후보 승인 — {cand['title']}", "dur": "14:02:11", "kind": "start"},
+        {"emoji": "🔍", "text": f"대상 서비스 구조 분석 완료 — deployment 3개 확인, {app.name} replicas 1 (단일 복제본)", "dur": "3.2초"},
+        {"emoji": "🛠️", "text": f"Chaos Mesh 스펙 생성 완료 — {fault} · k6 10 VUs", "dur": "18.4초"},
+        {"emoji": "🩹", "text": "검증 실패 1건 → 보정 완료 — selector 라벨을 labelSelectors 아래로 중첩", "dur": "12.1초", "kind": "warn"},
+    ]
+    checks = [
+        {"title": "대상이 맞나요?", "badge": "가장 중요",
+         "desc": f"app={app.name} 이(가) 장애 대상이에요. 다른 서비스가 잡혀 있으면 여기서 멈추세요."},
+        {"title": "장애 유형과 강도", "badge": None,
+         "desc": f"{cand['type']} · {fault} — k6 부하 10 VUs를 60초간 /healthz로 흘려요."},
+        {"title": "판정 기준", "badge": None,
+         "desc": "장애 중 ready 파드 유지 · 60초 내 복구 · 에러율 5% 미만 — 하나라도 어기면 실패 판정 후 자동 개선 루프로 넘어가요."},
+    ]
+    return {
+        "candidate": cand,
+        "summary": f"격리 공간 {ns}에서 {app.name}에 {action_ko}하고, 60초간 k6 부하를 흘리며 복구를 관측해요.",
+        "namespace": ns,
+        "yaml": yaml_by_type[cand["type"]],
+        "conditions": conditions,
+        "events": events,
+        "checks": checks,
+        "repair_note": "selector 라벨을 labelSelectors 아래로 중첩했어요",
+        "total_sec": "33.7초",
+    }
+
+
+# 주의: /experiments/{exp_id}보다 먼저 등록해야 "plan-review"가 경로 파라미터로 안 잡힌다
+@router.get("/experiments/plan-review")
+def experiment_plan_review(
+    request: Request,
+    app_id: int = 1,
+    candidate: str = "1",
+    custom_text: str = "",
+    objective: str = "",
+    session: Session = Depends(get_session),
+    app_count: int = Depends(get_app_count),
+):
+    app = next((a for a in AppRepository(session).list_all() if a.id == app_id), None)
+    if app is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    ctx = {
+        "active_nav": "experiments",
+        "app_count": app_count,
+        "app": app,
+        "objective": objective.strip(),
+        "plan": _plan_stub(app, candidate, custom_text.strip()),
+    }
+    return render_page(request, "pages/experiment_plan_review.html", ctx)
+
+
 @router.get("/experiments/{exp_id}")
 def experiment_detail(
     request: Request,

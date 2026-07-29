@@ -38,6 +38,44 @@ document.addEventListener('click', (e) => {
   if (content) content.classList.add('active');
 });
 
+// ============== 세그먼트 컨트롤 (탭과 동일 위임, pill 모양) ==============
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-seg]');
+  if (!t) return;
+  const group = t.dataset.segGroup;
+  document.querySelectorAll(`[data-seg][data-seg-group="${group}"]`)
+    .forEach(el => el.classList.toggle('active', el === t));
+  document.querySelectorAll(`[data-seg-panel][data-seg-group="${group}"]`)
+    .forEach(el => el.classList.toggle('active', el.dataset.segPanel === t.dataset.seg));
+});
+
+// ============== 계획 검토 체크리스트 — 전부 체크해야 실행 활성화 ==============
+document.addEventListener('change', (e) => {
+  const input = e.target;
+  if (!(input.matches && input.matches('[data-plan-check] input[type="checkbox"]'))) return;
+  const scope = input.closest('[data-plan-checklist]');
+  const cards = [...scope.querySelectorAll('[data-plan-check]')];
+  cards.forEach((c) => {
+    const on = c.querySelector('input').checked;
+    c.style.borderColor = on ? 'var(--primary)' : '';
+    c.style.background = on ? 'var(--primary-soft)' : '';
+  });
+  const n = cards.filter((c) => c.querySelector('input').checked).length;
+  const run = scope.querySelector('[data-plan-run]');
+  const hint = scope.querySelector('[data-plan-check-hint]');
+  if (run) run.disabled = n < cards.length;
+  if (hint) hint.textContent = n < cards.length
+    ? `${cards.length}개 항목을 확인하면 실행할 수 있어요 (${n}/${cards.length})`
+    : '모두 확인했어요 — 실행할 수 있어요';
+});
+
+// 실행 버튼 — 실행 화면은 다음 증분 (모의)
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-plan-run]');
+  if (!t || t.disabled) return;
+  showFieldTooltip(t, '실험 실행 화면은 다음 증분이에요 (모의)');
+});
+
 // ============== 다이얼로그 ==============
 function openDialog(name) {
   const d = document.getElementById(`dialog-${name}`);

@@ -105,7 +105,10 @@
     if (sel.value === 'custom' && !custom.value.trim()) {
       showFieldTooltip(custom, '원하는 장애 방향을 입력해 주세요'); custom.focus(); return;
     }
-    showFieldTooltip(e.currentTarget, '계획 구체화·실행은 다음 증분이에요 (모의)');
+    let url = `/experiments/plan-review?app_id={{ app.id }}&objective={{ objective|urlencode }}&candidate=${encodeURIComponent(sel.value)}`;
+    if (sel.value === 'custom') url += `&custom_text=${encodeURIComponent(custom.value.trim())}`;
+    htmx.ajax('GET', url, { target: '#main-content', swap: 'innerHTML' })
+      .then(() => history.pushState({}, '', url));
   });
 })();
 </script>
