@@ -1,0 +1,134 @@
+{% extends layout|default("base.html") %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-8 py-8">
+
+  <!-- Hero (제목 행 h-11 고정 + hero-line — 전 페이지 동일 배치) -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between h-11">
+      <h1 class="text-3xl font-extrabold flex items-center gap-4"><span class="tossface-lg">🍓</span>로컬 인프라</h1>
+      <span class="tds-badge badge-info">{{ cluster.access }}</span>
+    </div>
+    <div class="hero-line mt-4"></div>
+    <p class="text-base mt-4" style="color: var(--muted-foreground);">라즈베리파이 3대에 올린 k3s 클러스터의 노드·관측 스택 상태를 한눈에 봐요 (모의 데이터)</p>
+  </div>
+
+  <!-- 클러스터 개요 -->
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+    <div class="tds-card p-5">
+      <div class="flex items-start justify-between mb-3"><span class="tossface">🌐</span><span class="tds-badge badge-success">Healthy</span></div>
+      <div class="text-2xl font-extrabold mb-1">{{ cluster.name }}</div>
+      <div class="text-xs mono" style="color: var(--muted-foreground);">{{ cluster.version }} · {{ cluster.arch }}</div>
+    </div>
+    <div class="tds-card p-5">
+      <div class="flex items-start justify-between mb-3"><span class="tossface">📦</span><span class="tds-badge badge-info">{{ nodes|length }} 노드</span></div>
+      <div class="text-2xl font-extrabold mb-1">1 + {{ nodes|length - 1 }}</div>
+      <div class="text-xs" style="color: var(--muted-foreground);">control-plane 1대 · worker {{ nodes|length - 1 }}대</div>
+    </div>
+    <div class="tds-card p-5">
+      <div class="flex items-start justify-between mb-3"><span class="tossface">🚀</span><span class="tds-badge badge-success">정상</span></div>
+      <div class="text-2xl font-extrabold mb-1">{{ pod_count }}</div>
+      <div class="text-xs" style="color: var(--muted-foreground);">실행 중 Pod</div>
+    </div>
+    <div class="tds-card p-5">
+      <div class="flex items-start justify-between mb-3"><span class="tossface">📁</span></div>
+      <div class="text-2xl font-extrabold mb-1">{{ namespaces|length }}</div>
+      <div class="text-xs" style="color: var(--muted-foreground);">Namespace · {{ namespaces[:2]|join(", ") }} 외</div>
+    </div>
+  </div>
+
+  <!-- 노드 -->
+  <div class="tds-card overflow-hidden mb-6">
+    <div class="px-6 py-4 border-b font-extrabold" style="border-color: var(--border);">노드</div>
+    <table class="w-full text-sm">
+      <thead style="background: var(--muted);">
+        <tr class="text-left text-xs font-bold" style="color: var(--muted-foreground);">
+          <th class="px-6 py-3">이름</th>
+          <th class="px-6 py-3">기기</th>
+          <th class="px-6 py-3">역할</th>
+          <th class="px-6 py-3">CPU</th>
+          <th class="px-6 py-3">메모리</th>
+          <th class="px-6 py-3">온도</th>
+          <th class="px-6 py-3">상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for node in nodes %}
+        <tr class="border-t" style="border-color: var(--border);">
+          <td class="px-6 py-3"><span class="font-bold mono">{{ node.name }}</span></td>
+          <td class="px-6 py-3">{{ node.model }}</td>
+          <td class="px-6 py-3">
+            {% if "control-plane" in node.role %}
+              <span class="tds-badge badge-warning">{{ node.role }}</span>
+            {% else %}
+              <span class="tds-badge badge-info">{{ node.role }}</span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-3">
+            <div class="flex items-center gap-2">
+              <div class="w-16 h-1.5 rounded-full overflow-hidden" style="background: var(--muted);">
+                <div class="h-full rounded-full" style="width: {{ node.cpu_pct }}%; background: var(--primary);"></div>
+              </div>
+              <span class="text-xs mono">{{ node.cpu_pct }}%</span>
+            </div>
+          </td>
+          <td class="px-6 py-3">
+            <div class="flex items-center gap-2">
+              <div class="w-16 h-1.5 rounded-full overflow-hidden" style="background: var(--muted);">
+                <div class="h-full rounded-full" style="width: {{ node.mem_pct }}%; background: var(--primary);"></div>
+              </div>
+              <span class="text-xs mono">{{ node.mem_pct }}%</span>
+            </div>
+          </td>
+          <td class="px-6 py-3">
+            {% if node.temp_c < 60 %}
+              <span class="text-xs mono">{{ node.temp_c }}°C</span>
+            {% else %}
+              <span class="text-xs mono font-bold" style="color: var(--danger);">{{ node.temp_c }}°C 🔥</span>
+            {% endif %}
+          </td>
+          <td class="px-6 py-3">
+            {% if node.status == "Ready" %}
+              <span class="tds-badge badge-success">{{ node.status }}</span>
+            {% else %}
+              <span class="tds-badge badge-danger">{{ node.status }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 관측·실험 스택 -->
+  <div class="tds-card p-6">
+    <div class="font-extrabold mb-1">관측 · 실험 스택</div>
+    <p class="text-xs mb-4" style="color: var(--muted-foreground);">실험 판정에 쓰는 컴포넌트예요 — 포트포워딩 없이 Kubernetes API service proxy로 조회해요</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {% for component in components %}
+      <div class="flex items-center justify-between p-3 rounded-2xl border" style="border-color: var(--border);">
+        <div class="flex items-center gap-3">
+          {% if component.name == "Prometheus" %}
+            <iconify-icon icon="logos:prometheus" width="22"></iconify-icon>
+          {% elif component.name == "Loki" %}
+            <iconify-icon icon="logos:loki" width="22"></iconify-icon>
+          {% elif component.name == "Chaos Mesh" %}
+            <iconify-icon icon="solar:bug-bold" width="22" style="color: var(--danger);"></iconify-icon>
+          {% elif component.name == "Alloy" %}
+            <iconify-icon icon="logos:grafana" width="22"></iconify-icon>
+          {% else %}
+            <iconify-icon icon="solar:settings-bold" width="22"></iconify-icon>
+          {% endif %}
+          <div>
+            <div class="font-bold text-sm">{{ component.name }}</div>
+            <div class="text-[11px]" style="color: var(--muted-foreground);">{{ component.detail }} · <span class="mono">{{ component.ns }}</span></div>
+          </div>
+        </div>
+        <span class="tds-badge badge-success">Running</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}

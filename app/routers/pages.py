@@ -155,34 +155,6 @@ def experiment_detail(
     return render_page(request, "pages/experiment_detail.html", ctx)
 
 
-# ChaosPilot(온프레미스 AI 루프) 파이프라인 시연용 정적 정의 — DB·실서비스 미연결 데모
-CHAOSPILOT_STAGES = [
-    {"emoji": "🔍", "label": "전처리",
-     "desc": "업로드된 manifest와 클러스터 리소스를 분석해 실험 대상 서비스와 의존 관계를 파악해요."},
-    {"emoji": "💡", "label": "후보 생성",
-     "desc": "LLM이 전처리 근거를 바탕으로 장애 가설과 실험 후보 목록을 제안해요."},
-    {"emoji": "🙋", "label": "후보 선택", "gate": True, "gate_label": "pod-kill 후보 선택 (모의)",
-     "desc": "제안된 후보 중 실행할 실험을 사용자가 직접 골라요. 승인 전에는 진행되지 않아요."},
-    {"emoji": "📋", "label": "상세 계획",
-     "desc": "선택한 후보를 Chaos Mesh 스펙으로 구체화하고 검증·보정해요."},
-    {"emoji": "⚡", "label": "실험 실행",
-     "desc": "전용 namespace에 장애를 주입하고 k6 부하로 시스템 반응을 관측해요."},
-    {"emoji": "📊", "label": "분석·판정",
-     "desc": "관측값 기반으로 통과/실패를 판정해요. 실패하면 개선 패치를 적용하고 같은 실험을 다시 돌려요."},
-    {"emoji": "📝", "label": "보고",
-     "desc": "실험 결과·개선 이력·회복력 지표를 보고서로 정리해요."},
-]
-
-
-@router.get("/workflow")
-def workflow_page(
-    request: Request,
-    app_count: int = Depends(get_app_count),
-):
-    ctx = {"active_nav": "workflow", "app_count": app_count, "stages": CHAOSPILOT_STAGES}
-    return render_page(request, "pages/workflow.html", ctx)
-
-
 @router.get("/infra")
 def infra_page(
     request: Request,
@@ -197,6 +169,40 @@ def infra_page(
         "components": k8s.components(),
     }
     return render_page(request, "pages/infra.html", ctx)
+
+
+# 로컬(라즈베리파이 k3s) 인프라 목업 — 실배선 시 SSH 터널 경유 k8s API·Prometheus 조회로 대체.
+# 노드 온도는 node-exporter(hwmon), CPU·메모리는 metrics-server(kubectl top) 기준 값.
+LOCAL_K3S_STUB = {
+    "cluster": {"name": "chaospilot-k3s", "version": "v1.32.3+k3s1", "arch": "arm64",
+                "access": "SSH 터널 · localhost:6443"},
+    "pod_count": 24,
+    "namespaces": ["kube-system", "chaos-mesh", "chaospilot-observability", "order-msa"],
+    "nodes": [
+        {"name": "masternode", "model": "Raspberry Pi 4B 8GB", "role": "control-plane · etcd",
+         "cpu_pct": 21, "mem_pct": 48, "temp_c": 52.1, "status": "Ready"},
+        {"name": "worker1", "model": "Raspberry Pi 4B 4GB", "role": "worker",
+         "cpu_pct": 34, "mem_pct": 61, "temp_c": 55.3, "status": "Ready"},
+        {"name": "worker2", "model": "Raspberry Pi 4B 4GB", "role": "worker",
+         "cpu_pct": 18, "mem_pct": 44, "temp_c": 49.8, "status": "Ready"},
+    ],
+    "components": [
+        {"name": "Chaos Mesh", "detail": "controller 1/1 · daemon 3/3", "ns": "chaos-mesh"},
+        {"name": "Prometheus", "detail": "메트릭 수집 · service proxy 조회", "ns": "chaospilot-observability"},
+        {"name": "Loki", "detail": "로그 저장 · LogQL 조회", "ns": "chaospilot-observability"},
+        {"name": "kube-state-metrics", "detail": "리소스 상태 메트릭", "ns": "chaospilot-observability"},
+        {"name": "Alloy", "detail": "로그 수집 에이전트 (DaemonSet 3/3)", "ns": "chaospilot-observability"},
+    ],
+}
+
+
+@router.get("/infra/local")
+def local_infra_page(
+    request: Request,
+    app_count: int = Depends(get_app_count),
+):
+    ctx = {"active_nav": "local-infra", "app_count": app_count, **LOCAL_K3S_STUB}
+    return render_page(request, "pages/infra_local.html", ctx)
 
 
 @router.get("/settings")

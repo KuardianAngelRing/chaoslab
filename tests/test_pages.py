@@ -48,6 +48,24 @@ def test_infra_page(client):
     assert "Prometheus" in resp.text and "ng-spot-1" in resp.text
 
 
+def test_local_infra_page(client):
+    resp = client.get("/infra/local")
+    assert resp.status_code == 200
+    assert "로컬 인프라" in resp.text
+    assert "chaospilot-k3s" in resp.text
+    assert "masternode" in resp.text and "worker2" in resp.text
+    assert "Raspberry Pi 4B" in resp.text
+    assert "Chaos Mesh" in resp.text and "chaospilot-observability" in resp.text
+    assert "SSH 터널" in resp.text
+    assert "모의 데이터" in resp.text            # 목업 정직 표기
+
+
+def test_local_infra_partial_when_hx(client):
+    resp = client.get("/infra/local", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "<!DOCTYPE html>" not in resp.text
+
+
 def test_settings_page(client):
     resp = client.get("/settings")
     assert resp.status_code == 200
@@ -164,21 +182,6 @@ def test_experiment_candidates_page(client):
 
 def test_experiment_candidates_unknown_app_404(client):
     assert client.get("/experiments/candidates", params={"app_id": 9999}).status_code == 404
-
-
-def test_workflow_demo_page(client):
-    resp = client.get("/workflow")
-    assert resp.status_code == 200
-    assert "실험 워크플로우" in resp.text
-    # ChaosPilot 파이프라인 7단계 + 승인 게이트 표시
-    assert "전처리" in resp.text and "후보 선택" in resp.text and "보고" in resp.text
-    assert "승인 게이트" in resp.text
-
-
-def test_workflow_demo_partial_when_hx(client):
-    resp = client.get("/workflow", headers={"HX-Request": "true"})
-    assert resp.status_code == 200
-    assert "<!DOCTYPE html>" not in resp.text
 
 
 def test_sidebar_no_eks_status_box(client):
