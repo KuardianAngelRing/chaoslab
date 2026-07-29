@@ -36,6 +36,13 @@
       <span class="w-2 h-2 rounded-full pulse-dot" style="background: var(--danger);"></span>
     </a>
 
+    <a hx-get="/workflow" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+       class="sidebar-nav-item {{ 'active' if active_nav == 'workflow' }}">
+      <iconify-icon icon="solar:routing-2-bold" width="20"></iconify-icon>
+      <span class="flex-1">실험 워크플로우</span>
+      <span class="text-[11px] font-bold px-1.5 py-0.5 rounded-md" style="background: var(--muted); color: var(--muted-foreground);">데모</span>
+    </a>
+
     <a hx-get="/infra" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
        class="sidebar-nav-item {{ 'active' if active_nav == 'infra' }}">
       <iconify-icon icon="logos:aws" width="20"></iconify-icon>

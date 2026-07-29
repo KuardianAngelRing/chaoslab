@@ -1,0 +1,177 @@
+{% extends layout|default("base.html") %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-8 py-8">
+
+  <!-- Hero (제목 행 h-11 고정 + hero-line — 전 페이지 동일 배치) -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between h-11">
+      <h1 class="text-3xl font-extrabold flex items-center gap-4"><span class="tossface-lg">🧪</span>실험 워크플로우</h1>
+      <div class="flex items-center gap-3">
+        <button id="wf-start" class="tds-btn-primary"><iconify-icon icon="solar:play-bold" width="16"></iconify-icon>시연 시작</button>
+        <button id="wf-reset" class="tds-btn-muted">초기화</button>
+      </div>
+    </div>
+    <div class="hero-line mt-4"></div>
+    <p class="text-base mt-4" style="color: var(--muted-foreground);">온프레미스 ChaosPilot의 실험 파이프라인을 모의 데이터로 시연해요 — 실제 클러스터와 연결되지 않은 워크플로우 비교·논의용 화면이에요</p>
+  </div>
+
+  <!-- 파이프라인 시연 -->
+  <div class="tds-card p-6" id="wf-demo">
+
+    <!-- 단계 스테퍼 -->
+    <div class="flex items-start mb-8 overflow-x-auto pb-2">
+      {% for s in stages %}
+      <div class="wf-stage flex flex-col items-center shrink-0" data-wf-stage
+           data-label="{{ s.label }}" data-emoji="{{ s.emoji }}" data-desc="{{ s.desc }}"
+           {% if s.get("gate") %}data-gate="true" data-gate-label="{{ s.gate_label }}"{% endif %}>
+        <div class="wf-stage-dot">
+          <span class="tossface">{{ s.emoji }}</span>
+          <span class="wf-check">✓</span>
+        </div>
+        <div class="text-xs font-bold mt-2 whitespace-nowrap">{{ s.label }}</div>
+        {% if s.get("gate") %}
+        <span class="tds-badge badge-info mt-1" style="font-size: 0.625rem; padding: 0.125rem 0.5rem;">승인 게이트</span>
+        {% endif %}
+      </div>
+      {% if not loop.last %}<div class="wf-connector" data-wf-conn></div>{% endif %}
+      {% endfor %}
+    </div>
+
+    <!-- 현재 단계 패널 -->
+    <div class="rounded-2xl border p-5" style="border-color: var(--border); background: var(--muted);">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="tossface" id="wf-panel-emoji">🧭</span>
+        <span class="font-extrabold" id="wf-panel-title">대기 중</span>
+        <span class="tds-badge badge-muted" id="wf-panel-badge">idle</span>
+      </div>
+      <p class="text-sm leading-relaxed" style="color: var(--muted-foreground);" id="wf-panel-desc"></p>
+      <div id="wf-gate" class="hidden mt-4">
+        <button id="wf-gate-btn" class="tds-btn-primary"><iconify-icon icon="solar:check-circle-bold" width="18"></iconify-icon></button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  #wf-demo .wf-stage-dot {
+    width: 3rem; height: 3rem; border-radius: 9999px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--muted); border: 2px solid var(--border);
+    transition: all 0.2s;
+  }
+  #wf-demo .wf-stage-dot .tossface { font-size: 1.25rem; filter: grayscale(1); opacity: 0.45; transition: all 0.2s; }
+  #wf-demo .wf-check { display: none; font-weight: 900; font-size: 1.125rem; color: var(--primary-foreground); }
+  #wf-demo .wf-stage.active .wf-stage-dot {
+    border-color: var(--primary); background: var(--primary-soft);
+    animation: tds-pulse 1.6s ease-in-out infinite;
+  }
+  #wf-demo .wf-stage.active .wf-stage-dot .tossface { filter: none; opacity: 1; }
+  #wf-demo .wf-stage.done .wf-stage-dot { background: var(--primary); border-color: var(--primary); }
+  #wf-demo .wf-stage.done .wf-stage-dot .tossface { display: none; }
+  #wf-demo .wf-stage.done .wf-check { display: block; }
+  #wf-demo .wf-connector {
+    flex: 1 1 2rem; min-width: 1.25rem; height: 2px;
+    background: var(--border); margin: calc(1.5rem - 1px) 0.5rem 0;
+    transition: background 0.3s;
+  }
+  #wf-demo .wf-connector.done { background: var(--primary); }
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById('wf-demo');
+  if (!root || root.dataset.bound) return;
+  root.dataset.bound = '1';
+
+  const stages = Array.from(root.querySelectorAll('[data-wf-stage]'));
+  const conns = Array.from(root.querySelectorAll('[data-wf-conn]'));
+  const startBtn = document.getElementById('wf-start');
+  const resetBtn = document.getElementById('wf-reset');
+  const gateBox = document.getElementById('wf-gate');
+  const gateBtn = document.getElementById('wf-gate-btn');
+  const panelEmoji = document.getElementById('wf-panel-emoji');
+  const panelTitle = document.getElementById('wf-panel-title');
+  const panelBadge = document.getElementById('wf-panel-badge');
+  const panelDesc = document.getElementById('wf-panel-desc');
+
+  const STEP_MS = 1400;
+  let idx = -1;      // -1 = 시작 전, stages.length = 완료
+  let timer = null;
+
+  function setBadge(text, variant) {
+    panelBadge.textContent = text;
+    panelBadge.className = 'tds-badge badge-' + variant;
+  }
+
+  function render() {
+    stages.forEach((el, i) => {
+      el.classList.toggle('done', i < idx);
+      el.classList.toggle('active', i === idx);
+    });
+    conns.forEach((el, i) => el.classList.toggle('done', i < idx));
+
+    if (idx < 0) {
+      panelEmoji.textContent = '🧭';
+      panelTitle.textContent = '대기 중';
+      setBadge('idle', 'muted');
+      panelDesc.textContent = "'시연 시작'을 누르면 파이프라인이 단계별로 진행돼요. 모든 값은 모의 데이터예요.";
+      gateBox.classList.add('hidden');
+      return;
+    }
+    const s = stages[idx];
+    panelEmoji.textContent = s.dataset.emoji;
+    panelTitle.textContent = s.dataset.label;
+    panelDesc.textContent = s.dataset.desc;
+    if (s.dataset.gate) {
+      setBadge('사용자 입력 대기', 'warning');
+      gateBtn.innerHTML = '<iconify-icon icon="solar:check-circle-bold" width="18"></iconify-icon>' + s.dataset.gateLabel;
+      gateBox.classList.remove('hidden');
+    } else {
+      setBadge('진행 중', 'info');
+      gateBox.classList.add('hidden');
+    }
+  }
+
+  function finish() {
+    idx = stages.length;
+    render();
+    panelEmoji.textContent = '🎉';
+    panelTitle.textContent = '시연 완료';
+    setBadge('완료', 'success');
+    panelDesc.textContent = '보고서 생성까지 끝난 상태예요(모의). 초기화 후 다시 볼 수 있어요.';
+    startBtn.disabled = false;
+  }
+
+  function advance() {
+    if (idx >= stages.length - 1) { finish(); return; }
+    idx += 1;
+    render();
+    if (stages[idx].dataset.gate) return;  // 승인 게이트 — 사용자 입력까지 정지
+    timer = setTimeout(advance, STEP_MS);
+  }
+
+  startBtn.addEventListener('click', () => {
+    clearTimeout(timer);
+    idx = -1;
+    startBtn.disabled = true;
+    advance();
+  });
+  gateBtn.addEventListener('click', () => {
+    clearTimeout(timer);
+    gateBox.classList.add('hidden');
+    setBadge('진행 중', 'info');
+    timer = setTimeout(advance, 300);
+  });
+  resetBtn.addEventListener('click', () => {
+    clearTimeout(timer);
+    idx = -1;
+    startBtn.disabled = false;
+    render();
+  });
+
+  render();
+})();
+</script>
+{% endblock %}

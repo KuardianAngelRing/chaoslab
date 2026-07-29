@@ -29,6 +29,12 @@ def seed_data(session: Session) -> None:
         name="order-worker", repo_url="https://github.com/demo/order",
         framework="node", namespace="order", current_sha="c9d0e1f2", status="degraded",
     )
+    # 온프레미스(k3s) manifest 업로드형 SUT — ChaosPilot 흡수 데모용.
+    # repo_url의 "k3s://" 접두가 환경 배지 판별 마킹 (App 모델에 환경 필드 생기면 교체)
+    apps.create(
+        name="order-msa", repo_url="k3s://manifest-upload",
+        framework="manifest", namespace="order-msa", current_sha="", status="healthy",
+    )
 
     builds.create(app_id=boutique.id, status="succeeded", image_tag="a1b2c3d4",
                   workflow_name="build-boutique-a1b2c3d4")

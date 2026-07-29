@@ -12,6 +12,15 @@
 <iconify-icon icon="{{ icons.get(framework | lower, 'logos:docker-icon') }}" width="{{ size }}"></iconify-icon>
 {%- endmacro %}
 
+{# 환경 배지 — 소스 마킹 규칙(repo_url "k3s://" 접두)으로 판별. App 모델에 환경 필드가 생기면 교체 (ADR-0002/0003) #}
+{% macro env_badge(app, compact=False) %}
+{%- if app.repo_url.startswith("k3s://") -%}
+<span class="tds-badge badge-success">{{ "k3s" if compact else "k3s · 온프레미스" }}</span>
+{%- else -%}
+<span class="tds-badge badge-info">{{ "EKS" if compact else "EKS · 클라우드" }}</span>
+{%- endif -%}
+{% endmacro %}
+
 {% macro kpi_card(icon, label, value, delta=None, delta_variant="success") %}
 <div class="tds-card p-5 hover-lift">
   <div class="flex items-center justify-between mb-3">

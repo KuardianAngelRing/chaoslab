@@ -117,6 +117,70 @@ def test_dashboard_system_status_real(client):
     assert "online-boutique 신규 등록" in resp.text or "online-boutique 새 SHA" in resp.text
 
 
+def test_apps_new_dialog_env_branch(client):
+    resp = client.get("/apps")
+    assert resp.status_code == 200
+    # 4-step 위저드: 환경 → 소스 → 설정 → 마무리 (ADR-0003)
+    assert 'data-wiz-steps="4"' in resp.text
+    assert "어느 클러스터" in resp.text
+    assert "manifest YAML을 그대로 배포해요" in resp.text
+    assert "부하 검증 경로" in resp.text          # ADR-0005 필드 (k3s 분기)
+    assert "등록하고 배포할게요" in resp.text      # ADR-0004 정직 CTA
+
+
+def test_register_k3s_app_stub(client):
+    resp = client.post("/apps/k3s", data={"name": "demo-msa", "health_path": "/orders"})
+    assert resp.status_code == 200
+    assert "demo-msa" in resp.text               # 앱 목록에 즉시 등장
+    # 새 실험 위저드에서 k3s 환경 배지로 표시 (seed order-msa + 신규 = 2개 이상)
+    exp = client.get("/experiments")
+    assert "demo-msa" in exp.text
+    assert exp.text.count("k3s · 온프레미스") >= 2
+
+
+def test_experiments_new_dialog_wizard(client):
+    resp = client.get("/experiments")
+    assert resp.status_code == 200
+    # 2-step 위저드: 대상 앱 → 검증 목표 (설계는 항상 AI 후보 선택형, ADR-0006)
+    assert 'data-wiz-steps="2"' in resp.text
+    assert "대상 앱" in resp.text and "검증 목표" in resp.text
+    assert "후보 생성 요청할게요" in resp.text
+    # 환경 배지 — order-msa만 k3s, 나머지는 EKS
+    assert "k3s · 온프레미스" in resp.text and "EKS · 클라우드" in resp.text
+    # 직접 설계 폼 제거 (ADR-0006)
+    assert 'name="latency_ms"' not in resp.text and "직접 설계" not in resp.text
+
+
+def test_experiment_candidates_page(client):
+    resp = client.get("/experiments/candidates", params={"app_id": 1, "objective": "주문 흐름 검증"})
+    assert resp.status_code == 200
+    assert "실험 후보" in resp.text and "직접 입력" in resp.text
+    # 근거형 카드 (ADR-0007): 유형 배지 + 가설 + 예상 영향
+    assert "PodChaos" in resp.text and "파드 강제종료" in resp.text
+    assert "예상 영향" in resp.text
+    assert "주문 흐름 검증" in resp.text            # 검증 목표 에코
+    assert resp.text.count('<input type="radio" name="candidate"') == 4  # 후보 3 + 직접 입력
+
+
+def test_experiment_candidates_unknown_app_404(client):
+    assert client.get("/experiments/candidates", params={"app_id": 9999}).status_code == 404
+
+
+def test_workflow_demo_page(client):
+    resp = client.get("/workflow")
+    assert resp.status_code == 200
+    assert "실험 워크플로우" in resp.text
+    # ChaosPilot 파이프라인 7단계 + 승인 게이트 표시
+    assert "전처리" in resp.text and "후보 선택" in resp.text and "보고" in resp.text
+    assert "승인 게이트" in resp.text
+
+
+def test_workflow_demo_partial_when_hx(client):
+    resp = client.get("/workflow", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "<!DOCTYPE html>" not in resp.text
+
+
 def test_sidebar_no_eks_status_box(client):
     resp = client.get("/")          # 풀페이지(사이드바 포함)
     assert resp.status_code == 200

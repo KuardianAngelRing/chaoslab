@@ -52,7 +52,8 @@ document.addEventListener('click', (e) => {
 });
 
 // ── 등록 모달: 3-step 위저드 (클라이언트 show/hide, submit은 마지막 1회) ──
-const WIZ_STEPS = 3;
+const WIZ_STEPS = 3;  // 기본값 — dialog-card의 data-wiz-steps로 카드별 재정의
+function wizStepCount(card) { return +(card.dataset.wizSteps || WIZ_STEPS); }
 function wizRender(card) {
   const step = +(card.dataset.wizStep || 1);
   card.querySelectorAll('[data-wiz-panel]').forEach((p) =>
@@ -67,18 +68,18 @@ function wizRender(card) {
   const next = card.querySelector('[data-wiz-next]');
   const submit = card.querySelector('[data-wiz-submit]');
   if (prev) prev.classList.toggle('invisible', step === 1);
-  if (next) next.classList.toggle('hidden', step === WIZ_STEPS);
-  if (submit) submit.classList.toggle('hidden', step !== WIZ_STEPS);
+  if (next) next.classList.toggle('hidden', step === wizStepCount(card));
+  if (submit) submit.classList.toggle('hidden', step !== wizStepCount(card));
 }
 function wizReset(card) { card.dataset.wizStep = '1'; wizRender(card); }
 function wizGo(card, dir) {
   let step = +(card.dataset.wizStep || 1);
   if (dir > 0) {  // 다음 누를 때 현재 패널 필수값 검증
     const panel = card.querySelector(`[data-wiz-panel="${step}"]`);
-    const bad = [...panel.querySelectorAll('[data-wiz-required]')].find((i) => !i.value.trim());
+    const bad = [...panel.querySelectorAll('[data-wiz-required]')].find((i) => !i.disabled && !i.value.trim());
     if (bad) { showFieldTooltip(bad, bad.dataset.wizMsg || '입력해 주세요'); bad.focus(); return; }
   }
-  card.dataset.wizStep = String(Math.min(WIZ_STEPS, Math.max(1, step + dir)));
+  card.dataset.wizStep = String(Math.min(wizStepCount(card), Math.max(1, step + dir)));
   wizRender(card);
 }
 document.addEventListener('click', (e) => {
@@ -282,12 +283,52 @@ function chaosTypeSync(root) {
 document.addEventListener('change', (e) => {
   if (e.target.name === 'chaos_type') chaosTypeSync(e.target.closest('form'));
 });
-document.body.addEventListener('htmx:afterSwap', () => {
-  document.querySelectorAll('#dialog-newExperiment form').forEach(chaosTypeSync);
+
+// ── 새 실험 위저드: 대상 앱 카드 강조 (설계는 항상 AI 후보 선택형 — ADR-0006) ──
+function appPickSync(root) {
+  root.querySelectorAll('.app-pick-card').forEach((card) => {
+    const on = card.querySelector('input').checked;
+    card.style.borderColor = on ? 'var(--primary)' : '';
+    card.style.background = on ? 'var(--primary-soft)' : '';
+  });
+}
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'app_id') appPickSync(e.target.closest('form'));
 });
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('#dialog-newExperiment form').forEach(chaosTypeSync);
+
+function newExperimentSync() {
+  document.querySelectorAll('#dialog-newExperiment form').forEach(appPickSync);
+}
+document.body.addEventListener('htmx:afterSwap', newExperimentSync);
+document.addEventListener('DOMContentLoaded', newExperimentSync);
+
+// ── 새 앱 등록 위저드: 환경(k3s/EKS) 분기 — ADR-0003 ──
+function clusterEnvSync(root) {
+  const checked = root.querySelector('input[name="cluster_env"]:checked');
+  if (!checked) return;
+  root.querySelectorAll('.env-pick-card').forEach((card) => {
+    const on = card.querySelector('input').checked;
+    card.style.borderColor = on ? 'var(--primary)' : '';
+    card.style.background = on ? 'var(--primary-soft)' : '';
+  });
+  root.querySelectorAll('[data-env-panel]').forEach((panel) => {
+    const on = panel.dataset.envPanel === checked.value;
+    panel.classList.toggle('hidden', !on);
+    panel.querySelectorAll('input, textarea').forEach((i) => { i.disabled = !on; });
+  });
+  const eks = root.querySelector('[data-submit-eks]');
+  const k3s = root.querySelector('[data-submit-k3s]');
+  if (eks) eks.classList.toggle('hidden', checked.value !== 'eks');
+  if (k3s) k3s.classList.toggle('hidden', checked.value !== 'k3s');
+}
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'cluster_env') clusterEnvSync(e.target.closest('form'));
 });
+function newAppSync() {
+  document.querySelectorAll('#dialog-newApp form').forEach(clusterEnvSync);
+}
+document.body.addEventListener('htmx:afterSwap', newAppSync);
+document.addEventListener('DOMContentLoaded', newAppSync);
 
 // ── 실험 상태 watch (running 행만 EventSource, 종료 시 목록 새로고침) ──
 const _expStreams = new Set();

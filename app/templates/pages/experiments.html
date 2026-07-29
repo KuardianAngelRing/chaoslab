@@ -1,5 +1,5 @@
 {% extends layout|default("base.html") %}
-{% from "macros/components.html" import badge %}
+{% from "macros/components.html" import badge, framework_icon, env_badge %}
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-8 py-8">
@@ -131,9 +131,9 @@
 
 </div>
 
-<!-- DIALOG: 새 실험 시작 (새 앱 등록 모달과 동일 디자인 — 리사이즈·타이포 통일) -->
+<!-- DIALOG: 새 실험 시작 (2-step 위저드 — 대상 앱 → 검증 목표. 설계는 항상 AI 후보 선택형: ADR-0006) -->
 <div class="dialog-backdrop" id="dialog-newExperiment">
-  <div class="dialog-card" data-wizard>
+  <div class="dialog-card" data-wizard data-wiz-steps="2">
     <div class="dialog-resize-handle" title="드래그하여 크기 조절">
       <svg width="20" height="20" viewBox="-2 -2 40 40" fill="none" style="color: var(--primary);">
         <path d="M 10 34 Q 30 30 34 10" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" />
@@ -148,65 +148,80 @@
         <iconify-icon icon="lucide:x" width="20"></iconify-icon>
       </button>
     </div>
-    <form hx-post="/experiments" hx-target="#main-content" hx-swap="innerHTML" class="flex-1 min-h-0 flex flex-col">
-    <div class="flex-1 overflow-auto px-8 pb-8 space-y-5">
-      <div>
-        <label class="text-base font-bold mb-2 block">대상 앱</label>
-        <select name="app_id" class="tds-input text-base" required>
-          {% for a in apps %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
-        </select>
+
+    <div class="px-8 pb-4 flex items-center justify-center gap-2.5 text-sm font-bold" data-wiz-indicator>
+      {% for num, label in [(1, "대상 앱"), (2, "검증 목표")] %}
+      <div class="flex items-center gap-2" data-wiz-dot="{{ num }}">
+        <span class="w-7 h-7 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span>
+        <span class="hidden sm:inline" data-wiz-label>{{ label }}</span>
       </div>
-      <div>
-        <label class="text-base font-bold mb-2 block">카오스 종류</label>
-        <div class="grid grid-cols-3 gap-2">
-          <label class="tds-card p-3 cursor-pointer text-center hover-lift chaos-type-card">
-            <input type="radio" name="chaos_type" value="NetworkChaos" class="sr-only" checked />
-            <iconify-icon icon="solar:wifi-router-minimalistic-bold" width="28" class="mx-auto mb-1"></iconify-icon>
-            <div class="text-sm font-bold">NetworkChaos</div>
-            <div class="text-xs" style="color: var(--muted-foreground);">지연 주입</div>
+      {% if not loop.last %}<div class="w-8 h-px shrink-0" style="background: var(--border);"></div>{% endif %}
+      {% endfor %}
+    </div>
+
+    <form onsubmit="event.preventDefault()" novalidate class="flex-1 min-h-0 flex flex-col">
+    <div class="flex-1 overflow-auto px-8 pb-4">
+
+      <!-- step 1: 대상 앱 — 환경은 묻지 않고 앱을 따라온다 (배지 표시) -->
+      <div data-wiz-panel="1" class="space-y-2.5 pt-1">
+        <label class="text-base font-bold mb-1 block">실험을 실행할 앱을 골라 주세요</label>
+        {% for a in apps %}
+        <label class="tds-card p-4 cursor-pointer app-pick-card flex items-center gap-3">
+          <input type="radio" name="app_id" value="{{ a.id }}" class="sr-only" {% if loop.first %}checked{% endif %} />
+          {{ framework_icon(a.framework, 24) }}
+          <div class="flex-1 min-w-0">
+            <div class="font-bold">{{ a.name }}</div>
+            <div class="text-xs mono truncate" style="color: var(--muted-foreground);">{{ a.namespace }}</div>
+          </div>
+          {{ env_badge(a) }}
+        </label>
+        {% endfor %}
+      </div>
+
+      <!-- step 2: 검증 목표 — 설계는 항상 AI 후보 선택형 (ADR-0006) -->
+      <div data-wiz-panel="2" class="hidden space-y-4 pt-2">
+        <div>
+          <label class="text-base font-bold mb-2 block">검증 목표
+            <span class="text-xs font-normal" style="color: var(--muted-foreground);">선택 — AI가 후보를 제안할 때 참고해요</span>
           </label>
-          <label class="tds-card p-3 cursor-pointer text-center hover-lift chaos-type-card">
-            <input type="radio" name="chaos_type" value="PodChaos" class="sr-only" />
-            <iconify-icon icon="solar:box-bold" width="28" class="mx-auto mb-1"></iconify-icon>
-            <div class="text-sm font-bold">PodChaos</div>
-            <div class="text-xs" style="color: var(--muted-foreground);">파드 강제종료</div>
-          </label>
-          <label class="tds-card p-3 cursor-pointer text-center hover-lift chaos-type-card">
-            <input type="radio" name="chaos_type" value="StressChaos" class="sr-only" />
-            <iconify-icon icon="solar:cpu-bold" width="28" class="mx-auto mb-1"></iconify-icon>
-            <div class="text-sm font-bold">StressChaos</div>
-            <div class="text-xs" style="color: var(--muted-foreground);">CPU 부하</div>
-          </label>
+          <textarea name="objective" rows="3" class="env-textarea"
+            placeholder="예: 주문 API가 파드 장애와 네트워크 지연에도 60초 안에 정상화되면 좋겠어요"></textarea>
         </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3" data-chaos-fields="NetworkChaos">
-        <div><label class="text-base font-bold mb-2 block">지연 (ms)</label>
-          <input name="latency_ms" type="number" min="10" max="10000" value="200" class="tds-input mono text-base" /></div>
-        <div><label class="text-base font-bold mb-2 block">지속 (초)</label>
-          <input name="duration_s" type="number" min="30" max="1800" value="300" class="tds-input mono text-base" /></div>
-      </div>
-      <div class="hidden p-4 rounded-2xl text-sm" style="background: var(--muted); color: var(--muted-foreground);" data-chaos-fields="PodChaos">
-        파드를 즉시 1회 종료해요. 복구 속도(재기동)를 관찰하는 실험이라 추가 설정이 없어요
-      </div>
-      <div class="hidden grid grid-cols-2 gap-3" data-chaos-fields="StressChaos">
-        <div><label class="text-base font-bold mb-2 block">CPU 부하 (%)</label>
-          <input name="cpu_load" type="number" min="1" max="100" value="80" class="tds-input mono text-base" /></div>
-        <div><label class="text-base font-bold mb-2 block">지속 (초)</label>
-          <input name="duration_s" type="number" min="30" max="1800" value="300" class="tds-input mono text-base" disabled /></div>
-      </div>
-      <div class="p-4 rounded-2xl flex items-start gap-2.5" style="background: var(--primary-soft);">
-        <span class="tossface">🤖</span>
-        <div class="text-sm" style="color: var(--primary-soft-foreground);">
-          <span class="font-bold">AI Agent 자동 개선</span>은 Phase 3에서 연결돼요 — 지금은 주입·회복까지만 수행해요
+        <details class="rounded-2xl border px-4 py-3" style="border-color: var(--border);">
+          <summary class="text-sm font-bold cursor-pointer">고급 실행 설정
+            <span class="font-normal" style="color: var(--muted-foreground);">후보 5 · 개선 반복 3</span>
+          </summary>
+          <div class="grid grid-cols-2 gap-3 mt-3">
+            <div><label class="text-xs font-bold mb-1 block">후보 수</label>
+              <input name="max_candidates" type="number" min="1" max="10" value="5" class="tds-input mono text-sm h-10" /></div>
+            <div><label class="text-xs font-bold mb-1 block">개선 반복</label>
+              <input name="max_improvements" type="number" min="0" max="10" value="3" class="tds-input mono text-sm h-10" /></div>
+          </div>
+        </details>
+        <div class="p-4 rounded-2xl flex items-start gap-2.5" style="background: var(--primary-soft);">
+          <span class="tossface">🤖</span>
+          <div class="text-sm" style="color: var(--primary-soft-foreground);">
+            요청하면 AI가 앱 구조를 분석해 실험 후보를 제안해요. <span class="font-bold">선택하고 승인한 후보만 실행돼요</span>
+          </div>
         </div>
       </div>
     </div>
-    <div class="px-8 py-4 flex gap-2 justify-end border-t" style="border-color: var(--border);">
-      <button type="button" class="tds-btn-muted text-base" onclick="closeDialog('newExperiment')">닫기</button>
-      <button type="submit" class="tds-btn-primary text-base">
-        <iconify-icon icon="solar:bug-bold" width="16"></iconify-icon>
-        실험 시작할게요
-      </button>
+
+    <div class="px-8 py-4 flex items-center justify-between border-t" style="border-color: var(--border);">
+      <button type="button" class="tds-btn-muted text-base" data-wiz-prev>이전</button>
+      <div class="flex items-center gap-2">
+        <button type="button" class="tds-btn-muted text-base" onclick="closeDialog('newExperiment')">닫기</button>
+        <button type="button" class="tds-btn-primary text-base" data-wiz-next>
+          다음
+          <iconify-icon icon="lucide:arrow-right" width="16"></iconify-icon>
+        </button>
+        <button type="button" class="tds-btn-primary text-base hidden" data-wiz-submit
+                hx-get="/experiments/candidates" hx-include="closest form"
+                hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+          <iconify-icon icon="solar:magic-stick-3-bold" width="16"></iconify-icon>
+          후보 생성 요청할게요
+        </button>
+      </div>
     </div>
     </form>
   </div>

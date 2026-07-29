@@ -42,7 +42,7 @@ def test_experiments_page_shows_real_apps_and_no_mock(client):
     assert "online-boutique" in resp.text      # 실제 등록 앱이 select에
     assert "spring-boot-demo" not in resp.text  # 하드코딩 mock 제거
     assert "총 12건" not in resp.text           # 가짜 카운트 제거
-    assert 'name="chaos_type"' in resp.text
+    assert "후보 생성 요청할게요" in resp.text   # 수동 폼 제거 — AI 후보 선택형 위저드 (ADR-0006)
     assert "실험 중지" in resp.text              # running 행 중지 버튼 (seed 1건 running)
 
 
