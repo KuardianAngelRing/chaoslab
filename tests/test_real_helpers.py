@@ -107,6 +107,12 @@ def test_render_chaos_manifest_pod_kill_has_no_duration():
     assert "duration" not in m["spec"]
 
 
+def test_real_k8s_events_returns_empty_list():
+    from app.services.real.k8s import RealK8s
+
+    assert RealK8s(settings=None).events("sut") == []
+
+
 def test_render_chaos_manifest_stress_cpu():
     from app.services.real.chaos import render_chaos_manifest
 
