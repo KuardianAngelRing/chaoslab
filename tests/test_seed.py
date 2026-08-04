@@ -28,3 +28,14 @@ def test_seed_running_experiment_has_metrics(db_session):
     assert exp.baseline_metrics.get("p99") == 89
     assert exp.fault_metrics.get("p99") == 412
     assert exp.fault_metrics.get("error") == 2.1
+
+
+def test_seed_experiment_metrics_complete(db_session):
+    """목업 화면(R분해·baseline 오버레이)이 쓰는 metrics 키가 모두 seed되어야 한다."""
+    from app.db.seed import seed_data
+    from app.db.repositories import ExperimentRepository
+
+    seed_data(db_session)
+    exp = ExperimentRepository(db_session).list_all()[0]
+    assert {"rate", "error", "p99"} <= set(exp.baseline_metrics)
+    assert {"error", "p99", "ttr_s"} <= set(exp.recovery_metrics)
