@@ -41,3 +41,15 @@ def test_make_chaos_returns_stub_in_stub_mode():
     from app.services.stubs import StubChaos
 
     assert isinstance(make_chaos(), StubChaos)
+
+
+def test_stub_k8s_events_shape():
+    """이벤트 피드 계약: source/reason/message/ts, ts는 naive UTC(DB datetime과 정렬 호환)."""
+    from app.services.stubs import StubK8s
+
+    events = StubK8s().events("online-boutique")
+    assert len(events) >= 3
+    for e in events:
+        assert {"source", "reason", "message", "ts"} <= set(e)
+        assert e["source"] in ("chaos", "k8s")
+        assert e["ts"].tzinfo is None  # naive — DB datetime과 비교 가능해야 함

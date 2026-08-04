@@ -91,3 +91,8 @@ class K8sService(Protocol):
     def components(self) -> list[dict]:
         """시스템 컴포넌트 상태 (Prometheus/Grafana/Loki/Chaos Mesh/ArgoCD)."""
         ...
+
+    def events(self, namespace: str) -> list[dict]:
+        """네임스페이스 K8s 이벤트 (Chaos Mesh 이벤트도 K8s 이벤트로 방출되므로 이 메서드 하나로 조회).
+        각 항목: {source: 'chaos'|'k8s', reason, message, ts(naive UTC)}."""
+        ...

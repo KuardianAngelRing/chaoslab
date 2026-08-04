@@ -154,7 +154,7 @@
                   </div>
                   <div class="flex items-center justify-between">
                     <span style="color: var(--muted-foreground);">LLM 비용</span>
-                    <span class="font-bold mono">$1.23 / $5.00</span>
+                    <span class="font-bold mono">${{ "%.2f"|format(llm_cost) }}</span>
                   </div>
                   <div class="flex items-center justify-between">
                     <span style="color: var(--muted-foreground);">목표 R</span>
@@ -167,6 +167,74 @@
                     <span>목표 도달까지</span>
                     <span>예상 3 iteration</span>
                   </div>
+                  {% if r_comp %}
+                  <div class="pt-3 mt-3 border-t" style="border-color: var(--border);">
+                    <div class="text-[11px] font-bold uppercase mb-2" style="color: var(--muted-foreground);">
+                      R = 0.4×가용성 + 0.3×레이턴시 + 0.3×복구속도
+                    </div>
+                    {% for label, val in [("가용성", r_comp.availability), ("레이턴시", r_comp.latency_score), ("복구속도", r_comp.recovery_speed)] %}
+                    <div class="flex items-center gap-2 mb-1.5">
+                      <span class="text-xs w-14" style="color: var(--muted-foreground);">{{ label }}</span>
+                      <div class="progress-track flex-1"><div class="progress-fill" style="width: {{ (val * 100)|round|int }}%;"></div></div>
+                      <span class="text-xs font-bold mono w-9 text-right">{{ "%.2f"|format(val) }}</span>
+                    </div>
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <!-- 안전장치 + 이벤트 피드 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="tds-card p-6">
+                <div class="flex items-center gap-2 mb-4">
+                  <iconify-icon icon="solar:shield-check-bold" width="18" style="color: var(--primary);"></iconify-icon>
+                  <div class="font-extrabold">안전장치</div>
+                </div>
+                <div class="space-y-3 text-sm">
+                  <div class="text-[11px] font-bold uppercase" style="color: var(--muted-foreground);">주입 파라미터 · 허용 범위</div>
+                  {% if chaos_spec and chaos_spec.fields %}
+                  {% for name, rule in chaos_spec.fields.items() %}
+                  <div class="flex items-center justify-between">
+                    <span style="color: var(--muted-foreground);">{{ rule.label }}</span>
+                    <span>
+                      <span class="font-bold mono">{{ exp.params.get(name, "—") }}</span>
+                      <span class="text-xs ml-1" style="color: var(--muted-foreground);">(허용 범위 {{ rule.min }}~{{ rule.max }})</span>
+                    </span>
+                  </div>
+                  {% endfor %}
+                  {% else %}
+                  <div style="color: var(--muted-foreground);">원샷 주입 — 범위 파라미터 없음</div>
+                  {% endif %}
+                  <div class="pt-3 border-t" style="border-color: var(--border);">
+                    <div class="text-[11px] font-bold uppercase mb-2" style="color: var(--muted-foreground);">자동 중단 조건</div>
+                    <div class="flex items-center justify-between">
+                      <span style="color: var(--muted-foreground);">Error Rate &gt; 50% · 60초 지속</span>
+                      <span class="tds-badge badge-muted">예정</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tds-card p-6">
+                <div class="flex items-center gap-2 mb-4">
+                  <iconify-icon icon="solar:history-bold" width="18" style="color: var(--primary);"></iconify-icon>
+                  <div class="font-extrabold">이벤트 피드</div>
+                </div>
+                <div class="space-y-2.5 overflow-y-auto" style="max-height: 320px;">
+                  {% for e in events %}
+                  <div class="flex items-start gap-2.5 text-sm">
+                    <iconify-icon width="16" class="mt-0.5 shrink-0"
+                      icon="{% if e.source == 'chaos' %}solar:bug-bold{% elif e.source == 'k8s' %}solar:box-bold{% else %}solar:magic-stick-3-bold{% endif %}"
+                      style="color: {% if e.reason in ('Unhealthy', 'BackOff') %}var(--warning){% else %}var(--muted-foreground){% endif %};"></iconify-icon>
+                    <div class="flex-1 min-w-0">
+                      <span class="text-xs font-bold mr-1.5">{{ e.reason }}</span>
+                      <span class="text-xs" style="color: var(--muted-foreground);">{{ e.message }}</span>
+                    </div>
+                    <span class="text-[11px] mono shrink-0" style="color: var(--muted-foreground);">{{ e.ts.strftime("%H:%M:%S") }}</span>
+                  </div>
+                  {% endfor %}
                 </div>
               </div>
             </div>
@@ -181,6 +249,10 @@
               <select class="tds-input text-sm h-10 w-32"><option>최근 5분</option><option>최근 30분</option><option>실험 전체</option></select>
               <span class="text-xs font-bold ml-3" style="color: var(--muted-foreground);">소스</span>
               <select class="tds-input text-sm h-10 w-44"><option>Istio sidecar 메트릭</option><option>App level 메트릭</option></select>
+              <span class="text-xs flex items-center gap-1.5" style="color: var(--muted-foreground);">
+                <span style="border-top: 2px dashed var(--muted-foreground); width: 16px; display: inline-block;"></span> 기준선 평균
+                <span class="inline-block w-4 h-3 rounded-sm ml-2" style="background: color-mix(in srgb, var(--danger) 8%, transparent);"></span> 주입 구간
+              </span>
               <div class="flex-1"></div>
               <a class="text-xs font-bold flex items-center gap-1" style="color: var(--primary);" href="#">
                 <iconify-icon icon="logos:grafana" width="14"></iconify-icon>
@@ -199,7 +271,7 @@
                   </div>
                   <span class="tds-badge badge-success">▲ 12%</span>
                 </div>
-                <div class="chart-box"><canvas id="metricRate2"></canvas></div>
+                <div class="chart-box"><canvas id="metricRate2" data-baseline="{{ exp.baseline_metrics.get('rate', '') }}"></canvas></div>
               </div>
 
               <div class="tds-card p-5">
@@ -210,7 +282,7 @@
                   </div>
                   <span class="tds-badge badge-danger">▲ 카오스 주입</span>
                 </div>
-                <div class="chart-box"><canvas id="metricError2"></canvas></div>
+                <div class="chart-box"><canvas id="metricError2" data-baseline="{{ exp.baseline_metrics.get('error', '') }}"></canvas></div>
               </div>
 
               <div class="tds-card p-5">
@@ -221,7 +293,7 @@
                   </div>
                   <span class="tds-badge badge-warning">▲ 363%</span>
                 </div>
-                <div class="chart-box"><canvas id="metricLatency2"></canvas></div>
+                <div class="chart-box"><canvas id="metricLatency2" data-baseline="{{ exp.baseline_metrics.get('p99', '') }}"></canvas></div>
               </div>
 
               <div class="tds-card p-5">
@@ -272,7 +344,7 @@
                 </div>
                 <div class="text-right">
                   <div class="text-xs" style="color: var(--muted-foreground);">현재 비용</div>
-                  <div class="text-2xl font-extrabold" style="color: var(--primary);">$1.23 <span class="text-sm font-medium" style="color: var(--muted-foreground);">/ $5.00</span></div>
+                  <div class="text-2xl font-extrabold" style="color: var(--primary);">${{ "%.2f"|format(llm_cost) }} <span class="text-sm font-medium" style="color: var(--muted-foreground);">/ $5.00</span></div>
                 </div>
               </div>
 

@@ -1,4 +1,6 @@
 """Slice 1 스텁 — mock 데이터 반환. 외부 시스템 호출 없음. 운영은 services/real/ 사용."""
+from datetime import datetime, timedelta, timezone
+
 from app.services.interfaces import BuildRequest
 
 
@@ -69,3 +71,19 @@ class StubK8s:
     def components(self) -> list[dict]:
         names = ["Prometheus", "Grafana", "Loki", "Chaos Mesh", "ArgoCD"]
         return [{"name": n, "status": "Healthy"} for n in names]
+
+    def events(self, namespace: str) -> list[dict]:
+        # ts는 naive UTC — DB(DateTime 컬럼)의 naive datetime과 정렬 병합되므로 tzinfo를 붙이지 않는다
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return [
+            {"source": "chaos", "reason": "Applied",
+             "message": f"NetworkChaos CRD 적용 (namespace={namespace})", "ts": now - timedelta(minutes=4)},
+            {"source": "chaos", "reason": "Started",
+             "message": "delay 200ms 주입 시작", "ts": now - timedelta(minutes=3, seconds=50)},
+            {"source": "k8s", "reason": "Unhealthy",
+             "message": "readiness probe 실패: frontend-7d9", "ts": now - timedelta(minutes=3)},
+            {"source": "k8s", "reason": "BackOff",
+             "message": "cartservice-5fc 재시작 백오프", "ts": now - timedelta(minutes=2, seconds=30)},
+            {"source": "k8s", "reason": "Started",
+             "message": "frontend-7d9 컨테이너 시작", "ts": now - timedelta(minutes=1)},
+        ]

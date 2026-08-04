@@ -157,6 +157,23 @@ function chartCommon() {
   };
 }
 
+// ── 카오스 주입 구간 음영 (options.plugins.faultShade = {from, to} 라벨 인덱스) ──
+const faultShade = {
+  id: 'faultShade',
+  beforeDatasetsDraw(chart, _args, opts) {
+    if (opts.from == null) return;
+    const { ctx, chartArea, scales } = chart;
+    if (!scales.x) return;
+    const x0 = scales.x.getPixelForValue(opts.from);
+    const x1 = scales.x.getPixelForValue(opts.to);
+    ctx.save();
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim() + '12';
+    ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top);
+    ctx.restore();
+  }
+};
+Chart.register(faultShade);
+
 function makeTimeSeries(canvasId, color, base, variance, isStep = false) {
   const ctx = document.getElementById(canvasId);
   if (!ctx) return;
@@ -166,11 +183,16 @@ function makeTimeSeries(canvasId, color, base, variance, isStep = false) {
     if (i < 18) return base + (Math.random() - 0.5) * variance;
     return base * 0.4 + (Math.random() - 0.5) * (variance * 0.3);
   });
+  const datasets = [{ data, borderColor: color, backgroundColor: color + '22', fill: true, tension: isStep ? 0 : 0.4, stepped: isStep, pointRadius: 0, borderWidth: 2 }];
+  const baseline = parseFloat(ctx.dataset.baseline);
+  if (!isNaN(baseline)) {
+    datasets.push({ data: labels.map(() => baseline), borderColor: tdsTextColor(), borderDash: [4, 4], pointRadius: 0, borderWidth: 1.5, fill: false });
+  }
   const cc = chartCommon();
   window._charts[canvasId] = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [{ data, borderColor: color, backgroundColor: color + '22', fill: true, tension: isStep ? 0 : 0.4, stepped: isStep, pointRadius: 0, borderWidth: 2 }] },
-    options: { ...cc, scales: { ...cc.scales, x: { display: false } } }
+    data: { labels, datasets },
+    options: { ...cc, plugins: { ...cc.plugins, faultShade: { from: 5, to: 18 } }, scales: { ...cc.scales, x: { display: false } } }
   });
 }
 

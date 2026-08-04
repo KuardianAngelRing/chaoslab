@@ -38,6 +38,10 @@ class RealK8s:
             else:
                 raise
 
+    def events(self, namespace: str) -> list[dict]:
+        """Slice 4에서 실조회 예정 — 그 전까지 빈 피드 (페이지 500 방지)."""
+        return []
+
     def restart_deployment(self, namespace: str, name: str) -> None:
         """kubectl rollout restart와 동일 — 파드 템플릿 annotation 갱신으로 재기동."""
         from datetime import datetime, timezone
