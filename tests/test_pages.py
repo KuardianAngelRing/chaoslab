@@ -69,6 +69,15 @@ def test_experiment_detail_r_breakdown(client):
     assert "$0.04" in resp.text                # seed 실비용 3×0.012 반올림
 
 
+def test_experiment_detail_baseline_overlay_attrs(client):
+    """메트릭 탭 차트가 서버 렌더된 기준선 값을 data-baseline으로 받는다."""
+    resp = client.get("/experiments/1")
+    assert 'id="metricRate2" data-baseline="38' in resp.text
+    assert 'id="metricError2" data-baseline="0.3"' in resp.text
+    assert 'id="metricLatency2" data-baseline="89"' in resp.text
+    assert "주입 구간" in resp.text            # 범례 캡션
+
+
 def test_infra_page(client):
     resp = client.get("/infra")
     assert resp.status_code == 200
