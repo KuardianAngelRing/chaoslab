@@ -167,7 +167,7 @@ const faultShade = {
     const x0 = scales.x.getPixelForValue(opts.from);
     const x1 = scales.x.getPixelForValue(opts.to);
     ctx.save();
-    ctx.fillStyle = 'rgba(220, 38, 38, 0.07)';
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim() + '12';
     ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top);
     ctx.restore();
   }
