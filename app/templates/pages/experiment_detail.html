@@ -249,6 +249,10 @@
               <select class="tds-input text-sm h-10 w-32"><option>최근 5분</option><option>최근 30분</option><option>실험 전체</option></select>
               <span class="text-xs font-bold ml-3" style="color: var(--muted-foreground);">소스</span>
               <select class="tds-input text-sm h-10 w-44"><option>Istio sidecar 메트릭</option><option>App level 메트릭</option></select>
+              <span class="text-xs flex items-center gap-1.5" style="color: var(--muted-foreground);">
+                <span style="border-top: 2px dashed var(--muted-foreground); width: 16px; display: inline-block;"></span> 기준선 평균
+                <span class="inline-block w-4 h-3 rounded-sm ml-2" style="background: color-mix(in srgb, var(--danger) 8%, transparent);"></span> 주입 구간
+              </span>
               <div class="flex-1"></div>
               <a class="text-xs font-bold flex items-center gap-1" style="color: var(--primary);" href="#">
                 <iconify-icon icon="logos:grafana" width="14"></iconify-icon>
@@ -267,7 +271,7 @@
                   </div>
                   <span class="tds-badge badge-success">▲ 12%</span>
                 </div>
-                <div class="chart-box"><canvas id="metricRate2"></canvas></div>
+                <div class="chart-box"><canvas id="metricRate2" data-baseline="{{ exp.baseline_metrics.get('rate', '') }}"></canvas></div>
               </div>
 
               <div class="tds-card p-5">
@@ -278,7 +282,7 @@
                   </div>
                   <span class="tds-badge badge-danger">▲ 카오스 주입</span>
                 </div>
-                <div class="chart-box"><canvas id="metricError2"></canvas></div>
+                <div class="chart-box"><canvas id="metricError2" data-baseline="{{ exp.baseline_metrics.get('error', '') }}"></canvas></div>
               </div>
 
               <div class="tds-card p-5">
@@ -289,7 +293,7 @@
                   </div>
                   <span class="tds-badge badge-warning">▲ 363%</span>
                 </div>
-                <div class="chart-box"><canvas id="metricLatency2"></canvas></div>
+                <div class="chart-box"><canvas id="metricLatency2" data-baseline="{{ exp.baseline_metrics.get('p99', '') }}"></canvas></div>
               </div>
 
               <div class="tds-card p-5">
