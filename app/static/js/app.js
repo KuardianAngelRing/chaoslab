@@ -69,11 +69,11 @@ document.addEventListener('change', (e) => {
     : '모두 확인했어요 — 실행할 수 있어요';
 });
 
-// 실행 버튼 — 실행 화면은 다음 증분 (모의)
+// 실행 버튼 — hx-get으로 실험 상세(모의)로 이동. hx 속성이 없을 때만 안내 툴팁
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-plan-run]');
-  if (!t || t.disabled) return;
-  showFieldTooltip(t, '실험 실행 화면은 다음 증분이에요 (모의)');
+  if (!t || t.disabled || t.hasAttribute('hx-get')) return;
+  showFieldTooltip(t, '실행할 실험이 아직 없어요 (모의)');
 });
 
 // ============== 다이얼로그 ==============

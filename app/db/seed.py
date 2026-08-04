@@ -1,4 +1,6 @@
 """목업 화면을 채우는 대표 mock 데이터. `python -m app.db.seed`로 실행."""
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal, init_db
@@ -31,7 +33,7 @@ def seed_data(session: Session) -> None:
     )
     # 온프레미스(k3s) manifest 업로드형 SUT — ChaosPilot 흡수 데모용.
     # repo_url의 "k3s://" 접두가 환경 배지 판별 마킹 (App 모델에 환경 필드 생기면 교체)
-    apps.create(
+    order_msa = apps.create(
         name="order-msa", repo_url="k3s://manifest-upload",
         framework="manifest", namespace="order-msa", current_sha="", status="healthy",
     )
@@ -53,6 +55,17 @@ def seed_data(session: Session) -> None:
             recommender_output="timeout 1s→3s, retry 2회", r_index=r, verdict=verdict,
             llm_cost_usd=0.012,
         )
+
+    # 실환경 smoke 완주(2026-07-28) 스토리 재현 — 실패 판정→자동 개선→재검증 통과.
+    # 상세 화면 completed 상태 데모용, 단계별 내용은 pages._run_stub()이 채운다 (ADR-0008).
+    # started_at을 과거로 둬서 대시보드 '최신 실험'은 계속 running인 boutique 실험이 잡히게 한다
+    exps.create(
+        app_id=order_msa.id, chaos_type="PodChaos",
+        params={"action": "pod-kill", "mode": "one", "duration": "30s"},
+        status="completed",
+        started_at=datetime(2026, 7, 28, 12, 53, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 7, 28, 12, 55, tzinfo=timezone.utc),
+    )
 
 
 def main() -> None:

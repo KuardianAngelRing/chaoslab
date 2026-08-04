@@ -31,10 +31,30 @@ def test_experiments_page(client):
     assert "카오스 테스트" in resp.text
 
 
-def test_experiment_detail(client):
+def test_experiment_detail_running(client):
+    # seed 1번: boutique NetworkChaos running — 실행 진행 중 + 이후 단계 대기 (ADR-0008)
     resp = client.get("/experiments/1")
     assert resp.status_code == 200
-    assert "개요" in resp.text and "메트릭" in resp.text and "AI 루프" in resp.text
+    for stage in ("실행", "판정", "개선", "보고"):  # 스테퍼 4단계
+        assert stage in resp.text
+    assert "진행 중" in resp.text and "대기" in resp.text
+    assert "ADR-0005" in resp.text  # NetworkChaos엔 /healthz 얕은 측정 경고 상시 표기
+    assert "AI 루프" not in resp.text  # 구 5탭 잔재 제거
+
+
+def test_experiment_detail_completed_story(client):
+    # seed 2번: order-msa PodChaos completed — smoke 완주 스토리 (실패→개선→통과)
+    resp = client.get("/experiments/2")
+    assert resp.status_code == 200
+    # 판정: 12종 체크 전체 노출 + 실패 근거
+    assert "11/12" in resp.text
+    assert "ready_pods_maintained_during_fault" in resp.text
+    assert "LLM 판정 아님" in resp.text
+    # 개선: iteration 카드 (패치·안전 검증·재실험)
+    assert "PodDisruptionBudget" in resp.text
+    assert "안전 검증" in resp.text and "재실험 PASSED" in resp.text
+    # 보고: 원시 지표 비교 + R 수식 미확정 정직 표기
+    assert "원시 지표" in resp.text and "수식 미확정" in resp.text
 
 
 def test_experiment_detail_404(client):
