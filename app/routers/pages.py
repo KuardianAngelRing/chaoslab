@@ -12,6 +12,8 @@ from app.db.repositories import (
 from app.deps import get_app_count, get_k8s, get_loki
 from app.rendering import render_page
 from app.services import interfaces
+from app.services.chaos_specs import CHAOS_SPECS
+from app.services.r_index import r_components
 
 router = APIRouter()
 
@@ -95,6 +97,19 @@ def experiments_page(
     return render_page(request, "pages/experiments.html", ctx)
 
 
+def _platform_events(exp, iterations) -> list[dict]:
+    """DB 상태에서 만드는 플랫폼 이벤트 — 실험 시작/종료, AI iteration."""
+    events = [{"source": "platform", "reason": "ExperimentStarted",
+               "message": f"{exp.chaos_type} 실험 시작", "ts": exp.started_at}]
+    for it in iterations:
+        events.append({"source": "platform", "reason": "AgentIteration",
+                       "message": f"AI iteration {it.iteration} — {it.verdict}", "ts": it.created_at})
+    if exp.finished_at:
+        events.append({"source": "platform", "reason": "ExperimentFinished",
+                       "message": "실험 종료", "ts": exp.finished_at})
+    return events
+
+
 @router.get("/experiments/{exp_id}")
 def experiment_detail(
     request: Request,
@@ -102,17 +117,26 @@ def experiment_detail(
     session: Session = Depends(get_session),
     app_count: int = Depends(get_app_count),
     loki: interfaces.LokiService = Depends(get_loki),
+    k8s: interfaces.K8sService = Depends(get_k8s),
 ):
     exp = ExperimentRepository(session).get(exp_id)
     if exp is None:
         raise HTTPException(status_code=404, detail="experiment not found")
     iterations = IterationRepository(session).list_for_experiment(exp_id)
+    events = sorted(
+        k8s.events(exp.app.namespace) + _platform_events(exp, iterations),
+        key=lambda e: e["ts"], reverse=True,
+    )[:20]
     ctx = {
         "active_nav": "experiments",
         "app_count": app_count,
         "exp": exp,
         "iterations": iterations,
         "logs": loki.tail(exp.app.namespace, limit=20),
+        "events": events,
+        "r_comp": r_components(exp.baseline_metrics, exp.fault_metrics, exp.recovery_metrics),
+        "chaos_spec": CHAOS_SPECS.get(exp.chaos_type),
+        "llm_cost": sum(it.llm_cost_usd for it in iterations),
     }
     return render_page(request, "pages/experiment_detail.html", ctx)
 
