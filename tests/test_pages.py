@@ -42,6 +42,33 @@ def test_experiment_detail_404(client):
     assert resp.status_code == 404
 
 
+def test_experiment_detail_event_feed(client):
+    resp = client.get("/experiments/1")
+    assert resp.status_code == 200
+    assert "이벤트 피드" in resp.text
+    assert "주입 시작" in resp.text            # StubK8s chaos 이벤트
+    assert "Unhealthy" in resp.text            # StubK8s k8s 이벤트
+    assert "실험 시작" in resp.text            # 플랫폼 이벤트 (DB)
+
+
+def test_experiment_detail_safety_card(client):
+    resp = client.get("/experiments/1")
+    assert "안전장치" in resp.text
+    assert "허용 범위" in resp.text
+    assert "10~10000" in resp.text             # chaos_specs latency_ms 범위
+    assert "자동 중단 조건" in resp.text
+    assert "예정" in resp.text                 # 자동 중단은 표시만 (신규 개념)
+
+
+def test_experiment_detail_r_breakdown(client):
+    resp = client.get("/experiments/1")
+    assert "가용성" in resp.text and "복구속도" in resp.text
+    assert "0.98" in resp.text                 # availability (seed 기준 r_components)
+    assert "0.68" in resp.text                 # recovery_speed
+    assert "$1.23" not in resp.text            # 하드코딩 LLM 비용 제거
+    assert "$0.04" in resp.text                # seed 실비용 3×0.012 반올림
+
+
 def test_infra_page(client):
     resp = client.get("/infra")
     assert resp.status_code == 200
