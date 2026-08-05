@@ -320,3 +320,171 @@ function syncSidebarActive() {
 document.addEventListener('DOMContentLoaded', syncSidebarActive);
 document.body.addEventListener('htmx:afterSwap', syncSidebarActive);
 document.body.addEventListener('htmx:historyRestore', syncSidebarActive);
+
+// ── 카오스 워크플로우 UI 시안 (브라우저 상태만 변경, 서버 요청 없음) ──
+function syncWorkflowStageState(root) {
+  if (!root) return;
+  const stages = [...root.querySelectorAll('[data-workflow-stage]')];
+  const active = stages.find((stage) => stage.classList.contains('active')) || stages[0];
+  if (!active) return;
+  const currentIndex = Number(root.dataset.workflowCurrentStage || 1);
+  stages.forEach((stage) => {
+    const isActive = stage === active;
+    stage.classList.toggle('is-complete', Number(stage.dataset.stageIndex) < currentIndex);
+    stage.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  const setText = (selector, value) => {
+    const el = root.querySelector(selector);
+    if (el) el.textContent = value;
+  };
+  setText('[data-workflow-view-label]', active.dataset.stageLabel);
+  setText('[data-workflow-aside-view]', active.dataset.stageLabel);
+}
+
+function syncWorkflowCandidates(root) {
+  if (!root) return;
+  const candidates = [...root.querySelectorAll('[data-workflow-candidate]')];
+  candidates.forEach((candidate) => {
+    const card = candidate.closest('label')?.querySelector('[data-candidate-card]');
+    if (card) card.classList.toggle('is-selected', candidate.checked);
+  });
+  const selectedCandidates = candidates.filter((candidate) => candidate.checked);
+  const selectedIds = selectedCandidates.map((candidate) => candidate.dataset.candidateId);
+  const selected = selectedIds.length;
+  const maxSelected = Number(root.dataset.workflowMaxSelected || 3);
+  candidates.forEach((candidate) => {
+    const card = candidate.closest('label')?.querySelector('[data-candidate-card]');
+    if (candidate.disabled && !candidate.dataset.limitDisabled) return;
+    const limitDisabled = selected >= maxSelected && !candidate.checked;
+    candidate.disabled = limitDisabled;
+    if (limitDisabled) candidate.dataset.limitDisabled = 'true';
+    else delete candidate.dataset.limitDisabled;
+    if (card) card.classList.toggle('is-limit-disabled', limitDisabled);
+  });
+  const summary = root.querySelector('[data-workflow-selection-summary]');
+  if (summary) summary.textContent = selected ? `${selected}개 후보를 선택했어요` : '아직 선택한 후보가 없어요';
+  const help = root.querySelector('[data-workflow-selection-help]');
+  if (help) help.textContent = selected >= maxSelected ? `최대 ${maxSelected}개를 선택했어요. 하나를 해제하면 다른 후보를 고를 수 있습니다.` : `1개 이상, 최대 ${maxSelected}개까지 선택할 수 있습니다.`;
+  const next = root.querySelector('[data-workflow-selection-next]');
+  if (next) next.disabled = selected === 0;
+  const count = root.querySelector('[data-workflow-selected-count]');
+  if (count) count.textContent = `${selected}개`;
+  const executeStage = root.querySelector('[data-workflow-stage="execute"]');
+  if (executeStage && Number(root.dataset.workflowCurrentStage) < 3) {
+    executeStage.disabled = selected === 0;
+    executeStage.setAttribute('aria-disabled', selected === 0 ? 'true' : 'false');
+    executeStage.title = selected === 0 ? '후보를 하나 이상 선택하면 열립니다' : '';
+  }
+  syncWorkflowExecutionSelection(root, selectedIds);
+}
+
+function syncWorkflowExecutionSelection(root, selectedIds) {
+  const queueItems = [...root.querySelectorAll('[data-execution-queue-item]')];
+  queueItems.forEach((item) => {
+    const order = selectedIds.indexOf(item.dataset.executionQueueItem);
+    const selected = order >= 0;
+    item.classList.toggle('hidden', !selected);
+    item.classList.toggle('is-current', order === 0);
+    const orderEl = item.querySelector('[data-queue-order]');
+    if (orderEl && selected) orderEl.textContent = String(order + 1);
+    const status = item.querySelector('[data-queue-status]');
+    if (status && selected) status.textContent = order === 0 ? '현재 상세 · 개선 1회 예시' : '다음 실행 · 대기';
+  });
+  const empty = root.querySelector('[data-workflow-queue-empty]');
+  if (empty) empty.classList.toggle('hidden', selectedIds.length > 0);
+  root.querySelectorAll('[data-candidate-execution]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.candidateExecution !== selectedIds[0]);
+  });
+  const executionCount = root.querySelector('[data-workflow-execution-count]');
+  if (executionCount) executionCount.textContent = selectedIds.length ? `${selectedIds.length}개 선택 · 화면 예시` : '후보 선택 필요';
+}
+
+function syncCandidatePrompt(root) {
+  if (!root) return;
+  const prompt = root.querySelector('[data-candidate-prompt]');
+  const generate = root.querySelector('[data-candidate-generate]');
+  if (!prompt || !generate) return;
+  const value = prompt.value.trim();
+  generate.disabled = !value || value === generate.dataset.lastPrompt;
+  const count = root.querySelector('[data-candidate-prompt-count]');
+  if (count) count.textContent = `${prompt.value.length} / 200`;
+}
+
+function showGeneratedCandidate(root) {
+  const prompt = root?.querySelector('[data-candidate-prompt]');
+  const generate = root?.querySelector('[data-candidate-generate]');
+  const generated = root?.querySelector('[data-generated-candidate]');
+  const value = prompt?.value.trim();
+  if (!root || !generate || !generated || !value) return;
+  generated.classList.remove('hidden');
+  const promptText = generated.querySelector('[data-generated-prompt-text]');
+  if (promptText) promptText.textContent = `“${value}”`;
+  const total = root.querySelector('[data-workflow-candidate-total]');
+  if (total) total.textContent = '4개 후보 · 예시';
+  const label = generate.querySelector('[data-candidate-generate-label]');
+  if (label) label.textContent = '다른 예시로 갱신';
+  generate.dataset.lastPrompt = value;
+  syncCandidatePrompt(root);
+  syncWorkflowCandidates(root);
+}
+
+function initWorkflowDemo() {
+  document.querySelectorAll('[data-workflow-shell]').forEach((root) => {
+    syncWorkflowStageState(root);
+    syncWorkflowCandidates(root);
+    syncCandidatePrompt(root);
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const promptExample = e.target.closest && e.target.closest('[data-candidate-prompt-example]');
+  if (promptExample) {
+    const root = promptExample.closest('[data-workflow-shell]');
+    const prompt = root?.querySelector('[data-candidate-prompt]');
+    if (prompt) {
+      prompt.value = promptExample.dataset.candidatePromptExample;
+      syncCandidatePrompt(root);
+      prompt.focus();
+    }
+    return;
+  }
+
+  const generate = e.target.closest && e.target.closest('[data-candidate-generate]');
+  if (generate && !generate.disabled) {
+    showGeneratedCandidate(generate.closest('[data-workflow-shell]'));
+    return;
+  }
+
+  const stage = e.target.closest && e.target.closest('[data-workflow-stage]');
+  if (stage) syncWorkflowStageState(stage.closest('[data-workflow-shell]'));
+
+  const go = e.target.closest && e.target.closest('[data-workflow-go]');
+  if (!go || go.disabled) return;
+  const root = go.closest('[data-workflow-shell]');
+  const target = root?.querySelector(`[data-workflow-stage="${go.dataset.workflowGo}"]`);
+  if (target) {
+    if (go.hasAttribute('data-workflow-preview-unlock')) {
+      target.disabled = false;
+      target.setAttribute('aria-disabled', 'false');
+      target.title = '';
+    }
+    target.click();
+    root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.matches && e.target.matches('[data-workflow-candidate]')) {
+    syncWorkflowCandidates(e.target.closest('[data-workflow-shell]'));
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target.matches && e.target.matches('[data-candidate-prompt]')) {
+    syncCandidatePrompt(e.target.closest('[data-workflow-shell]'));
+  }
+});
+
+document.addEventListener('DOMContentLoaded', initWorkflowDemo);
+document.body.addEventListener('htmx:afterSwap', initWorkflowDemo);
