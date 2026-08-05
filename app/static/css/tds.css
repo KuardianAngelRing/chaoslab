@@ -324,3 +324,112 @@
       background: var(--primary-soft);
       color: var(--primary-soft-foreground);
     }
+
+    /* 카오스 워크플로우 UI 시안 — 기존 카드/색상 토큰 위에서만 동작 */
+    .workflow-stage-button {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      padding: 0.75rem;
+      border: 1px solid transparent;
+      border-radius: 1rem;
+      color: var(--muted-foreground);
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .workflow-stage-button:hover { background: var(--muted); color: var(--foreground); }
+    .workflow-stage-button:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+      background: transparent;
+    }
+    .workflow-stage-button.active {
+      background: var(--primary-soft);
+      border-color: var(--primary);
+      color: var(--primary-soft-foreground);
+    }
+    .workflow-stage-button.is-complete { color: var(--foreground); }
+    .workflow-stage-number {
+      width: 2rem;
+      height: 2rem;
+      flex: 0 0 2rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      background: var(--muted);
+      color: var(--muted-foreground);
+      font-size: 0.75rem;
+      font-weight: 800;
+    }
+    .workflow-stage-button.active .workflow-stage-number {
+      background: var(--primary);
+      color: var(--primary-foreground);
+    }
+    .workflow-stage-button.is-complete .workflow-stage-number {
+      background: var(--success);
+      color: #fff;
+    }
+    .workflow-stage-number [data-stage-check] { display: none; }
+    .workflow-stage-button.is-complete .workflow-stage-number [data-stage-number] { display: none; }
+    .workflow-stage-button.is-complete .workflow-stage-number [data-stage-check] { display: block; }
+
+    .workflow-candidate-card {
+      transition: border-color 0.15s, background 0.15s, transform 0.15s;
+    }
+    .workflow-candidate-card:hover { transform: translateY(-1px); border-color: var(--muted-foreground); }
+    .workflow-candidate-card.is-selected {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+      box-shadow: 0 0 0 1px var(--primary);
+    }
+    .workflow-candidate-card.is-limit-disabled { opacity: 0.5; }
+    .workflow-candidate-check {
+      width: 1.75rem;
+      height: 1.75rem;
+      flex: 0 0 1.75rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 0.625rem;
+      color: transparent;
+      background: var(--card);
+      transition: all 0.15s;
+    }
+    .workflow-candidate-card.is-selected .workflow-candidate-check {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: var(--primary-foreground);
+    }
+
+    .workflow-queue-item {
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+      border: 1px solid transparent;
+      border-radius: 0.75rem;
+      background: var(--muted);
+      color: var(--muted-foreground);
+    }
+    .workflow-queue-item.is-current {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+      color: var(--primary-soft-foreground);
+    }
+    .workflow-queue-order {
+      width: 1.5rem;
+      height: 1.5rem;
+      flex: 0 0 1.5rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      background: var(--card);
+      color: var(--foreground);
+      font-size: 0.6875rem;
+      font-weight: 800;
+    }
+    .workflow-queue-item.is-current .workflow-queue-order {
+      background: var(--primary);
+      color: var(--primary-foreground);
+    }

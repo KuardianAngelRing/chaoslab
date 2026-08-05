@@ -27,14 +27,78 @@ def test_apps_page_lists_seeded(client):
 def test_experiments_page(client):
     resp = client.get("/experiments")
     assert resp.status_code == 200
-    assert "NetworkChaos" in resp.text         # seed된 실험
     assert "카오스 테스트" in resp.text
+    assert "UI 디자인 시안" in resp.text
+    assert "새 실험 설계" in resp.text
+    assert "후보 선택" in resp.text and "최종 검증" in resp.text
+    assert 'hx-post="/experiments"' not in resp.text
+    assert "data-running-exp" not in resp.text
+    for run_id, stage in ((1, "plan"), (2, "execute"), (3, "result")):
+        assert f'/experiments/{run_id}?view={stage}' in resp.text
 
 
 def test_experiment_detail(client):
     resp = client.get("/experiments/1")
     assert resp.status_code == 200
-    assert "개요" in resp.text and "메트릭" in resp.text and "AI 루프" in resp.text
+    for stage in ("준비", "후보 선택", "순차 실행·개선", "최종 회귀 검증", "결과"):
+        assert stage in resp.text
+    assert "하드코딩된 UI 디자인 시안" in resp.text
+    assert "data-workflow-candidate" in resp.text
+    assert "API·DB·클러스터에 연결되지 않습니다" in resp.text
+    assert "hx-post" not in resp.text
+
+
+def test_experiment_demo_rows_open_their_own_fixed_state(client):
+    for run_id, code, stage in ((1, "CL-042", "plan"), (2, "CL-041", "execute"), (3, "CL-040", "result")):
+        resp = client.get(f"/experiments/{run_id}?view={stage}")
+        assert resp.status_code == 200
+        assert code in resp.text
+        assert f'data-initial-stage="{stage}"' in resp.text
+
+
+def test_experiment_future_stage_query_is_clamped(client):
+    resp = client.get("/experiments/1?view=result")
+    assert resp.status_code == 200
+    assert 'data-initial-stage="plan"' in resp.text
+    resp = client.get("/experiments/2?view=verify")
+    assert resp.status_code == 200
+    assert 'data-initial-stage="execute"' in resp.text
+
+
+def test_prepare_page_contains_only_decision_gates(client):
+    resp = client.get("/experiments/1?view=prepare")
+    assert resp.status_code == 200
+    for gate in ("대상 유효성", "판정 가능한 관측", "장애 정리 보장", "자동 변경 경계"):
+        assert gate in resp.text
+    assert "사용자 목표 초안" in resp.text
+    assert "4/4" not in resp.text
+    assert "Deployment 3개" not in resp.text
+    assert "RED metric 3종" not in resp.text
+
+
+def test_candidate_prompt_adds_a_selectable_ui_only_sample(client):
+    resp = client.get("/experiments/1?view=plan")
+    assert resp.status_code == 200
+    assert "원하는 후보가 없나요?" in resp.text
+    assert "data-candidate-prompt" in resp.text
+    assert "data-candidate-generate" in resp.text
+    assert 'data-workflow-max-selected="3"' in resp.text
+    assert 'data-candidate-id="custom"' in resp.text
+    assert 'data-execution-queue-item="custom"' in resp.text
+    assert 'data-candidate-execution="custom"' in resp.text
+    assert "checkoutservice · memory-stress" in resp.text
+    assert "입력 내용과 무관하게" in resp.text
+    assert "hx-post" not in resp.text
+
+
+def test_execute_stage_can_open_final_verification_preview(client):
+    resp = client.get("/experiments/2?view=execute")
+    assert resp.status_code == 200
+    assert 'data-workflow-go="verify"' in resp.text
+    assert "data-workflow-preview-unlock" in resp.text
+    assert "최종 회귀 검증 시안 보기" in resp.text
+    assert 'data-workflow-go="result" data-workflow-preview-unlock' in resp.text
+    assert "결과 화면 시안 보기" in resp.text
 
 
 def test_experiment_detail_404(client):

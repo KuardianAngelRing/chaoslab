@@ -7,9 +7,8 @@ from app.db.repositories import (
     AppRepository,
     BuildRepository,
     ExperimentRepository,
-    IterationRepository,
 )
-from app.deps import get_app_count, get_k8s, get_loki
+from app.deps import get_app_count, get_k8s
 from app.rendering import render_page
 from app.services import interfaces
 
@@ -85,13 +84,9 @@ def apps_page(
 @router.get("/experiments")
 def experiments_page(
     request: Request,
-    session: Session = Depends(get_session),
     app_count: int = Depends(get_app_count),
 ):
-    exps = ExperimentRepository(session).list_all()
-    apps = AppRepository(session).list_all()
-    ctx = {"active_nav": "experiments", "app_count": app_count,
-           "experiments": exps, "apps": apps}
+    ctx = {"active_nav": "experiments", "app_count": app_count}
     return render_page(request, "pages/experiments.html", ctx)
 
 
@@ -99,21 +94,11 @@ def experiments_page(
 def experiment_detail(
     request: Request,
     exp_id: int,
-    session: Session = Depends(get_session),
     app_count: int = Depends(get_app_count),
-    loki: interfaces.LokiService = Depends(get_loki),
 ):
-    exp = ExperimentRepository(session).get(exp_id)
-    if exp is None:
+    if exp_id not in (1, 2, 3):
         raise HTTPException(status_code=404, detail="experiment not found")
-    iterations = IterationRepository(session).list_for_experiment(exp_id)
-    ctx = {
-        "active_nav": "experiments",
-        "app_count": app_count,
-        "exp": exp,
-        "iterations": iterations,
-        "logs": loki.tail(exp.app.namespace, limit=20),
-    }
+    ctx = {"active_nav": "experiments", "app_count": app_count}
     return render_page(request, "pages/experiment_detail.html", ctx)
 
 
