@@ -1,5 +1,5 @@
 {% extends layout|default("base.html") %}
-{% from "macros/components.html" import app_card, badge, framework_icon %}
+{% from "macros/components.html" import app_card, badge, framework_icon, env_badge %}
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-8 py-8">
@@ -36,7 +36,7 @@
             {{ framework_icon(app.framework) }}
           </div>
           <div>
-            <div class="font-extrabold">{{ app.name }}</div>
+            <div class="font-extrabold flex items-center gap-2">{{ app.name }} {{ env_badge(app, compact=True) }}</div>
             <div class="text-xs mono" style="color: var(--muted-foreground);">{{ app.branch }}</div>
           </div>
         </div>
@@ -156,9 +156,9 @@
   </div>
 </div>
 
-<!-- DIALOG: 새 앱 등록 (3-step 위저드) -->
+<!-- DIALOG: 새 앱 등록 (4-step 위저드 — 첫 분기는 환경: ADR-0003, 등록=배포까지: ADR-0004) -->
 <div class="dialog-backdrop" id="dialog-newApp">
-  <div class="dialog-card" data-wizard>
+  <div class="dialog-card" data-wizard data-wiz-steps="4">
     <div class="dialog-resize-handle" title="드래그하여 크기 조절">
       <svg width="20" height="20" viewBox="-2 -2 40 40" fill="none" style="color: var(--primary);">
         <path d="M 10 34 Q 30 30 34 10" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" />
@@ -176,7 +176,7 @@
 
     <!-- 스텝 인디케이터 -->
     <div class="px-8 pb-4 flex items-center justify-center gap-2.5 text-sm font-bold" data-wiz-indicator>
-      {% set steps = [("1", "소스"), ("2", "빌드 설정"), ("3", "환경변수")] %}
+      {% set steps = [("1", "환경"), ("2", "소스"), ("3", "설정"), ("4", "마무리")] %}
       {% for num, label in steps %}
       <div class="flex items-center gap-2" data-wiz-dot="{{ num }}">
         <span class="w-7 h-7 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span>
@@ -189,40 +189,106 @@
     <form hx-post="/apps" hx-target="#main-content" hx-swap="innerHTML" novalidate class="flex-1 min-h-0 flex flex-col">
     <div class="flex-1 min-h-0 overflow-auto px-8 pb-8 flex flex-col">
 
-      <!-- Step 1: 소스 -->
-      <div data-wiz-panel="1" class="flex-1 flex flex-col justify-center space-y-6">
-        <div>
-          <label class="text-base font-bold mb-2 block">GitHub 저장소 URL</label>
-          <p class="text-sm mb-2" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소 URL을 입력해주세요</p>
-          <input name="repo_url" class="tds-input mono text-base" placeholder="https://github.com/org/repo" data-wiz-required data-wiz-msg="GitHub 저장소 URL을 입력해 주세요" />
-        </div>
-        <div>
-          <label class="text-base font-bold mb-2 block">브랜치</label>
-          <p class="text-sm mb-2" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
-          <input name="branch" class="tds-input mono text-base" value="main" />
-        </div>
-      </div>
-
-      <!-- Step 2: 빌드 설정 -->
-      <div data-wiz-panel="2" class="hidden flex-1 flex flex-col justify-center space-y-6">
-        <div>
-          <label class="text-base font-bold mb-2 block">Health Path</label>
-          <p class="text-sm mb-2" style="color: var(--muted-foreground);">컨테이너 상태를 확인할 HTTP 경로예요 (비우면 TCP 포트로 확인해요)</p>
-          <input name="health_path" class="tds-input mono text-base" value="/actuator/health" />
-        </div>
-        <div>
-          <label class="text-base font-bold mb-2 block">Port</label>
-          <p class="text-sm mb-2" style="color: var(--muted-foreground);">컨테이너가 listen 하는 포트예요</p>
-          <input name="port" type="number" class="tds-input mono text-base" value="8080" />
+      <!-- Step 1: 환경 — 앱이 사는 클러스터가 소스 입력 방식을 결정한다 -->
+      <div data-wiz-panel="1" class="flex-1 flex flex-col justify-center space-y-4">
+        <label class="text-base font-bold block">앱이 어느 클러스터에서 돌아가나요?</label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="tds-card p-5 cursor-pointer env-pick-card text-center hover-lift">
+            <input type="radio" name="cluster_env" value="eks" class="sr-only" checked />
+            <iconify-icon icon="logos:aws" width="30" class="mx-auto mb-2"></iconify-icon>
+            <div class="text-sm font-bold">EKS · 클라우드</div>
+            <div class="text-xs mt-1" style="color: var(--muted-foreground);">GitHub 저장소를 빌드해서 배포해요</div>
+          </label>
+          <label class="tds-card p-5 cursor-pointer env-pick-card text-center hover-lift">
+            <input type="radio" name="cluster_env" value="k3s" class="sr-only" />
+            <span class="tossface block mx-auto mb-2" style="font-size: 1.875rem;">🍓</span>
+            <div class="text-sm font-bold">k3s · 온프레미스</div>
+            <div class="text-xs mt-1" style="color: var(--muted-foreground);">manifest YAML을 그대로 배포해요</div>
+          </label>
         </div>
       </div>
 
-      <!-- Step 3: 환경변수 (단일 입력, 모달 높이에 맞춰 늘어남) -->
-      <div data-wiz-panel="3" class="hidden flex-1 min-h-0 flex flex-col">
-        <label class="text-base font-bold mb-2 block">환경변수 <span style="color: var(--muted-foreground);">(선택)</span></label>
-        <p class="text-sm mb-2" style="color: var(--muted-foreground);">KEY=VALUE 형식으로 한 줄에 하나씩 입력해요</p>
-        <textarea id="env-paste" class="env-textarea mono text-sm flex-1" placeholder="DB_HOST=mysql&#10;API_TOKEN=xxxxx"></textarea>
-        <input type="hidden" name="env_json" id="env-json" value="[]" />
+      <!-- Step 2: 소스 -->
+      <div data-wiz-panel="2" class="hidden flex-1 flex flex-col justify-center">
+        <div data-env-panel="eks" class="space-y-6">
+          <div>
+            <label class="text-base font-bold mb-2 block">GitHub 저장소 URL</label>
+            <p class="text-sm mb-2" style="color: var(--muted-foreground);">Dockerfile 이 포함된 저장소 URL을 입력해주세요</p>
+            <input name="repo_url" class="tds-input mono text-base" placeholder="https://github.com/org/repo" data-wiz-required data-wiz-msg="GitHub 저장소 URL을 입력해 주세요" />
+          </div>
+          <div>
+            <label class="text-base font-bold mb-2 block">브랜치</label>
+            <p class="text-sm mb-2" style="color: var(--muted-foreground);">빌드할 Git 브랜치예요 (기본 main)</p>
+            <input name="branch" class="tds-input mono text-base" value="main" />
+          </div>
+        </div>
+        <div data-env-panel="k3s" class="hidden space-y-6">
+          <div>
+            <label class="text-base font-bold mb-2 block">앱 이름</label>
+            <p class="text-sm mb-2" style="color: var(--muted-foreground);">목록과 네임스페이스에 쓰일 이름이에요</p>
+            <input name="name" class="tds-input mono text-base" placeholder="order-msa" data-wiz-required data-wiz-msg="앱 이름을 입력해 주세요" disabled />
+          </div>
+          <div>
+            <label class="text-base font-bold mb-2 block">manifest 파일</label>
+            <label class="block rounded-2xl border-2 border-dashed p-6 text-center cursor-pointer" style="border-color: var(--border);">
+              <iconify-icon icon="solar:upload-bold" width="24" style="color: var(--muted-foreground);"></iconify-icon>
+              <div class="text-sm font-bold mt-1">Deployment·Service YAML 또는 ZIP 업로드</div>
+              <div class="text-xs mt-0.5" style="color: var(--muted-foreground);">모의 — 아직 파일을 저장하지 않아요</div>
+              <input type="file" name="manifest" accept=".yaml,.yml,.zip" class="sr-only" disabled />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3: 설정 -->
+      <div data-wiz-panel="3" class="hidden flex-1 flex flex-col justify-center">
+        <div data-env-panel="eks" class="space-y-6">
+          <div>
+            <label class="text-base font-bold mb-2 block">Health Path</label>
+            <p class="text-sm mb-2" style="color: var(--muted-foreground);">컨테이너 상태를 확인할 HTTP 경로예요 (비우면 TCP 포트로 확인해요)</p>
+            <input name="health_path" class="tds-input mono text-base" value="/actuator/health" />
+          </div>
+          <div>
+            <label class="text-base font-bold mb-2 block">Port</label>
+            <p class="text-sm mb-2" style="color: var(--muted-foreground);">컨테이너가 listen 하는 포트예요</p>
+            <input name="port" type="number" class="tds-input mono text-base" value="8080" />
+          </div>
+        </div>
+        <div data-env-panel="k3s" class="hidden space-y-6">
+          <div>
+            <label class="text-base font-bold mb-2 block">부하 검증 경로</label>
+            <p class="text-sm mb-2" style="color: var(--muted-foreground);">장애 주입 중에 k6가 이 경로로 요청을 보내 "아직 응답하나"를 측정해요</p>
+            <input name="health_path" class="tds-input mono text-base" value="/healthz" data-wiz-required data-wiz-msg="부하 검증 경로를 입력해 주세요" disabled />
+            <p class="text-xs mt-2" style="color: var(--warning);">⚠️ 생존 경로만으로는 네트워크 지연 장애를 못 잡아요 — 기능 경로 승격 논의 예정 (ADR-0005)</p>
+          </div>
+          <details class="rounded-2xl border px-4 py-3" style="border-color: var(--border);">
+            <summary class="text-sm font-bold cursor-pointer">고급 <span class="font-normal" style="color: var(--muted-foreground);">네임스페이스는 앱 이름으로 자동 생성돼요</span></summary>
+            <div class="mt-3">
+              <label class="text-xs font-bold mb-1 block">네임스페이스</label>
+              <input name="namespace" class="tds-input mono text-sm h-10" placeholder="비우면 앱 이름으로 만들어요" disabled />
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <!-- Step 4: 마무리 -->
+      <div data-wiz-panel="4" class="hidden flex-1 min-h-0 flex flex-col">
+        <div data-env-panel="eks" class="flex-1 min-h-0 flex flex-col">
+          <label class="text-base font-bold mb-2 block">환경변수 <span style="color: var(--muted-foreground);">(선택)</span></label>
+          <p class="text-sm mb-2" style="color: var(--muted-foreground);">KEY=VALUE 형식으로 한 줄에 하나씩 입력해요</p>
+          <textarea id="env-paste" class="env-textarea mono text-sm flex-1" placeholder="DB_HOST=mysql&#10;API_TOKEN=xxxxx"></textarea>
+          <input type="hidden" name="env_json" id="env-json" value="[]" />
+        </div>
+        <div data-env-panel="k3s" class="hidden flex-1 flex flex-col justify-center">
+          <div class="p-5 rounded-2xl flex items-start gap-2.5" style="background: var(--primary-soft);">
+            <span class="tossface">🚀</span>
+            <div class="text-sm leading-relaxed" style="color: var(--primary-soft-foreground);">
+              <span class="font-bold">등록을 마치면 바로 클러스터에 배포돼요.</span><br />
+              manifest를 앱 네임스페이스에 apply하고, 파드가 준비되면 healthy로 표시돼요.
+              지금은 모의라 목록에 앱만 추가돼요
+            </div>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -233,10 +299,17 @@
         <button type="button" class="tds-btn-primary text-base" data-wiz-next>
           다음<iconify-icon icon="solar:alt-arrow-right-linear" width="14"></iconify-icon>
         </button>
-        <button type="submit" class="tds-btn-primary text-base hidden" data-wiz-submit>
-          <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
-          등록할게요
-        </button>
+        <div class="hidden" data-wiz-submit>
+          <button type="submit" class="tds-btn-primary text-base" data-submit-eks>
+            <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
+            등록하고 배포할게요
+          </button>
+          <button type="button" class="tds-btn-primary text-base hidden" data-submit-k3s
+                  hx-post="/apps/k3s" hx-include="closest form" hx-target="#main-content" hx-swap="innerHTML">
+            <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
+            등록하고 배포할게요
+          </button>
+        </div>
       </div>
     </div>
     </form>

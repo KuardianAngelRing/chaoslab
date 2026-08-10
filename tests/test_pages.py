@@ -29,7 +29,7 @@ def test_experiments_page(client):
     assert resp.status_code == 200
     assert "카오스 테스트" in resp.text
     assert "UI 디자인 시안" in resp.text
-    assert "새 실험 설계" in resp.text
+    assert "새 실험 시작" in resp.text
     assert "후보 선택" in resp.text and "최종 검증" in resp.text
     assert 'hx-post="/experiments"' not in resp.text
     assert "data-running-exp" not in resp.text
@@ -40,11 +40,14 @@ def test_experiments_page(client):
 def test_experiment_detail(client):
     resp = client.get("/experiments/1")
     assert resp.status_code == 200
-    for stage in ("준비", "후보 선택", "순차 실행·개선", "최종 회귀 검증", "결과"):
+    # 준비 탭 제거 — 4단계 스테퍼 (게이트는 후보 선택 탭 배너로 흡수)
+    for stage in ("후보 선택", "순차 실행·개선", "최종 회귀 검증", "결과"):
         assert stage in resp.text
-    assert "하드코딩된 UI 디자인 시안" in resp.text
+    assert 'data-workflow-stage="prepare"' not in resp.text
     assert "data-workflow-candidate" in resp.text
-    assert "API·DB·클러스터에 연결되지 않습니다" in resp.text
+    # SAMPLE DATA 배너·실행 컨텍스트 사이드 패널 제거 (디자인 피드백)
+    assert "SAMPLE DATA" not in resp.text
+    assert "실행 컨텍스트" not in resp.text
     assert "hx-post" not in resp.text
 
 
@@ -65,15 +68,18 @@ def test_experiment_future_stage_query_is_clamped(client):
     assert 'data-initial-stage="execute"' in resp.text
 
 
-def test_prepare_page_contains_only_decision_gates(client):
+def test_prepare_view_removed_and_gates_absorbed_into_plan(client):
+    # 구 준비 탭 URL은 존재하지 않는 view → 기본 view로 클램프
     resp = client.get("/experiments/1?view=prepare")
     assert resp.status_code == 200
-    for gate in ("대상 유효성", "판정 가능한 관측", "장애 정리 보장", "자동 변경 경계"):
+    assert 'data-initial-stage="plan"' in resp.text
+    # 게이트 3종은 후보 선택 탭 상단 접이식 배너로
+    resp = client.get("/experiments/1?view=plan")
+    assert "data-precheck-banner" in resp.text
+    assert "사전 점검 3/3 통과" in resp.text
+    for gate in ("대상 유효성", "판정 가능한 관측", "장애 정리 보장"):
         assert gate in resp.text
-    assert "사용자 목표 초안" in resp.text
-    assert "4/4" not in resp.text
-    assert "Deployment 3개" not in resp.text
-    assert "RED metric 3종" not in resp.text
+    assert "후보 생성이 차단됩니다" in resp.text   # 실패 시 차단 계약 명시
 
 
 def test_candidate_prompt_adds_a_selectable_ui_only_sample(client):
@@ -110,6 +116,60 @@ def test_infra_page(client):
     resp = client.get("/infra")
     assert resp.status_code == 200
     assert "Prometheus" in resp.text and "ng-spot-1" in resp.text
+
+
+def test_local_infra_page(client):
+    resp = client.get("/infra/local")
+    assert resp.status_code == 200
+    assert "로컬 인프라" in resp.text
+    assert "chaospilot-k3s" in resp.text
+    assert "masternode" in resp.text and "worker2" in resp.text
+    assert "Raspberry Pi 4B" in resp.text
+    assert "Chaos Mesh" in resp.text and "chaospilot-observability" in resp.text
+    assert "SSH 터널" in resp.text
+    assert "모의 데이터" in resp.text            # 목업 정직 표기
+
+
+def test_local_infra_partial_when_hx(client):
+    resp = client.get("/infra/local", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert "<!DOCTYPE html>" not in resp.text
+
+
+def test_apps_new_dialog_env_branch(client):
+    resp = client.get("/apps")
+    assert resp.status_code == 200
+    # 4-step 위저드: 환경 → 소스 → 설정 → 마무리 (ADR-0003)
+    assert 'data-wiz-steps="4"' in resp.text
+    assert "어느 클러스터" in resp.text
+    assert "manifest YAML을 그대로 배포해요" in resp.text
+    assert "부하 검증 경로" in resp.text          # ADR-0005 필드 (k3s 분기)
+    assert "등록하고 배포할게요" in resp.text      # ADR-0004 정직 CTA
+
+
+def test_register_k3s_app_stub(client):
+    resp = client.post("/apps/k3s", data={"name": "demo-msa", "health_path": "/orders"})
+    assert resp.status_code == 200
+    assert "demo-msa" in resp.text               # 앱 목록에 즉시 등장
+    # 새 실험 위저드에서 k3s 환경 배지로 표시 (seed order-msa + 신규 = 2개 이상)
+    exp = client.get("/experiments")
+    assert "demo-msa" in exp.text
+    assert exp.text.count("k3s · 온프레미스") >= 2
+
+
+def test_experiments_new_dialog_wizard(client):
+    resp = client.get("/experiments")
+    assert resp.status_code == 200
+    # 2-step 위저드: 대상 앱 → 검증 목표 (설계는 항상 AI 후보 선택형, ADR-0006)
+    assert 'data-wiz-steps="2"' in resp.text
+    assert "대상 앱" in resp.text and "검증 목표" in resp.text
+    assert "후보 생성 요청할게요" in resp.text
+    # 제출은 워크플로우 시안의 후보 선택 단계로 바로 진입 (준비 탭 제거)
+    assert 'hx-get="/experiments/1?view=plan"' in resp.text
+    # 환경 배지 — order-msa만 k3s, 나머지는 EKS
+    assert "k3s · 온프레미스" in resp.text and "EKS · 클라우드" in resp.text
+    # 직접 설계 폼 제거 (ADR-0006)
+    assert 'name="latency_ms"' not in resp.text and "직접 설계" not in resp.text
 
 
 def test_settings_page(client):
