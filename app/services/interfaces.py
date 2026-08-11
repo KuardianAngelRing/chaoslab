@@ -91,3 +91,30 @@ class K8sService(Protocol):
     def components(self) -> list[dict]:
         """시스템 컴포넌트 상태 (Prometheus/Grafana/Loki/Chaos Mesh/ArgoCD)."""
         ...
+
+
+class HandoffSourceService(Protocol):
+    """AI 전달 페이로드 재료 중 외부 시스템산(産) — Real 구현은 Slice 4·5에서.
+
+    반환 dict의 키는 services/agent/handoff_schema.py 계약 모델과 1:1.
+    """
+
+    def phase_summary(self, namespace: str, app_name: str, phase: str) -> dict:
+        """단계(baseline|fault|recovery)별 지표 요약. PhaseSummary와 동일 키."""
+        ...
+
+    def istio_config(self, namespace: str, app_name: str) -> dict:
+        """{"virtual_service_yaml": str, "destination_rule_yaml": str}."""
+        ...
+
+    def deployment_info(self, namespace: str, app_name: str) -> dict:
+        """{"replicas": int, "probes": dict, "resources": dict}."""
+        ...
+
+    def events(self, namespace: str, app_name: str) -> list[dict]:
+        """K8s 이벤트 원본 목록. K8sEvent와 동일 키."""
+        ...
+
+    def error_logs(self, namespace: str, app_name: str, limit: int = 20) -> list[str]:
+        """중복 제거된 에러 로그 샘플, 최대 limit개."""
+        ...
