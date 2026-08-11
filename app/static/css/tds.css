@@ -465,3 +465,37 @@
       background: var(--primary);
       color: var(--primary-foreground);
     }
+
+    /* 실행 탭 모의 실행 애니메이션 (시안) — data-exec-* 훅은 experiment_detail.html */
+    .exec-pending {
+      opacity: 0.25;
+      filter: grayscale(1);
+      transition: opacity 0.4s ease, filter 0.4s ease;
+    }
+    .exec-active {
+      opacity: 1;
+      filter: none;
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+      animation: exec-breathe 0.95s ease-in-out infinite;
+    }
+    @keyframes exec-breathe {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.03); }
+    }
+    [data-exec-after], [data-exec-analysis] { transition: opacity 0.5s ease; }
+    .exec-hidden { opacity: 0; }
+    .exec-live::before {
+      content: "";
+      width: 0.375rem;
+      height: 0.375rem;
+      border-radius: 9999px;
+      background: currentColor;
+      margin-right: 0.25rem;
+      flex-shrink: 0;
+      animation: exec-blink 1s ease-in-out infinite;
+    }
+    @keyframes exec-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.25; }
+    }

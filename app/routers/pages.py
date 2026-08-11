@@ -40,26 +40,9 @@ def dashboard(
     app_count: int = Depends(get_app_count),
     k8s: interfaces.K8sService = Depends(get_k8s),
 ):
-    exps = ExperimentRepository(session).list_all()
-    running = [e for e in exps if e.status == "running"]
-    latest_exp = max(exps, key=lambda e: e.started_at) if exps else None
-    iterations = sorted(latest_exp.iterations, key=lambda i: i.iteration) if latest_exp else []
-    latest_iter = iterations[-1] if iterations else None
-    r_series = ([latest_exp.baseline_r] + [it.r_index for it in iterations]) if latest_exp else []
-    r_labels = (["기준선"] + [f"개선 {it.iteration}회차" for it in iterations]) if latest_exp else []
-    llm_cost_total = sum(it.llm_cost_usd for e in exps for it in e.iterations)
-    latest_r = next((f"{e.r_index:.2f}" for e in exps if e.r_index is not None), "—")
     ctx = {
         "active_nav": "dashboard",
         "app_count": app_count,
-        "running_count": len(running),
-        "latest_exp": latest_exp,
-        "iterations": iterations,
-        "latest_iter": latest_iter,
-        "r_series": r_series,
-        "r_labels": r_labels,
-        "llm_cost_total": llm_cost_total,
-        "latest_r": latest_r,
         "components": k8s.components(),
         "node_count": len(k8s.nodes()),
         "recent": _recent_activity(session),

@@ -481,6 +481,64 @@ function syncWorkflowExecutionSelection(root, selectedIds) {
   });
   const executionCount = root.querySelector('[data-workflow-execution-count]');
   if (executionCount) executionCount.textContent = selectedIds.length ? `${selectedIds.length}개 선택 · 화면 예시` : '후보 선택 필요';
+  maybePlayExecution(root);
+}
+
+// ── 실행 탭 모의 실행 애니메이션 (시안) — 6단계 파이프라인이 실제 도는 듯한 연출 ──
+const EXEC_STEP_MS = 950;
+const EXEC_TIMELINE = [
+  { badge: ['badge-info', '기준선 관측 중'] },
+  { badge: ['badge-warning', '장애 주입 중'] },
+  { badge: ['badge-info', '정리 확인 중'] },
+  { badge: ['badge-danger', '초기 판정 실패'] },
+  { badge: ['badge-info', 'AI 분석·개선 중'], reveal: true, attempt: 'attempt 2 / 3' },
+  { badge: ['badge-warning', '동조건 재실험 중'] },
+];
+
+function execFinish(card) {
+  card.querySelectorAll('[data-exec-step]').forEach((s) => s.classList.remove('exec-pending', 'exec-active'));
+  card.querySelectorAll('[data-exec-after]').forEach((a) => a.classList.remove('exec-hidden'));
+  const analysis = card.querySelector('[data-exec-analysis]');
+  if (analysis) analysis.classList.remove('exec-hidden');
+  const badge = card.querySelector('[data-exec-status]');
+  if (badge) { badge.className = 'tds-badge badge-success'; badge.textContent = '재실험 통과'; }
+  const attempt = card.querySelector('[data-exec-attempt]');
+  if (attempt) attempt.textContent = 'attempt 2 / 3';
+}
+
+function playExecutionDemo(card) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { execFinish(card); return; }
+  const steps = [...card.querySelectorAll('[data-exec-step]')];
+  const badge = card.querySelector('[data-exec-status]');
+  const attempt = card.querySelector('[data-exec-attempt]');
+  const analysis = card.querySelector('[data-exec-analysis]');
+  steps.forEach((s) => s.classList.add('exec-pending'));
+  card.querySelectorAll('[data-exec-after]').forEach((a) => a.classList.add('exec-hidden'));
+  if (analysis) analysis.classList.add('exec-hidden');
+  if (attempt) attempt.textContent = 'attempt 1 / 3';
+  steps.forEach((step, i) => {
+    setTimeout(() => {
+      steps.forEach((s) => s.classList.remove('exec-active'));
+      step.classList.remove('exec-pending');
+      step.classList.add('exec-active');
+      const t = EXEC_TIMELINE[i] || {};
+      if (badge && t.badge) { badge.className = `tds-badge ${t.badge[0]} exec-live`; badge.textContent = t.badge[1]; }
+      if (t.reveal && analysis) analysis.classList.remove('exec-hidden');
+      if (t.attempt && attempt) attempt.textContent = t.attempt;
+    }, i * EXEC_STEP_MS);
+  });
+  setTimeout(() => execFinish(card), steps.length * EXEC_STEP_MS + 400);
+}
+
+// 실행 탭이 보일 때 현재 표시 중인 실험 카드를 1회 재생 (카드별 1번만)
+function maybePlayExecution(root) {
+  if (!root) return;
+  const section = root.querySelector('[data-tab-content="execute"]');
+  if (!section || !section.classList.contains('active')) return;
+  const card = section.querySelector('[data-candidate-execution]:not(.hidden)');
+  if (!card || card.dataset.execPlayed) return;
+  card.dataset.execPlayed = 'true';
+  playExecutionDemo(card);
 }
 
 function syncCandidatePrompt(root) {
@@ -540,7 +598,11 @@ document.addEventListener('click', (e) => {
   }
 
   const stage = e.target.closest && e.target.closest('[data-workflow-stage]');
-  if (stage) syncWorkflowStageState(stage.closest('[data-workflow-shell]'));
+  if (stage) {
+    const shell = stage.closest('[data-workflow-shell]');
+    syncWorkflowStageState(shell);
+    maybePlayExecution(shell);
+  }
 
   const go = e.target.closest && e.target.closest('[data-workflow-go]');
   if (!go || go.disabled) return;

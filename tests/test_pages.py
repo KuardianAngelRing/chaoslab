@@ -90,7 +90,6 @@ def test_candidate_prompt_adds_a_selectable_ui_only_sample(client):
     assert "data-candidate-generate" in resp.text
     assert 'data-workflow-max-selected="3"' in resp.text
     assert 'data-candidate-id="custom"' in resp.text
-    assert 'data-execution-queue-item="custom"' in resp.text
     assert 'data-candidate-execution="custom"' in resp.text
     assert "checkoutservice · memory-stress" in resp.text
     assert "입력 내용과 무관하게" in resp.text
@@ -190,44 +189,20 @@ def test_recent_activity_assembles_and_limits(db_session):
     assert "online-boutique" in joined
 
 
-def test_dashboard_merged_experiment_card(client):
+def test_dashboard_simplified(client):
+    # KPI 4장 + 최근 실험/AI 진단 카드 제거 (디자인 피드백) — 최근 활동·시스템 상태만 유지
     resp = client.get("/")
     assert resp.status_code == 200
-    # 합친 카드의 실데이터(seed)
-    assert "online-boutique" in resp.text and "NetworkChaos" in resp.text
-    # 상태 배지 (seed 실험은 running)
-    assert "진행중" in resp.text
-    # 주입 파라미터 줄은 미노출
-    assert "주입 설정" not in resp.text
-    # R 지수 추이 차트 제목 + 회차 라벨 (data-labels는 tojson이 \u 이스케이프)
-    assert "R 지수 추이" in resp.text
-    assert "기준선" in resp.text  # 지표 타일의 기준선 표기
-    assert "\\uac1c\\uc120 1\\ud68c\\ucc28" in resp.text  # 차트 라벨 "개선 1회차"
-    # AI 진단은 iteration이 있으면 진행중이어도 표시 (seed는 3회차 보유)
-    assert "AI Agent 진단" in resp.text
-    assert "관찰" in resp.text and "가설" in resp.text and "권고" in resp.text
-    assert "timeout 1s→3s" in resp.text  # seed recommender_output
-    # 제거 대상
-    assert "자동 적용" not in resp.text       # Phase 3 버튼 삭제
-    assert "분 경과" not in resp.text          # 경과 배지 → 상태 배지로 대체
-    assert "Iteration 4 / 10" not in resp.text  # iteration 카운트 줄 삭제
-
-
-def test_dashboard_hero_and_kpi_honest(client):
-    resp = client.get("/")
-    assert resp.status_code == 200
-    # 제거되어야 할 가짜들
+    assert "배포된 앱" not in resp.text
+    assert "진행중인 실험" not in resp.text
+    assert "총 소요된 LLM 비용" not in resp.text
+    assert "R 지수 추이" not in resp.text
+    assert "AI Agent 진단" not in resp.text
+    assert "rIndexChart" not in resp.text
+    assert "최근 활동" in resp.text and "시스템 상태" in resp.text
+    # 기존 정리 항목 유지
     assert "Phase 4" not in resp.text
     assert "👋" not in resp.text
-    assert "$5.00 한도" not in resp.text
-    assert "+1 어제 대비" not in resp.text
-    # 새 라벨
-    assert "진행중인 실험" in resp.text
-    assert "총 소요된 LLM 비용" in resp.text
-    assert "최근 R 지수" in resp.text
-    # 실 비용(seed 3 iter × 0.012 = 0.036) → $0.04 표기
-    assert "$0.04" in resp.text
-    # '새 실험 시작' 버튼 제거
     assert "새 실험 시작" not in resp.text
 
 
