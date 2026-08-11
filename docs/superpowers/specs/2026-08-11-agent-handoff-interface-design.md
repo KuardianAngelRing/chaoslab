@@ -142,8 +142,10 @@ PUT 시 행의 `schema_version`은 페이로드의 `schema_version`으로 동기
 
 ## 5. 시드·테스트
 
-- `db/seed.py`: 완료 상태 seed 실험에 핸드오프 스냅샷 1건 생성(assembler 재사용 —
-  하드코딩 JSON 금지). 팀원이 `uvicorn` 띄우면 `/docs`에서 바로 예시 확인 가능.
+- `db/seed.py`: seed 실험(`status="running"`)에 핸드오프 스냅샷 1건 생성(assembler
+  재사용 — 하드코딩 JSON 금지). 팀원이 `uvicorn` 띄우면 `/docs`에서 바로 예시 확인 가능.
+  POST에 실험 status 가드는 두지 않음 — 노션의 "회복 종료 후 전달"은 전달 시점 권고이고,
+  스냅샷 생성 자체는 개발·큐레이션 목적상 어느 상태에서든 허용.
 - 테스트 (hermetic, conftest가 Stub 강제):
   - 계약: 유효 페이로드 round-trip / `extra="forbid"` 위반 / 로그 21개 초과 거부.
   - assembler: seed 실험 → 유효한 `AgentHandoffPayload` 산출, 저장 metrics 우선 규칙.
