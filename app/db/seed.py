@@ -6,8 +6,11 @@ from app.db.repositories import (
     AppRepository,
     BuildRepository,
     ExperimentRepository,
+    HandoffRepository,
     IterationRepository,
 )
+from app.deps import make_handoff_source
+from app.services.agent.assembler import assemble_handoff
 
 
 def seed_data(session: Session) -> None:
@@ -47,6 +50,14 @@ def seed_data(session: Session) -> None:
             recommender_output="timeout 1s→3s, retry 2회", r_index=r, verdict=verdict,
             llm_cost_usd=0.012,
         )
+
+    # AI 전달 데이터 스냅샷 1건 — 팀원이 /docs에서 바로 예시 확인 (하드코딩 JSON 금지)
+    payload = assemble_handoff(session, make_handoff_source(), exp)
+    HandoffRepository(session).create(
+        experiment_id=exp.id,
+        schema_version=payload.schema_version,
+        payload=payload.model_dump(),
+    )
 
 
 def main() -> None:
