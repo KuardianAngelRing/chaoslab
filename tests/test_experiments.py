@@ -45,6 +45,7 @@ def test_experiments_page_is_disconnected_workflow_demo(client):
     assert 'name="chaos_type"' not in resp.text
     assert "실험 중지" not in resp.text
     assert 'hx-post="/experiments"' not in resp.text
+    assert "후보 생성 요청할게요" in resp.text   # 새 실험 위저드(2-step)는 유지 — AI 후보 선택형 (ADR-0006)
 
 
 def test_create_experiment_success(client):

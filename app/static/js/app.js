@@ -38,6 +38,44 @@ document.addEventListener('click', (e) => {
   if (content) content.classList.add('active');
 });
 
+// ============== 세그먼트 컨트롤 (탭과 동일 위임, pill 모양) ==============
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-seg]');
+  if (!t) return;
+  const group = t.dataset.segGroup;
+  document.querySelectorAll(`[data-seg][data-seg-group="${group}"]`)
+    .forEach(el => el.classList.toggle('active', el === t));
+  document.querySelectorAll(`[data-seg-panel][data-seg-group="${group}"]`)
+    .forEach(el => el.classList.toggle('active', el.dataset.segPanel === t.dataset.seg));
+});
+
+// ============== 계획 검토 체크리스트 — 전부 체크해야 실행 활성화 ==============
+document.addEventListener('change', (e) => {
+  const input = e.target;
+  if (!(input.matches && input.matches('[data-plan-check] input[type="checkbox"]'))) return;
+  const scope = input.closest('[data-plan-checklist]');
+  const cards = [...scope.querySelectorAll('[data-plan-check]')];
+  cards.forEach((c) => {
+    const on = c.querySelector('input').checked;
+    c.style.borderColor = on ? 'var(--primary)' : '';
+    c.style.background = on ? 'var(--primary-soft)' : '';
+  });
+  const n = cards.filter((c) => c.querySelector('input').checked).length;
+  const run = scope.querySelector('[data-plan-run]');
+  const hint = scope.querySelector('[data-plan-check-hint]');
+  if (run) run.disabled = n < cards.length;
+  if (hint) hint.textContent = n < cards.length
+    ? `${cards.length}개 항목을 확인하면 실행할 수 있어요 (${n}/${cards.length})`
+    : '모두 확인했어요 — 실행할 수 있어요';
+});
+
+// 실행 버튼 — hx-get으로 실험 상세(모의)로 이동. hx 속성이 없을 때만 안내 툴팁
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-plan-run]');
+  if (!t || t.disabled || t.hasAttribute('hx-get')) return;
+  showFieldTooltip(t, '실행할 실험이 아직 없어요 (모의)');
+});
+
 // ============== 다이얼로그 ==============
 function openDialog(name) {
   const d = document.getElementById(`dialog-${name}`);
@@ -52,7 +90,8 @@ document.addEventListener('click', (e) => {
 });
 
 // ── 등록 모달: 3-step 위저드 (클라이언트 show/hide, submit은 마지막 1회) ──
-const WIZ_STEPS = 3;
+const WIZ_STEPS = 3;  // 기본값 — dialog-card의 data-wiz-steps로 카드별 재정의
+function wizStepCount(card) { return +(card.dataset.wizSteps || WIZ_STEPS); }
 function wizRender(card) {
   const step = +(card.dataset.wizStep || 1);
   card.querySelectorAll('[data-wiz-panel]').forEach((p) =>
@@ -67,18 +106,18 @@ function wizRender(card) {
   const next = card.querySelector('[data-wiz-next]');
   const submit = card.querySelector('[data-wiz-submit]');
   if (prev) prev.classList.toggle('invisible', step === 1);
-  if (next) next.classList.toggle('hidden', step === WIZ_STEPS);
-  if (submit) submit.classList.toggle('hidden', step !== WIZ_STEPS);
+  if (next) next.classList.toggle('hidden', step === wizStepCount(card));
+  if (submit) submit.classList.toggle('hidden', step !== wizStepCount(card));
 }
 function wizReset(card) { card.dataset.wizStep = '1'; wizRender(card); }
 function wizGo(card, dir) {
   let step = +(card.dataset.wizStep || 1);
   if (dir > 0) {  // 다음 누를 때 현재 패널 필수값 검증
     const panel = card.querySelector(`[data-wiz-panel="${step}"]`);
-    const bad = [...panel.querySelectorAll('[data-wiz-required]')].find((i) => !i.value.trim());
+    const bad = [...panel.querySelectorAll('[data-wiz-required]')].find((i) => !i.disabled && !i.value.trim());
     if (bad) { showFieldTooltip(bad, bad.dataset.wizMsg || '입력해 주세요'); bad.focus(); return; }
   }
-  card.dataset.wizStep = String(Math.min(WIZ_STEPS, Math.max(1, step + dir)));
+  card.dataset.wizStep = String(Math.min(wizStepCount(card), Math.max(1, step + dir)));
   wizRender(card);
 }
 document.addEventListener('click', (e) => {
@@ -282,12 +321,52 @@ function chaosTypeSync(root) {
 document.addEventListener('change', (e) => {
   if (e.target.name === 'chaos_type') chaosTypeSync(e.target.closest('form'));
 });
-document.body.addEventListener('htmx:afterSwap', () => {
-  document.querySelectorAll('#dialog-newExperiment form').forEach(chaosTypeSync);
+
+// ── 새 실험 위저드: 대상 앱 카드 강조 (설계는 항상 AI 후보 선택형 — ADR-0006) ──
+function appPickSync(root) {
+  root.querySelectorAll('.app-pick-card').forEach((card) => {
+    const on = card.querySelector('input').checked;
+    card.style.borderColor = on ? 'var(--primary)' : '';
+    card.style.background = on ? 'var(--primary-soft)' : '';
+  });
+}
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'app_id') appPickSync(e.target.closest('form'));
 });
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('#dialog-newExperiment form').forEach(chaosTypeSync);
+
+function newExperimentSync() {
+  document.querySelectorAll('#dialog-newExperiment form').forEach(appPickSync);
+}
+document.body.addEventListener('htmx:afterSwap', newExperimentSync);
+document.addEventListener('DOMContentLoaded', newExperimentSync);
+
+// ── 새 앱 등록 위저드: 환경(k3s/EKS) 분기 — ADR-0003 ──
+function clusterEnvSync(root) {
+  const checked = root.querySelector('input[name="cluster_env"]:checked');
+  if (!checked) return;
+  root.querySelectorAll('.env-pick-card').forEach((card) => {
+    const on = card.querySelector('input').checked;
+    card.style.borderColor = on ? 'var(--primary)' : '';
+    card.style.background = on ? 'var(--primary-soft)' : '';
+  });
+  root.querySelectorAll('[data-env-panel]').forEach((panel) => {
+    const on = panel.dataset.envPanel === checked.value;
+    panel.classList.toggle('hidden', !on);
+    panel.querySelectorAll('input, textarea').forEach((i) => { i.disabled = !on; });
+  });
+  const eks = root.querySelector('[data-submit-eks]');
+  const k3s = root.querySelector('[data-submit-k3s]');
+  if (eks) eks.classList.toggle('hidden', checked.value !== 'eks');
+  if (k3s) k3s.classList.toggle('hidden', checked.value !== 'k3s');
+}
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'cluster_env') clusterEnvSync(e.target.closest('form'));
 });
+function newAppSync() {
+  document.querySelectorAll('#dialog-newApp form').forEach(clusterEnvSync);
+}
+document.body.addEventListener('htmx:afterSwap', newAppSync);
+document.addEventListener('DOMContentLoaded', newAppSync);
 
 // ── 실험 상태 watch (running 행만 EventSource, 종료 시 목록 새로고침) ──
 const _expStreams = new Set();
@@ -310,12 +389,16 @@ document.body.addEventListener('htmx:afterSwap', watchExperiments);
 // ── 사이드바 active 동기화 (HTMX 부분 스왑은 사이드바 DOM을 안 바꿈) ──
 function syncSidebarActive() {
   const path = location.pathname;
-  document.querySelectorAll('.sidebar-nav-item').forEach((a) => {
+  const items = [...document.querySelectorAll('.sidebar-nav-item')];
+  // 루트는 정확히, 나머지는 하위경로(/experiments/3 등)까지 매칭 — 서버 active_nav와 동일.
+  // /infra vs /infra/local처럼 매칭이 겹치면 가장 긴 href 하나만 활성화
+  let best = null;
+  items.forEach((a) => {
     const href = a.getAttribute('hx-get');
-    // 루트는 정확히, 나머지는 하위경로(/experiments/3 등)까지 매칭 — 서버 active_nav와 동일
     const match = href === '/' ? path === '/' : path === href || path.startsWith(href + '/');
-    a.classList.toggle('active', match);
+    if (match && (!best || href.length > best.getAttribute('hx-get').length)) best = a;
   });
+  items.forEach((a) => a.classList.toggle('active', a === best));
 }
 document.addEventListener('DOMContentLoaded', syncSidebarActive);
 document.body.addEventListener('htmx:afterSwap', syncSidebarActive);
@@ -371,7 +454,7 @@ function syncWorkflowCandidates(root) {
   const count = root.querySelector('[data-workflow-selected-count]');
   if (count) count.textContent = `${selected}개`;
   const executeStage = root.querySelector('[data-workflow-stage="execute"]');
-  if (executeStage && Number(root.dataset.workflowCurrentStage) < 3) {
+  if (executeStage && Number(root.dataset.workflowCurrentStage) < 2) {
     executeStage.disabled = selected === 0;
     executeStage.setAttribute('aria-disabled', selected === 0 ? 'true' : 'false');
     executeStage.title = selected === 0 ? '후보를 하나 이상 선택하면 열립니다' : '';
@@ -398,6 +481,64 @@ function syncWorkflowExecutionSelection(root, selectedIds) {
   });
   const executionCount = root.querySelector('[data-workflow-execution-count]');
   if (executionCount) executionCount.textContent = selectedIds.length ? `${selectedIds.length}개 선택 · 화면 예시` : '후보 선택 필요';
+  maybePlayExecution(root);
+}
+
+// ── 실행 탭 모의 실행 애니메이션 (시안) — 6단계 파이프라인이 실제 도는 듯한 연출 ──
+const EXEC_STEP_MS = 950;
+const EXEC_TIMELINE = [
+  { badge: ['badge-info', '기준선 관측 중'] },
+  { badge: ['badge-warning', '장애 주입 중'] },
+  { badge: ['badge-info', '정리 확인 중'] },
+  { badge: ['badge-danger', '초기 판정 실패'] },
+  { badge: ['badge-info', 'AI 분석·개선 중'], reveal: true, attempt: 'attempt 2 / 3' },
+  { badge: ['badge-warning', '동조건 재실험 중'] },
+];
+
+function execFinish(card) {
+  card.querySelectorAll('[data-exec-step]').forEach((s) => s.classList.remove('exec-pending', 'exec-active'));
+  card.querySelectorAll('[data-exec-after]').forEach((a) => a.classList.remove('exec-hidden'));
+  const analysis = card.querySelector('[data-exec-analysis]');
+  if (analysis) analysis.classList.remove('exec-hidden');
+  const badge = card.querySelector('[data-exec-status]');
+  if (badge) { badge.className = 'tds-badge badge-success'; badge.textContent = '재실험 통과'; }
+  const attempt = card.querySelector('[data-exec-attempt]');
+  if (attempt) attempt.textContent = 'attempt 2 / 3';
+}
+
+function playExecutionDemo(card) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { execFinish(card); return; }
+  const steps = [...card.querySelectorAll('[data-exec-step]')];
+  const badge = card.querySelector('[data-exec-status]');
+  const attempt = card.querySelector('[data-exec-attempt]');
+  const analysis = card.querySelector('[data-exec-analysis]');
+  steps.forEach((s) => s.classList.add('exec-pending'));
+  card.querySelectorAll('[data-exec-after]').forEach((a) => a.classList.add('exec-hidden'));
+  if (analysis) analysis.classList.add('exec-hidden');
+  if (attempt) attempt.textContent = 'attempt 1 / 3';
+  steps.forEach((step, i) => {
+    setTimeout(() => {
+      steps.forEach((s) => s.classList.remove('exec-active'));
+      step.classList.remove('exec-pending');
+      step.classList.add('exec-active');
+      const t = EXEC_TIMELINE[i] || {};
+      if (badge && t.badge) { badge.className = `tds-badge ${t.badge[0]} exec-live`; badge.textContent = t.badge[1]; }
+      if (t.reveal && analysis) analysis.classList.remove('exec-hidden');
+      if (t.attempt && attempt) attempt.textContent = t.attempt;
+    }, i * EXEC_STEP_MS);
+  });
+  setTimeout(() => execFinish(card), steps.length * EXEC_STEP_MS + 400);
+}
+
+// 실행 탭이 보일 때 현재 표시 중인 실험 카드를 1회 재생 (카드별 1번만)
+function maybePlayExecution(root) {
+  if (!root) return;
+  const section = root.querySelector('[data-tab-content="execute"]');
+  if (!section || !section.classList.contains('active')) return;
+  const card = section.querySelector('[data-candidate-execution]:not(.hidden)');
+  if (!card || card.dataset.execPlayed) return;
+  card.dataset.execPlayed = 'true';
+  playExecutionDemo(card);
 }
 
 function syncCandidatePrompt(root) {
@@ -457,7 +598,11 @@ document.addEventListener('click', (e) => {
   }
 
   const stage = e.target.closest && e.target.closest('[data-workflow-stage]');
-  if (stage) syncWorkflowStageState(stage.closest('[data-workflow-shell]'));
+  if (stage) {
+    const shell = stage.closest('[data-workflow-shell]');
+    syncWorkflowStageState(shell);
+    maybePlayExecution(shell);
+  }
 
   const go = e.target.closest && e.target.closest('[data-workflow-go]');
   if (!go || go.disabled) return;

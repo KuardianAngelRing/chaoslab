@@ -40,26 +40,9 @@ def dashboard(
     app_count: int = Depends(get_app_count),
     k8s: interfaces.K8sService = Depends(get_k8s),
 ):
-    exps = ExperimentRepository(session).list_all()
-    running = [e for e in exps if e.status == "running"]
-    latest_exp = max(exps, key=lambda e: e.started_at) if exps else None
-    iterations = sorted(latest_exp.iterations, key=lambda i: i.iteration) if latest_exp else []
-    latest_iter = iterations[-1] if iterations else None
-    r_series = ([latest_exp.baseline_r] + [it.r_index for it in iterations]) if latest_exp else []
-    r_labels = (["기준선"] + [f"개선 {it.iteration}회차" for it in iterations]) if latest_exp else []
-    llm_cost_total = sum(it.llm_cost_usd for e in exps for it in e.iterations)
-    latest_r = next((f"{e.r_index:.2f}" for e in exps if e.r_index is not None), "—")
     ctx = {
         "active_nav": "dashboard",
         "app_count": app_count,
-        "running_count": len(running),
-        "latest_exp": latest_exp,
-        "iterations": iterations,
-        "latest_iter": latest_iter,
-        "r_series": r_series,
-        "r_labels": r_labels,
-        "llm_cost_total": llm_cost_total,
-        "latest_r": latest_r,
         "components": k8s.components(),
         "node_count": len(k8s.nodes()),
         "recent": _recent_activity(session),
@@ -84,9 +67,12 @@ def apps_page(
 @router.get("/experiments")
 def experiments_page(
     request: Request,
+    session: Session = Depends(get_session),
     app_count: int = Depends(get_app_count),
 ):
-    ctx = {"active_nav": "experiments", "app_count": app_count}
+    # apps는 새 실험 위저드 step 1(대상 앱 선택)용 — 목록 테이블은 정적 시안
+    apps = AppRepository(session).list_all()
+    ctx = {"active_nav": "experiments", "app_count": app_count, "apps": apps}
     return render_page(request, "pages/experiments.html", ctx)
 
 
@@ -116,6 +102,40 @@ def infra_page(
         "components": k8s.components(),
     }
     return render_page(request, "pages/infra.html", ctx)
+
+
+# 로컬(라즈베리파이 k3s) 인프라 목업 — 실배선 시 SSH 터널 경유 k8s API·Prometheus 조회로 대체.
+# 노드 온도는 node-exporter(hwmon), CPU·메모리는 metrics-server(kubectl top) 기준 값.
+LOCAL_K3S_STUB = {
+    "cluster": {"name": "chaospilot-k3s", "version": "v1.32.3+k3s1", "arch": "arm64",
+                "access": "SSH 터널 · localhost:6443"},
+    "pod_count": 24,
+    "namespaces": ["kube-system", "chaos-mesh", "chaospilot-observability", "order-msa"],
+    "nodes": [
+        {"name": "masternode", "model": "Raspberry Pi 4B 8GB", "role": "control-plane · etcd",
+         "cpu_pct": 21, "mem_pct": 48, "temp_c": 52.1, "status": "Ready"},
+        {"name": "worker1", "model": "Raspberry Pi 4B 4GB", "role": "worker",
+         "cpu_pct": 34, "mem_pct": 61, "temp_c": 55.3, "status": "Ready"},
+        {"name": "worker2", "model": "Raspberry Pi 4B 4GB", "role": "worker",
+         "cpu_pct": 18, "mem_pct": 44, "temp_c": 49.8, "status": "Ready"},
+    ],
+    "components": [
+        {"name": "Chaos Mesh", "detail": "controller 1/1 · daemon 3/3", "ns": "chaos-mesh"},
+        {"name": "Prometheus", "detail": "메트릭 수집 · service proxy 조회", "ns": "chaospilot-observability"},
+        {"name": "Loki", "detail": "로그 저장 · LogQL 조회", "ns": "chaospilot-observability"},
+        {"name": "kube-state-metrics", "detail": "리소스 상태 메트릭", "ns": "chaospilot-observability"},
+        {"name": "Alloy", "detail": "로그 수집 에이전트 (DaemonSet 3/3)", "ns": "chaospilot-observability"},
+    ],
+}
+
+
+@router.get("/infra/local")
+def local_infra_page(
+    request: Request,
+    app_count: int = Depends(get_app_count),
+):
+    ctx = {"active_nav": "local-infra", "app_count": app_count, **LOCAL_K3S_STUB}
+    return render_page(request, "pages/infra_local.html", ctx)
 
 
 @router.get("/settings")

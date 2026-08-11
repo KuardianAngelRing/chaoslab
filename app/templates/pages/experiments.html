@@ -1,10 +1,11 @@
 {% extends layout|default("base.html") %}
+{% from "macros/components.html" import framework_icon, env_badge %}
 
 {% block content %}
 {% set demo_runs = [
-  {"id":1, "code":"CL-042", "view":"plan", "stage":"후보 선택", "step":"2/5", "selected":"0 / 3", "verdict":"판정 전", "updated":"방금 전", "status":"선택 필요", "badge":"badge-warning"},
-  {"id":2, "code":"CL-041", "view":"execute", "stage":"순차 실행", "step":"3/5", "selected":"1 / 2", "verdict":"통과 1", "updated":"어제 17:42", "status":"실행 중", "badge":"badge-info"},
-  {"id":3, "code":"CL-040", "view":"result", "stage":"결과", "step":"5/5", "selected":"2 / 2", "verdict":"통과 1 · 검증 불충분 1", "updated":"07/31 14:18", "status":"완료 · 보완 필요", "badge":"badge-warning"}
+  {"id":1, "code":"CL-042", "view":"plan", "stage":"후보 선택", "step":"1/4", "selected":"0 / 3", "verdict":"판정 전", "updated":"방금 전", "status":"선택 필요", "badge":"badge-warning"},
+  {"id":2, "code":"CL-041", "view":"execute", "stage":"순차 실행", "step":"2/4", "selected":"1 / 2", "verdict":"통과 1", "updated":"어제 17:42", "status":"실행 중", "badge":"badge-info"},
+  {"id":3, "code":"CL-040", "view":"result", "stage":"결과", "step":"4/4", "selected":"2 / 2", "verdict":"통과 1 · 검증 불충분 1", "updated":"07/31 14:18", "status":"완료 · 보완 필요", "badge":"badge-warning"}
 ] %}
 <div class="max-w-7xl mx-auto px-8 py-8">
 
@@ -15,8 +16,8 @@
         카오스 테스트
       </h1>
       <button class="tds-btn-primary" type="button" onclick="openDialog('newExperiment')">
-        <iconify-icon icon="solar:add-circle-bold" width="18"></iconify-icon>
-        새 실험 설계
+        <iconify-icon icon="solar:bug-bold" width="18"></iconify-icon>
+        새 실험 시작
       </button>
     </div>
     <div class="hero-line mt-4"></div>
@@ -113,49 +114,101 @@
   </div>
 </div>
 
+<!-- DIALOG: 새 실험 시작 (2-step 위저드 — 대상 앱 → 검증 목표. 설계는 항상 AI 후보 선택형: ADR-0006)
+     제출 시 워크플로우 시안의 후보 선택 단계로 진입 (준비 탭은 제거 — 게이트는 배너로) -->
 <div class="dialog-backdrop" id="dialog-newExperiment">
-  <div class="dialog-card" data-wizard>
+  <div class="dialog-card" data-wizard data-wiz-steps="2">
     <div class="dialog-resize-handle" title="드래그하여 크기 조절">
-      <svg width="20" height="20" viewBox="-2 -2 40 40" fill="none" style="color: var(--primary);"><path d="M 10 34 Q 30 30 34 10" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" /></svg>
+      <svg width="20" height="20" viewBox="-2 -2 40 40" fill="none" style="color: var(--primary);">
+        <path d="M 10 34 Q 30 30 34 10" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round" />
+      </svg>
     </div>
     <div class="px-8 pt-7 pb-4 flex items-center justify-between">
-      <div class="flex items-center gap-2.5"><span class="tossface-lg">🧪</span><div><h2 class="font-extrabold text-2xl">새 실험 설계</h2><p class="text-xs mt-1" style="color: var(--muted-foreground);">UI 시안 · 입력값은 저장되지 않습니다</p></div></div>
-      <button class="p-1 rounded-lg hover:bg-muted" type="button" onclick="closeDialog('newExperiment')"><iconify-icon icon="lucide:x" width="20"></iconify-icon></button>
+      <div class="flex items-center gap-2.5">
+        <span class="tossface-lg">🧪</span>
+        <h2 class="font-extrabold text-2xl">새 실험 시작</h2>
+      </div>
+      <button class="p-1 rounded-lg hover:bg-muted" onclick="closeDialog('newExperiment')">
+        <iconify-icon icon="lucide:x" width="20"></iconify-icon>
+      </button>
     </div>
 
-    <div class="px-8 pb-4 flex items-center justify-center gap-2.5 text-sm font-bold">
-      {% for num, label in [("1","목표"),("2","실행 제한"),("3","확인")] %}
-      <div class="flex items-center gap-2" data-wiz-dot="{{ num }}"><span class="w-7 h-7 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span><span>{{ label }}</span></div>
-      {% if not loop.last %}<iconify-icon icon="solar:alt-arrow-right-linear" width="14" style="color: var(--muted-foreground); opacity: .4;"></iconify-icon>{% endif %}
+    <div class="px-8 pb-4 flex items-center justify-center gap-2.5 text-sm font-bold" data-wiz-indicator>
+      {% for num, label in [(1, "대상 앱"), (2, "검증 목표")] %}
+      <div class="flex items-center gap-2" data-wiz-dot="{{ num }}">
+        <span class="w-7 h-7 rounded-full flex items-center justify-center transition-all" data-wiz-circle>{{ num }}</span>
+        <span class="hidden sm:inline" data-wiz-label>{{ label }}</span>
+      </div>
+      {% if not loop.last %}<div class="w-8 h-px shrink-0" style="background: var(--border);"></div>{% endif %}
       {% endfor %}
     </div>
 
-    <div class="flex-1 min-h-0 overflow-auto px-8 pb-6 flex flex-col">
-      <section data-wiz-panel="1" class="flex-1 flex flex-col justify-center space-y-5">
-        <div><label class="text-sm font-bold mb-2 block">대상 앱</label><select class="tds-input text-sm"><option selected>online-boutique · online-boutique</option></select></div>
-        <div><label class="text-sm font-bold mb-2 block">검증 목표</label><textarea class="tds-input text-sm h-24 py-3 resize-none" data-wiz-required data-wiz-msg="검증 목표를 입력해 주세요">Checkout이 Pod 손실과 Catalog 지연 중에도 오류율 1% 이하를 유지하고 60초 안에 회복하는지 검증</textarea><p class="text-xs mt-2" style="color: var(--muted-foreground);">장애 종류는 지금 고르지 않습니다. 목표를 기준으로 다음 화면에서 후보를 비교합니다.</p></div>
-      </section>
+    <form onsubmit="event.preventDefault()" novalidate class="flex-1 min-h-0 flex flex-col">
+    <div class="flex-1 overflow-auto px-8 pb-4">
 
-      <section data-wiz-panel="2" class="hidden flex-1 flex flex-col justify-center">
-        <div class="grid grid-cols-2 gap-4">
-          <label><span class="text-sm font-bold mb-2 block">후보 수</span><input class="tds-input text-sm" type="number" value="5" /></label>
-          <label><span class="text-sm font-bold mb-2 block">최대 선택</span><input class="tds-input text-sm" type="number" value="3" /></label>
-          <label><span class="text-sm font-bold mb-2 block">최대 개선 반복</span><input class="tds-input text-sm" type="number" value="2" /></label>
-          <label><span class="text-sm font-bold mb-2 block">실험 제한</span><select class="tds-input text-sm"><option>실험당 3분</option><option>실험당 5분</option></select></label>
+      <!-- step 1: 대상 앱 — 환경은 묻지 않고 앱을 따라온다 (배지 표시) -->
+      <div data-wiz-panel="1" class="space-y-2.5 pt-1">
+        <label class="text-base font-bold mb-1 block">실험을 실행할 앱을 골라 주세요</label>
+        {% for a in apps %}
+        <label class="tds-card p-4 cursor-pointer app-pick-card flex items-center gap-3">
+          <input type="radio" name="app_id" value="{{ a.id }}" class="sr-only" {% if loop.first %}checked{% endif %} />
+          {{ framework_icon(a.framework, 24) }}
+          <div class="flex-1 min-w-0">
+            <div class="font-bold">{{ a.name }}</div>
+            <div class="text-xs mono truncate" style="color: var(--muted-foreground);">{{ a.namespace }}</div>
+          </div>
+          {{ env_badge(a) }}
+        </label>
+        {% endfor %}
+      </div>
+
+      <!-- step 2: 검증 목표 — 설계는 항상 AI 후보 선택형 (ADR-0006) -->
+      <div data-wiz-panel="2" class="hidden space-y-4 pt-2">
+        <div>
+          <label class="text-base font-bold mb-2 block">검증 목표
+            <span class="text-xs font-normal" style="color: var(--muted-foreground);">선택 — AI가 후보를 제안할 때 참고해요</span>
+          </label>
+          <textarea name="objective" rows="3" class="env-textarea"
+            placeholder="예: 주문 API가 파드 장애와 네트워크 지연에도 60초 안에 정상화되면 좋겠어요"></textarea>
         </div>
-        <div class="mt-5 p-4 rounded-2xl text-xs leading-5" style="background: var(--muted); color: var(--muted-foreground);"><b style="color: var(--foreground);">자동 변경 제외</b><br />컨테이너 이미지 · Secret · 영구 스토리지 · cluster-scoped 리소스</div>
-      </section>
-
-      <section data-wiz-panel="3" class="hidden flex-1 flex flex-col justify-center space-y-4">
-        <div class="p-5 rounded-2xl" style="background: var(--primary-soft); color: var(--primary-soft-foreground);"><div class="flex items-center gap-2 font-extrabold"><iconify-icon icon="solar:shield-check-bold" width="20"></iconify-icon>화면용 사전 점검 예시</div><div class="grid grid-cols-2 gap-2 mt-4 text-xs"><div>✓ Ready workload 3개</div><div>✓ Metrics 연결 예시</div><div>✓ Logs 연결 예시</div><div>✓ Cleanup 정책 확인</div></div></div>
-        <div class="tds-card p-4 text-sm"><div class="flex justify-between py-1"><span style="color: var(--muted-foreground);">대상</span><b>online-boutique</b></div><div class="flex justify-between py-1"><span style="color: var(--muted-foreground);">후보 / 선택</span><b>5개 / 최대 3개</b></div><div class="flex justify-between py-1"><span style="color: var(--muted-foreground);">개선 반복</span><b>최대 2회</b></div></div>
-      </section>
+        <details class="rounded-2xl border px-4 py-3" style="border-color: var(--border);">
+          <summary class="text-sm font-bold cursor-pointer">고급 실행 설정
+            <span class="font-normal" style="color: var(--muted-foreground);">후보 5 · 개선 반복 3</span>
+          </summary>
+          <div class="grid grid-cols-2 gap-3 mt-3">
+            <div><label class="text-xs font-bold mb-1 block">후보 수</label>
+              <input name="max_candidates" type="number" min="1" max="10" value="5" class="tds-input mono text-sm h-10" /></div>
+            <div><label class="text-xs font-bold mb-1 block">개선 반복</label>
+              <input name="max_improvements" type="number" min="0" max="10" value="3" class="tds-input mono text-sm h-10" /></div>
+          </div>
+        </details>
+        <div class="p-4 rounded-2xl flex items-start gap-2.5" style="background: var(--primary-soft);">
+          <span class="tossface">🤖</span>
+          <div class="text-sm" style="color: var(--primary-soft-foreground);">
+            요청하면 AI가 앱 구조를 분석해 실험 후보를 제안해요. <span class="font-bold">선택하고 승인한 후보만 실행돼요</span>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="px-8 py-4 flex gap-2 justify-between border-t" style="border-color: var(--border);">
-      <button type="button" class="tds-btn-muted text-sm" data-wiz-prev>이전</button>
-      <div class="flex gap-2"><button type="button" class="tds-btn-muted text-sm" onclick="closeDialog('newExperiment')">닫기</button><button type="button" class="tds-btn-primary text-sm" data-wiz-next>다음<iconify-icon icon="solar:alt-arrow-right-linear" width="14"></iconify-icon></button><a class="tds-btn-primary text-sm hidden" data-wiz-submit hx-get="/experiments/1?view=prepare" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" onclick="closeDialog('newExperiment')"><iconify-icon icon="solar:magic-stick-3-bold" width="16"></iconify-icon>준비 화면 보기</a></div>
+    <div class="px-8 py-4 flex items-center justify-between border-t" style="border-color: var(--border);">
+      <button type="button" class="tds-btn-muted text-base" data-wiz-prev>이전</button>
+      <div class="flex items-center gap-2">
+        <button type="button" class="tds-btn-muted text-base" onclick="closeDialog('newExperiment')">닫기</button>
+        <button type="button" class="tds-btn-primary text-base" data-wiz-next>
+          다음
+          <iconify-icon icon="lucide:arrow-right" width="16"></iconify-icon>
+        </button>
+        <button type="button" class="tds-btn-primary text-base hidden" data-wiz-submit
+                hx-get="/experiments/1?view=plan"
+                hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+                onclick="closeDialog('newExperiment')">
+          <iconify-icon icon="solar:magic-stick-3-bold" width="16"></iconify-icon>
+          후보 생성 요청할게요
+        </button>
+      </div>
     </div>
+    </form>
   </div>
 </div>
 {% endblock %}
