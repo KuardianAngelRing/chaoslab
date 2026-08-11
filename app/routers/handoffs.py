@@ -3,6 +3,8 @@
 스냅샷 저장형: POST가 조립·저장, AI 루프는 GET …/latest 소비.
 계약·예시는 /docs (Swagger) 에서 확인 — 별도 대시보드 UI 없음.
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
@@ -17,13 +19,18 @@ from app.services.interfaces import HandoffSourceService
 router = APIRouter(tags=["handoffs"])
 
 
+def _utc_iso(dt: datetime) -> str:
+    # SQLite DateTime이 tzinfo를 버려 재로드 시 naive — 외부 소비자에겐 항상 UTC 명시
+    return dt.replace(tzinfo=timezone.utc).isoformat()
+
+
 def _meta(h: AgentHandoff) -> dict:
     return {
         "id": h.id,
         "experiment_id": h.experiment_id,
         "schema_version": h.schema_version,
-        "created_at": h.created_at.isoformat(),
-        "updated_at": h.updated_at.isoformat(),
+        "created_at": _utc_iso(h.created_at),
+        "updated_at": _utc_iso(h.updated_at),
     }
 
 

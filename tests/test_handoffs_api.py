@@ -52,6 +52,19 @@ def test_put_rejects_contract_violation(client):
     assert res.status_code == 422
 
 
+def test_put_404_unknown_handoff(client):
+    payload = client.post("/experiments/1/handoffs").json()["payload"]
+    assert client.put("/handoffs/999", json=payload).status_code == 404
+
+
+def test_timestamps_are_utc_aware_in_all_paths(client):
+    """POST(메모리 객체)와 GET(DB 재로드) 응답의 타임스탬프 표현이 동일해야 한다."""
+    created = client.post("/experiments/1/handoffs").json()
+    fetched = client.get(f"/handoffs/{created['id']}").json()
+    assert created["created_at"] == fetched["created_at"]
+    assert fetched["created_at"].endswith("+00:00")
+
+
 def test_delete_then_404(client):
     hid = client.post("/experiments/1/handoffs").json()["id"]
     assert client.delete(f"/handoffs/{hid}").status_code == 204

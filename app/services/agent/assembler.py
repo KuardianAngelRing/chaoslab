@@ -3,6 +3,8 @@
 단계 요약 규칙: Experiment.*_metrics가 계약(PhaseSummary) 형태로 저장돼 있으면 우선,
 아니면(비었거나 Slice 5 이전의 임의 형태) Stub/Real 소스 값 사용.
 """
+import logging
+
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -24,6 +26,8 @@ from app.services.agent.handoff_schema import (
 from app.services.chaos_specs import CHAOS_SPECS
 from app.services.interfaces import HandoffSourceService
 
+logger = logging.getLogger(__name__)
+
 _PHASE_COLUMNS = {
     "baseline": "baseline_metrics",
     "fault": "fault_metrics",
@@ -40,7 +44,11 @@ def _phase_summary(exp: Experiment, source: HandoffSourceService, phase: str) ->
         try:
             return PhaseSummary(**stored)
         except ValidationError:
-            pass  # 계약 이전 형태 — 소스 샘플로 대체
+            # 무음 대체 금지 — AI가 진짜/샘플 데이터를 구분할 근거를 로그로 남김
+            logger.warning(
+                "저장된 %s metrics가 계약과 불일치 — 소스 샘플로 대체 (exp=%s)",
+                phase, exp.id,
+            )
     return PhaseSummary(**source.phase_summary(exp.app.namespace, exp.app.name, phase))
 
 
