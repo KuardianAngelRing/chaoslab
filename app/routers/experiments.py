@@ -15,9 +15,10 @@ from app.config import settings
 from app.db.database import SessionLocal, get_session
 from app.db.models import Experiment
 from app.db.repositories import AppRepository, ExperimentRepository
-from app.deps import make_chaos
+from app.deps import make_chaos, make_prometheus
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
+from app.services.metrics_collector import collect_experiment_metrics
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -128,6 +129,9 @@ def _watch_experiment(exp_id: int) -> None:
             exp.status = status
             exp.finished_at = datetime.now(timezone.utc)
             s.commit()
+            if status == "completed":
+                # 실측 3구간 소급 집계 + R지수 (실패해도 실험 상태 불변)
+                collect_experiment_metrics(s, exp, make_prometheus())
     finally:
         s.close()
 

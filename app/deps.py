@@ -39,6 +39,20 @@ def make_chaos() -> interfaces.ChaosService:
     return stubs.StubChaos()
 
 
+def make_prometheus() -> interfaces.PrometheusService:
+    if settings.use_real_services:
+        from app.services.real.prometheus import RealPrometheus  # lazy: httpx
+        return RealPrometheus(settings)
+    return stubs.StubPrometheus()
+
+
+def make_loki() -> interfaces.LokiService:
+    if settings.use_real_services:
+        from app.services.real.loki import RealLoki  # lazy: httpx
+        return RealLoki(settings)
+    return stubs.StubLoki()
+
+
 def make_handoff_source() -> interfaces.HandoffSourceService:
     # Real(Prometheus/Loki/K8s 실조회)은 Slice 4·5 — 그 전까지 항상 Stub.
     return stubs.StubHandoffSource()
@@ -57,11 +71,11 @@ def get_chaos() -> interfaces.ChaosService:
 
 
 def get_prometheus() -> interfaces.PrometheusService:
-    return stubs.StubPrometheus()
+    return make_prometheus()
 
 
 def get_loki() -> interfaces.LokiService:
-    return stubs.StubLoki()
+    return make_loki()
 
 
 def get_k8s() -> interfaces.K8sService:
