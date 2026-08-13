@@ -54,7 +54,9 @@ def make_loki() -> interfaces.LokiService:
 
 
 def make_handoff_source() -> interfaces.HandoffSourceService:
-    # Real(Prometheus/Loki/K8s 실조회)은 Slice 4·5 — 그 전까지 항상 Stub.
+    if settings.use_real_services:
+        from app.services.real.handoff_source import RealHandoffSource  # lazy: k8s SDK
+        return RealHandoffSource(settings)
     return stubs.StubHandoffSource()
 
 

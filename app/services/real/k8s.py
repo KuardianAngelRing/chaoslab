@@ -1,9 +1,10 @@
-"""RealK8s — 클러스터 직접 쓰기 (운영, use_real_services=true).
+"""RealK8s — 클러스터 조회/쓰기 (운영, use_real_services=true).
 
-Slice 2 범위: apply_env_secret만. nodes/pods/components는 Slice 4에서 추가.
 k8s SDK는 메서드 안에서 lazy import → stub/테스트는 의존성 불필요.
 """
 from __future__ import annotations
+
+from app.services.real.kube import load_kube
 
 
 class RealK8s:
@@ -11,12 +12,9 @@ class RealK8s:
         self.s = settings
 
     def _api(self):
-        from kubernetes import client, config  # lazy
+        from kubernetes import client  # lazy
 
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
-            config.load_kube_config()
+        load_kube(self.s)
         return client.CoreV1Api()
 
     def apply_env_secret(self, namespace: str, name: str, data: dict[str, str]) -> None:
@@ -42,12 +40,9 @@ class RealK8s:
         """kubectl rollout restart와 동일 — 파드 템플릿 annotation 갱신으로 재기동."""
         from datetime import datetime, timezone
 
-        from kubernetes import client, config  # lazy
+        from kubernetes import client  # lazy
 
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
-            config.load_kube_config()
+        load_kube(self.s)
         client.AppsV1Api().patch_namespaced_deployment(
             name=name, namespace=namespace,
             body={"spec": {"template": {"metadata": {"annotations": {
@@ -55,3 +50,48 @@ class RealK8s:
                     datetime.now(timezone.utc).isoformat()
             }}}}},
         )
+
+    def nodes(self) -> list[dict]:
+        api = self._api()
+        out = []
+        for n in api.list_node().items:
+            conds = n.status.conditions or []
+            ready = any(c.type == "Ready" and c.status == "True" for c in conds)
+            labels = n.metadata.labels or {}
+            out.append({
+                "name": n.metadata.name,
+                "type": labels.get("node.kubernetes.io/instance-type", ""),
+                "status": "Ready" if ready else "NotReady",
+                "role": labels.get("role", ""),
+            })
+        return out
+
+    def pods(self, namespace: str) -> list[dict]:
+        api = self._api()
+        out = []
+        for p in api.list_namespaced_pod(namespace).items:
+            restarts = sum(cs.restart_count for cs in (p.status.container_statuses or []))
+            out.append({
+                "name": p.metadata.name, "namespace": namespace,
+                "status": p.status.phase, "restarts": restarts,
+            })
+        return out
+
+    _COMPONENTS = [("Prometheus", "monitoring", "prometheus"),
+                   ("Grafana", "monitoring", "grafana"),
+                   ("Loki", "monitoring", "loki"),
+                   ("Chaos Mesh", "chaos-mesh", "chaos"),
+                   ("ArgoCD", "argocd", "argocd")]
+
+    def components(self) -> list[dict]:
+        api = self._api()
+        out = []
+        for display, ns, keyword in self._COMPONENTS:
+            try:
+                pods = api.list_namespaced_pod(ns).items
+                healthy = any(keyword in p.metadata.name and p.status.phase == "Running"
+                              for p in pods)
+            except Exception:
+                healthy = False
+            out.append({"name": display, "status": "Healthy" if healthy else "Down"})
+        return out
