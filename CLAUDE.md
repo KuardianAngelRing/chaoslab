@@ -64,7 +64,7 @@ pytest -q                        # 89 통과
 - [x] **Slice 2 — 빌드/배포** (라이브 검증 완료): 앱 등록→`_bootstrap`(ECR+ArgoCD App+values.yaml, 평문 env는 values·시크릿은 K8s Secret 직접 apply)→Kaniko 빌드→ECR→ArgoCD sync. 빌드 이력 모달·빌드 SSE·healthPath 유무 따라 httpGet/tcpSocket probe·카드 액션 4종(재빌드/재배포=rollout restart/배포중지=replicas 0/빌드중지=Argo shutdown). ⚠️ 시크릿 **값만** 바꿔 재등록하면 values diff 없어 sync 안 됨 → "재배포" 버튼이 해법.
 - [x] **Slice 3 — 카오스** (구현 완료, stub 테스트만·라이브 미검증): 실험 폼→Chaos Mesh CRD 3종(network-delay·pod-kill·cpu-stress), `chaos_specs` 범위검증(latency 10–10000ms·cpu 1–100%·duration 30–1800s), 앱당 1개(409), `_watch_experiment`(duration→회복 확인→CRD 삭제→completed)·중지·SSE.
 - [x] **AI 전달 데이터 인터페이스** (08/04 회의): 노션 §2 계약(`services/agent/handoff_schema.py`, `schema_version` 1.0) · `agent_handoffs` 스냅샷 테이블 · 조립기(저장 metrics 우선, 외부산은 `HandoffSourceService` Stub — Real은 Slice 4·5) · REST CRUD(`routers/handoffs.py`, AI 루프 소비 지점은 `GET /experiments/{id}/handoffs/latest`, 계약 열람은 `/docs`)
-- [ ] **Slice 4 — 모니터링**: `RealPrometheus`(RED)·`RealLoki`(로그)·`RealK8s`(노드/Pod/컴포넌트) 실조회 + 차트 실데이터·SSE 갱신
+- [x] **Slice 4 — 실측 연동** (백엔드, stub 테스트 검증·라이브는 별도 확인): 실험 완료 시 Prometheus 소급 집계(기준선=주입 전 5분/장애/회복)를 계약 형태로 `*_metrics` 저장 + `r_index` 실계산(`services/r_index.py`, 복구 상한 300s) · Real 4종(`real/prometheus·loki·handoff_source` + `RealK8s` nodes/pods/components) · kubeconfig 공용화(`real/kube.py`, `k8s_context` 지원) · Iac-aws: sut Istio 스크레이프 + generic-app DestinationRule. 차트 실데이터·SSE 갱신 등 화면 배선은 팀원 영역으로 이관
 - [ ] **Slice 5 — 결과/R지수**: baseline/fault/recovery 계산 + 추이·iteration 히스토리 (AI 루프 자체는 Phase 3)
 - [ ] **DB Supabase 전환** (보고서 확정): up/down 시 EC2 로컬 SQLite 이력 유실 → 관리형 PostgreSQL로. 스키마 초안 `docs/supabase_schema.sql`
 - [ ] **설정 페이지**: LLM/목표R/예산 저장 + 외부 통합 키
