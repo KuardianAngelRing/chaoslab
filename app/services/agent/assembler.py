@@ -23,6 +23,7 @@ from app.services.agent.handoff_schema import (
     PhaseSummary,
     RIndexBreakdown,
 )
+from app.services import r_index
 from app.services.chaos_specs import CHAOS_SPECS
 from app.services.interfaces import HandoffSourceService
 
@@ -33,10 +34,6 @@ _PHASE_COLUMNS = {
     "fault": "fault_metrics",
     "recovery": "recovery_metrics",
 }
-
-# R지수 항목별 점수 실계산은 Slice 5 — 그 전까지는 형태 보증용 자리값.
-_STUB_COMPONENT_SCORES = {"availability": 0.82, "latency_score": 0.47, "recovery_score": 0.55}
-
 
 def _phase_summary(exp: Experiment, source: HandoffSourceService, phase: str) -> PhaseSummary:
     stored = getattr(exp, _PHASE_COLUMNS[phase])
@@ -58,6 +55,16 @@ def assemble_handoff(session: Session, source: HandoffSourceService,
     iterations = IterationRepository(session).list_for_experiment(exp.id)
     used_usd = sum(it.llm_cost_usd for it in iterations)
 
+    summaries = PhaseSummaries(
+        baseline=_phase_summary(exp, source, "baseline"),
+        fault=_phase_summary(exp, source, "fault"),
+        recovery=_phase_summary(exp, source, "recovery"),
+    )
+    # 항목별 점수는 페이로드에 실리는 바로 그 요약으로 계산 — AI가 받은 숫자와 항상 일관
+    scores = r_index.compute(summaries.baseline.model_dump(),
+                             summaries.fault.model_dump(),
+                             summaries.recovery.model_dump())
+
     return AgentHandoffPayload(
         experiment=ExperimentInfo(
             id=exp.id,
@@ -70,17 +77,15 @@ def assemble_handoff(session: Session, source: HandoffSourceService,
             started_at=exp.started_at.isoformat() if exp.started_at else None,
             finished_at=exp.finished_at.isoformat() if exp.finished_at else None,
         ),
-        phase_summaries=PhaseSummaries(
-            baseline=_phase_summary(exp, source, "baseline"),
-            fault=_phase_summary(exp, source, "fault"),
-            recovery=_phase_summary(exp, source, "recovery"),
-        ),
+        phase_summaries=summaries,
         istio_config=IstioConfig(**source.istio_config(app.namespace, app.name)),
         deployment_info=DeploymentInfo(**source.deployment_info(app.namespace, app.name)),
         k8s_events=[K8sEvent(**e) for e in source.events(app.namespace, app.name)],
         error_log_samples=source.error_logs(app.namespace, app.name, limit=20),
         r_index=RIndexBreakdown(
-            **_STUB_COMPONENT_SCORES,
+            availability=scores["availability"],
+            latency_score=scores["latency_score"],
+            recovery_score=scores["recovery_score"],
             baseline_r=exp.baseline_r,
             current_r=exp.r_index,
             target_r=exp.target_r,
