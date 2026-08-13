@@ -40,6 +40,11 @@ class StubPrometheus:
     def red_metrics(self, namespace: str) -> dict:
         return {"rate": 42.0, "error": 1.8, "duration": 380.0}
 
+    def phase_summary(self, namespace: str, app_name: str, phase: str,
+                      start, end) -> dict:
+        # 모듈 하단 _PHASE_SUMMARY_SAMPLES 재사용 (호출 시점 해석)
+        return dict(_PHASE_SUMMARY_SAMPLES[phase])
+
 
 class StubLoki:
     def tail(self, namespace: str, limit: int = 100) -> list[str]:
