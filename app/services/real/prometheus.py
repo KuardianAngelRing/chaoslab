@@ -120,7 +120,8 @@ class RealPrometheus:
             end), "response_code")
         five_xx = int(sum(v for code, v in dist.items() if code.startswith("5")))
 
-        pod_sel = f'namespace="{namespace}",pod=~"{app_name}-.*"'
+        # Deployment 파드 패턴(이름-rs해시-파드해시)으로 조여 접두 충돌(front vs frontend) 방지
+        pod_sel = f'namespace="{namespace}",pod=~"{app_name}-[a-z0-9]+-[a-z0-9]+"'
         ready = self._range(
             f'sum(kube_pod_status_ready{{condition="true",{pod_sel}}})', start, end)
         restarts = instant_value(self._instant(
