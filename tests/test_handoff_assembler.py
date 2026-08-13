@@ -7,8 +7,10 @@ from app.services.stubs import StubHandoffSource
 
 
 def _seeded_exp(db_session):
+    """seed의 boutique 실험(iteration 3건 딸린 것) — list_all 순서에 의존하지 않는다."""
     seed_data(db_session)
-    return ExperimentRepository(db_session).list_all()[0]
+    exps = ExperimentRepository(db_session).list_all()
+    return next(e for e in exps if e.app.name == "online-boutique")
 
 
 def test_assemble_produces_valid_payload(db_session):
