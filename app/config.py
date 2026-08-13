@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_model: str = "claude-sonnet-4-6"
     target_r: float = 0.7
+    llm_budget_usd: float = 5.0        # 실험당 LLM 예산 상한 (Budget.remaining 계산)
+    max_agent_iterations: int = 2      # 실험당 최대 개선 반복 (08/04 시안과 동일)
 
     # ── Slice 2c: 실제 빌드/배포 연동 ──
     # False(기본)면 Stub 사용 → 로컬/테스트는 클러스터·AWS 없이 동작.

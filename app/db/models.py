@@ -66,6 +66,7 @@ class Experiment(Base):
 
     app: Mapped["App"] = relationship(back_populates="experiments")
     iterations: Mapped[list["AgentIteration"]] = relationship(back_populates="experiment")
+    handoffs: Mapped[list["AgentHandoff"]] = relationship(back_populates="experiment")
 
 
 class AgentIteration(Base):
@@ -85,3 +86,18 @@ class AgentIteration(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     experiment: Mapped["Experiment"] = relationship(back_populates="iterations")
+
+
+class AgentHandoff(Base):
+    """AI Agent 전달 페이로드 스냅샷 — 계약 검증된 JSON을 통째로 저장."""
+
+    __tablename__ = "agent_handoffs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"))
+    schema_version: Mapped[str] = mapped_column(String(10), default="1.0")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    experiment: Mapped["Experiment"] = relationship(back_populates="handoffs")
