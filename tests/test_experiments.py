@@ -128,6 +128,10 @@ def test_watch_experiment_completes_and_cleans(monkeypatch):
     exp = ExperimentRepository(s).get(exp_id)
     assert exp.status == "completed"
     assert exp.finished_at is not None
+    # Slice 4: 완주 시 실측 3구간 + R지수가 채워져야 함 (DB 왕복 naive datetime 경로 포함)
+    assert exp.baseline_metrics and exp.fault_metrics and exp.recovery_metrics
+    assert exp.recovery_metrics["recovery_seconds"] is not None
+    assert exp.r_index is not None
     s.close()
     assert deleted == [("PodChaos", "exp-demo-abc")]
 

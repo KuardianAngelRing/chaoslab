@@ -11,6 +11,11 @@ _TIMEOUT_S = 10.0
 _STEP_S = 15  # Prometheus scrapeInterval과 동일
 
 
+def _epoch(dt: datetime) -> float:
+    """naive datetime은 UTC로 간주 — naive .timestamp()는 로컬(KST) 해석이라 9시간 어긋남."""
+    return (dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt).timestamp()
+
+
 def istio_selector(namespace: str, app_name: str) -> str:
     return (f'destination_workload="{app_name}",'
             f'destination_workload_namespace="{namespace}",reporter="destination"')
@@ -69,12 +74,12 @@ class RealPrometheus:
 
     def _range(self, query: str, start, end) -> list[float]:
         return range_values(self._get("/api/v1/query_range", {
-            "query": query, "start": start.timestamp(), "end": end.timestamp(),
+            "query": query, "start": _epoch(start), "end": _epoch(end),
             "step": _STEP_S,
         }))
 
     def _instant(self, query: str, at) -> dict:
-        return self._get("/api/v1/query", {"query": query, "time": at.timestamp()})
+        return self._get("/api/v1/query", {"query": query, "time": _epoch(at)})
 
     def red_metrics(self, namespace: str) -> dict:
         """네임스페이스 전체 RED 3종 (대시보드 카드) — 최근 1분 rate."""

@@ -5,7 +5,7 @@
 실패는 실험 상태를 건드리지 않고 경고 로그로 격리.
 """
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -19,14 +19,23 @@ BASELINE_WINDOW_S = 300
 _PODKILL_GRACE_S = 30  # experiments.py 워처와 동일 값
 
 
+def _aware_utc(dt: datetime) -> datetime:
+    """SQLite 재로드로 naive가 된 UTC 값을 aware로 정규화.
+
+    naive인 채 두면 (a) aware finished_at과의 뺄셈이 TypeError,
+    (b) .timestamp()가 로컬시간(KST)으로 해석돼 쿼리 구간이 9시간 밀린다.
+    """
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
 def collect_experiment_metrics(session: Session, exp: Experiment,
                                prometheus: PrometheusService) -> None:
     try:
         app = exp.app
         duration = int(exp.params.get("duration_s") or _PODKILL_GRACE_S)
-        injected = exp.started_at
+        injected = _aware_utc(exp.started_at)
         fault_end = injected + timedelta(seconds=duration)
-        recovered = exp.finished_at or fault_end
+        recovered = _aware_utc(exp.finished_at) if exp.finished_at else fault_end
 
         baseline = prometheus.phase_summary(
             app.namespace, app.name, "baseline",
