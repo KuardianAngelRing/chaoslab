@@ -64,7 +64,7 @@ pytest -q                        # 89 통과
 - [x] **Slice 2 — 빌드/배포** (라이브 검증 완료): 앱 등록→`_bootstrap`(ECR+ArgoCD App+values.yaml, 평문 env는 values·시크릿은 K8s Secret 직접 apply)→Kaniko 빌드→ECR→ArgoCD sync. 빌드 이력 모달·빌드 SSE·healthPath 유무 따라 httpGet/tcpSocket probe·카드 액션 4종(재빌드/재배포=rollout restart/배포중지=replicas 0/빌드중지=Argo shutdown). ⚠️ 시크릿 **값만** 바꿔 재등록하면 values diff 없어 sync 안 됨 → "재배포" 버튼이 해법.
 - [x] **Slice 3 — 카오스** (구현 완료, stub 테스트만·라이브 미검증): 실험 폼→Chaos Mesh CRD 3종(network-delay·pod-kill·cpu-stress), `chaos_specs` 범위검증(latency 10–10000ms·cpu 1–100%·duration 30–1800s), 앱당 1개(409), `_watch_experiment`(duration→회복 확인→CRD 삭제→completed)·중지·SSE.
 - [x] **AI 전달 데이터 인터페이스** (08/04 회의): 노션 §2 계약(`services/agent/handoff_schema.py`, `schema_version` 1.0) · `agent_handoffs` 스냅샷 테이블 · 조립기(저장 metrics 우선, 외부산은 `HandoffSourceService` Stub — Real은 Slice 4·5) · REST CRUD(`routers/handoffs.py`, AI 루프 소비 지점은 `GET /experiments/{id}/handoffs/latest`, 계약 열람은 `/docs`)
-- [x] **Slice 4 — 실측 연동** (백엔드, stub 테스트 검증·라이브는 별도 확인): 실험 완료 시 Prometheus 소급 집계(기준선=주입 전 5분/장애/회복)를 계약 형태로 `*_metrics` 저장 + `r_index` 실계산(`services/r_index.py`, 복구 상한 300s) · Real 4종(`real/prometheus·loki·handoff_source` + `RealK8s` nodes/pods/components) · kubeconfig 공용화(`real/kube.py`, `k8s_context` 지원) · Iac-aws: sut Istio 스크레이프 + generic-app DestinationRule. 차트 실데이터·SSE 갱신 등 화면 배선은 팀원 영역으로 이관
+- [x] **Slice 4 — 실측 연동** (라이브 검증 2026-08-13 완료 — 부띠끄 frontend delay 200ms: p99 49.7→3176.6ms, 회복 2.3s, R=0.7024 공식 검산 일치, 핸드오프 실데이터 확인): 실험 완료 시 Prometheus 소급 집계(기준선=주입 전 5분/장애/회복)를 계약 형태로 `*_metrics` 저장 + `r_index` 실계산(`services/r_index.py`, 복구 상한 300s) · Real 4종(`real/prometheus·loki·handoff_source` + `RealK8s` nodes/pods/components) · kubeconfig 공용화(`real/kube.py`, `k8s_context` 지원) · Iac-aws: sut Istio 스크레이프 + generic-app DestinationRule. 차트 실데이터·SSE 갱신 등 화면 배선은 팀원 영역으로 이관
 - [ ] **Slice 5 — 결과/R지수**: baseline/fault/recovery 계산 + 추이·iteration 히스토리 (AI 루프 자체는 Phase 3)
 - [ ] **DB Supabase 전환** (보고서 확정): up/down 시 EC2 로컬 SQLite 이력 유실 → 관리형 PostgreSQL로. 스키마 초안 `docs/supabase_schema.sql`
 - [ ] **설정 페이지**: LLM/목표R/예산 저장 + 외부 통합 키
@@ -75,6 +75,9 @@ pytest -q                        # 89 통과
 - 라이브 기동 시 `argo/apply.sh`로 WorkflowTemplate 적용 필수
 - Chaos Mesh 파드 Running 확인(`kubectl get pods -n chaos-mesh`) + 주입 대상 파드 존재
 - 마이그레이션 없음: EC2 **비파괴** 재기동 시 구 `chaoslab.db`에 새 컬럼 없어 깨짐 → 재기동 전 DB 삭제(파괴 재생성이면 무해)
+- ⚠️ **`~/Documents/Iac-aws`의 git은 iCloud 오염**(HEAD.lock이 삭제해도 부활 → 커밋 불가). **terraform 상태·GitOps 클론의 단일 진실원천은 `~/dev/Iac-aws`** (2026-08-13 이후) — **up.sh/down.sh는 반드시 `~/dev/Iac-aws`에서 실행** (Documents 쪽 상태 파일은 리소스 0으로 낡음 → 거기서 down.sh 하면 아무것도 안 지워짐)
+- Prometheus/Loki 접근은 EC2 SSH 터널보다 **로컬 `kubectl port-forward`가 안정적** (svc/kube-prometheus-stack-prometheus 9090, svc/loki 3100 — monitoring ns)
+- 부띠끄 대상 검증 시 `.env`의 `SUT_NAMESPACE=online-boutique`는 **임시** — 정상 플로우(앱 등록·빌드)는 `sut`로 되돌릴 것. 부띠끄는 generic-app 배포가 아니라 VS/DR이 없어 핸드오프 `istio_config`가 빈 문자열(계약 허용)
 
 ## 참조 / 컨벤션
 
