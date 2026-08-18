@@ -27,34 +27,83 @@ def test_apps_page_lists_seeded(client):
 def test_experiments_page(client):
     resp = client.get("/experiments")
     assert resp.status_code == 200
-    assert "NetworkChaos" in resp.text         # seed된 실험
     assert "카오스 테스트" in resp.text
+    assert "UI 디자인 시안" in resp.text
+    assert "새 실험 시작" in resp.text
+    assert "후보 선택" in resp.text and "최종 검증" in resp.text
+    assert 'hx-post="/experiments"' not in resp.text
+    assert "data-running-exp" not in resp.text
+    for run_id, stage in ((1, "plan"), (2, "execute"), (3, "result")):
+        assert f'/experiments/{run_id}?view={stage}' in resp.text
 
 
-def test_experiment_detail_running(client):
-    # seed 1번: boutique NetworkChaos running — 실행 진행 중 + 이후 단계 대기 (ADR-0008)
+def test_experiment_detail(client):
     resp = client.get("/experiments/1")
     assert resp.status_code == 200
-    for stage in ("실행", "판정", "개선", "보고"):  # 스테퍼 4단계
+    # 준비 탭 제거 — 4단계 스테퍼 (게이트는 후보 선택 탭 배너로 흡수)
+    for stage in ("후보 선택", "순차 실행·개선", "최종 회귀 검증", "결과"):
         assert stage in resp.text
-    assert "진행 중" in resp.text and "대기" in resp.text
-    assert "ADR-0005" in resp.text  # NetworkChaos엔 /healthz 얕은 측정 경고 상시 표기
-    assert "AI 루프" not in resp.text  # 구 5탭 잔재 제거
+    assert 'data-workflow-stage="prepare"' not in resp.text
+    assert "data-workflow-candidate" in resp.text
+    # SAMPLE DATA 배너·실행 컨텍스트 사이드 패널 제거 (디자인 피드백)
+    assert "SAMPLE DATA" not in resp.text
+    assert "실행 컨텍스트" not in resp.text
+    assert "hx-post" not in resp.text
 
 
-def test_experiment_detail_completed_story(client):
-    # seed 2번: order-msa PodChaos completed — smoke 완주 스토리 (실패→개선→통과)
-    resp = client.get("/experiments/2")
+def test_experiment_demo_rows_open_their_own_fixed_state(client):
+    for run_id, code, stage in ((1, "CL-042", "plan"), (2, "CL-041", "execute"), (3, "CL-040", "result")):
+        resp = client.get(f"/experiments/{run_id}?view={stage}")
+        assert resp.status_code == 200
+        assert code in resp.text
+        assert f'data-initial-stage="{stage}"' in resp.text
+
+
+def test_experiment_future_stage_query_is_clamped(client):
+    resp = client.get("/experiments/1?view=result")
     assert resp.status_code == 200
-    # 판정: 12종 체크 전체 노출 + 실패 근거
-    assert "11/12" in resp.text
-    assert "ready_pods_maintained_during_fault" in resp.text
-    assert "LLM 판정 아님" in resp.text
-    # 개선: iteration 카드 (패치·안전 검증·재실험)
-    assert "PodDisruptionBudget" in resp.text
-    assert "안전 검증" in resp.text and "재실험 PASSED" in resp.text
-    # 보고: 원시 지표 비교 + R 수식 미확정 정직 표기
-    assert "원시 지표" in resp.text and "수식 미확정" in resp.text
+    assert 'data-initial-stage="plan"' in resp.text
+    resp = client.get("/experiments/2?view=verify")
+    assert resp.status_code == 200
+    assert 'data-initial-stage="execute"' in resp.text
+
+
+def test_prepare_view_removed_and_gates_absorbed_into_plan(client):
+    # 구 준비 탭 URL은 존재하지 않는 view → 기본 view로 클램프
+    resp = client.get("/experiments/1?view=prepare")
+    assert resp.status_code == 200
+    assert 'data-initial-stage="plan"' in resp.text
+    # 게이트 3종은 후보 선택 탭 상단 접이식 배너로
+    resp = client.get("/experiments/1?view=plan")
+    assert "data-precheck-banner" in resp.text
+    assert "사전 점검 3/3 통과" in resp.text
+    for gate in ("대상 유효성", "판정 가능한 관측", "장애 정리 보장"):
+        assert gate in resp.text
+    assert "후보 생성이 차단됩니다" in resp.text   # 실패 시 차단 계약 명시
+
+
+def test_candidate_prompt_adds_a_selectable_ui_only_sample(client):
+    resp = client.get("/experiments/1?view=plan")
+    assert resp.status_code == 200
+    assert "원하는 후보가 없나요?" in resp.text
+    assert "data-candidate-prompt" in resp.text
+    assert "data-candidate-generate" in resp.text
+    assert 'data-workflow-max-selected="3"' in resp.text
+    assert 'data-candidate-id="custom"' in resp.text
+    assert 'data-candidate-execution="custom"' in resp.text
+    assert "checkoutservice · memory-stress" in resp.text
+    assert "입력 내용과 무관하게" in resp.text
+    assert "hx-post" not in resp.text
+
+
+def test_execute_stage_can_open_final_verification_preview(client):
+    resp = client.get("/experiments/2?view=execute")
+    assert resp.status_code == 200
+    assert 'data-workflow-go="verify"' in resp.text
+    assert "data-workflow-preview-unlock" in resp.text
+    assert "최종 회귀 검증 시안 보기" in resp.text
+    assert 'data-workflow-go="result" data-workflow-preview-unlock' in resp.text
+    assert "결과 화면 시안 보기" in resp.text
 
 
 def test_experiment_detail_404(client):
@@ -86,75 +135,6 @@ def test_local_infra_partial_when_hx(client):
     assert "<!DOCTYPE html>" not in resp.text
 
 
-def test_settings_page(client):
-    resp = client.get("/settings")
-    assert resp.status_code == 200
-    assert "설정" in resp.text and ("목표 R" in resp.text or "GitHub" in resp.text)
-
-
-def test_recent_activity_assembles_and_limits(db_session):
-    from app.db.seed import seed_data
-    from app.routers.pages import _recent_activity
-
-    seed_data(db_session)
-    items = _recent_activity(db_session)
-    assert len(items) <= 5
-    assert all({"icon", "text", "ts"} <= set(it) for it in items)
-    joined = " ".join(it["text"] for it in items)
-    assert "online-boutique" in joined
-
-
-def test_dashboard_merged_experiment_card(client):
-    resp = client.get("/")
-    assert resp.status_code == 200
-    # 합친 카드의 실데이터(seed)
-    assert "online-boutique" in resp.text and "NetworkChaos" in resp.text
-    # 상태 배지 (seed 실험은 running)
-    assert "진행중" in resp.text
-    # 주입 파라미터 줄은 미노출
-    assert "주입 설정" not in resp.text
-    # R 지수 추이 차트 제목 + 회차 라벨 (data-labels는 tojson이 \u 이스케이프)
-    assert "R 지수 추이" in resp.text
-    assert "기준선" in resp.text  # 지표 타일의 기준선 표기
-    assert "\\uac1c\\uc120 1\\ud68c\\ucc28" in resp.text  # 차트 라벨 "개선 1회차"
-    # AI 진단은 iteration이 있으면 진행중이어도 표시 (seed는 3회차 보유)
-    assert "AI Agent 진단" in resp.text
-    assert "관찰" in resp.text and "가설" in resp.text and "권고" in resp.text
-    assert "timeout 1s→3s" in resp.text  # seed recommender_output
-    # 제거 대상
-    assert "자동 적용" not in resp.text       # Phase 3 버튼 삭제
-    assert "분 경과" not in resp.text          # 경과 배지 → 상태 배지로 대체
-    assert "Iteration 4 / 10" not in resp.text  # iteration 카운트 줄 삭제
-
-
-def test_dashboard_hero_and_kpi_honest(client):
-    resp = client.get("/")
-    assert resp.status_code == 200
-    # 제거되어야 할 가짜들
-    assert "Phase 4" not in resp.text
-    assert "👋" not in resp.text
-    assert "$5.00 한도" not in resp.text
-    assert "+1 어제 대비" not in resp.text
-    # 새 라벨
-    assert "진행중인 실험" in resp.text
-    assert "총 소요된 LLM 비용" in resp.text
-    assert "최근 R 지수" in resp.text
-    # 실 비용(seed 3 iter × 0.012 = 0.036) → $0.04 표기
-    assert "$0.04" in resp.text
-    # '새 실험 시작' 버튼 제거
-    assert "새 실험 시작" not in resp.text
-
-
-def test_dashboard_system_status_real(client):
-    resp = client.get("/")
-    assert resp.status_code == 200
-    assert "Supabase" not in resp.text          # 스택에 없는 항목 제거
-    assert "sidecars" not in resp.text           # node_count 오표기 제거
-    assert "Chaos Mesh" in resp.text             # components() 실항목
-    # 최근 활동이 실데이터(seed 앱명)
-    assert "online-boutique 신규 등록" in resp.text or "online-boutique 새 SHA" in resp.text
-
-
 def test_apps_new_dialog_env_branch(client):
     resp = client.get("/apps")
     assert resp.status_code == 200
@@ -183,63 +163,57 @@ def test_experiments_new_dialog_wizard(client):
     assert 'data-wiz-steps="2"' in resp.text
     assert "대상 앱" in resp.text and "검증 목표" in resp.text
     assert "후보 생성 요청할게요" in resp.text
+    # 제출은 워크플로우 시안의 후보 선택 단계로 바로 진입 (준비 탭 제거)
+    assert 'hx-get="/experiments/1?view=plan"' in resp.text
     # 환경 배지 — order-msa만 k3s, 나머지는 EKS
     assert "k3s · 온프레미스" in resp.text and "EKS · 클라우드" in resp.text
     # 직접 설계 폼 제거 (ADR-0006)
     assert 'name="latency_ms"' not in resp.text and "직접 설계" not in resp.text
 
 
-def test_experiment_candidates_page(client):
-    resp = client.get("/experiments/candidates", params={"app_id": 1, "objective": "주문 흐름 검증"})
+def test_settings_page(client):
+    resp = client.get("/settings")
     assert resp.status_code == 200
-    assert "실험 후보" in resp.text and "직접 입력" in resp.text
-    # 근거형 카드 (ADR-0007): 유형 배지 + 가설 + 예상 영향
-    assert "PodChaos" in resp.text and "파드 강제종료" in resp.text
-    assert "예상 영향" in resp.text
-    assert "주문 흐름 검증" in resp.text            # 검증 목표 에코
-    assert resp.text.count('<input type="radio" name="candidate"') == 4  # 후보 3 + 직접 입력
+    assert "설정" in resp.text and ("목표 R" in resp.text or "GitHub" in resp.text)
 
 
-def test_plan_review_page(client):
-    resp = client.get("/experiments/plan-review",
-                      params={"app_id": 1, "candidate": "1", "objective": "주문 흐름 검증"})
+def test_recent_activity_assembles_and_limits(db_session):
+    from app.db.seed import seed_data
+    from app.routers.pages import _recent_activity
+
+    seed_data(db_session)
+    items = _recent_activity(db_session)
+    assert len(items) <= 5
+    assert all({"icon", "text", "ts"} <= set(it) for it in items)
+    joined = " ".join(it["text"] for it in items)
+    assert "online-boutique" in joined
+
+
+def test_dashboard_simplified(client):
+    # KPI 4장 + 최근 실험/AI 진단 카드 제거 (디자인 피드백) — 최근 활동·시스템 상태만 유지
+    resp = client.get("/")
     assert resp.status_code == 200
-    assert "실험 계획 검토" in resp.text
-    # 레이아웃 시안 3종 세그먼트 (팀 결정 전)
-    assert "seg-control" in resp.text
-    assert "요약 + YAML" in resp.text and "체크리스트" in resp.text and "타임라인" in resp.text
-    # 공유 stub 데이터: 사람말 요약 + 조건 + YAML + 검증 배지
-    assert "이렇게 진행돼요" in resp.text
-    assert "labelSelectors" in resp.text            # Chaos Mesh CR 전문
-    assert "보정 1회" in resp.text
-    # 시안 C 체크리스트 / 시안 E 타임라인 요소
-    assert "대상이 맞나요?" in resp.text
-    assert "계획이 완성됐어요" in resp.text
-    assert "실험 실행할게요" in resp.text
+    assert "배포된 앱" not in resp.text
+    assert "진행중인 실험" not in resp.text
+    assert "총 소요된 LLM 비용" not in resp.text
+    assert "R 지수 추이" not in resp.text
+    assert "AI Agent 진단" not in resp.text
+    assert "rIndexChart" not in resp.text
+    assert "최근 활동" in resp.text and "시스템 상태" in resp.text
+    # 기존 정리 항목 유지
+    assert "Phase 4" not in resp.text
+    assert "👋" not in resp.text
+    assert "새 실험 시작" not in resp.text
 
 
-def test_plan_review_candidate_types(client):
-    # 후보 2 = NetworkChaos → 스펙과 ADR-0005 경고 문구
-    resp = client.get("/experiments/plan-review", params={"app_id": 1, "candidate": "2"})
-    assert "NetworkChaos" in resp.text and "delay" in resp.text
-    assert "ADR-0005" in resp.text
-    # 직접 입력 → 서술 에코
-    resp = client.get("/experiments/plan-review",
-                      params={"app_id": 1, "candidate": "custom", "custom_text": "트래픽 절반 유실"})
-    assert "직접 입력 실험" in resp.text and "트래픽 절반 유실" in resp.text
-
-
-def test_plan_review_unknown_app_404(client):
-    assert client.get("/experiments/plan-review", params={"app_id": 9999}).status_code == 404
-
-
-def test_candidates_approve_navigates_to_plan_review(client):
-    resp = client.get("/experiments/candidates", params={"app_id": 1})
-    assert "/experiments/plan-review" in resp.text   # 승인 버튼이 검토 화면으로 이동
-
-
-def test_experiment_candidates_unknown_app_404(client):
-    assert client.get("/experiments/candidates", params={"app_id": 9999}).status_code == 404
+def test_dashboard_system_status_real(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Supabase" not in resp.text          # 스택에 없는 항목 제거
+    assert "sidecars" not in resp.text           # node_count 오표기 제거
+    assert "Chaos Mesh" in resp.text             # components() 실항목
+    # 최근 활동이 실데이터(seed 앱명)
+    assert "online-boutique 신규 등록" in resp.text or "online-boutique 새 SHA" in resp.text
 
 
 def test_sidebar_no_eks_status_box(client):

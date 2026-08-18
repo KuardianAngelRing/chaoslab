@@ -39,6 +39,11 @@ def make_chaos() -> interfaces.ChaosService:
     return stubs.StubChaos()
 
 
+def make_handoff_source() -> interfaces.HandoffSourceService:
+    # Real(Prometheus/Loki/K8s 실조회)은 Slice 4·5 — 그 전까지 항상 Stub.
+    return stubs.StubHandoffSource()
+
+
 def get_builder() -> interfaces.BuilderService:
     return make_builder()
 
@@ -61,6 +66,10 @@ def get_loki() -> interfaces.LokiService:
 
 def get_k8s() -> interfaces.K8sService:
     return make_k8s()
+
+
+def get_handoff_source() -> interfaces.HandoffSourceService:
+    return make_handoff_source()
 
 
 def get_app_count(session: Session = Depends(get_session)) -> int:

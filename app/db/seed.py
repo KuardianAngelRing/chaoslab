@@ -8,8 +8,11 @@ from app.db.repositories import (
     AppRepository,
     BuildRepository,
     ExperimentRepository,
+    HandoffRepository,
     IterationRepository,
 )
+from app.deps import make_handoff_source
+from app.services.agent.assembler import assemble_handoff
 
 
 def seed_data(session: Session) -> None:
@@ -57,7 +60,6 @@ def seed_data(session: Session) -> None:
         )
 
     # 실환경 smoke 완주(2026-07-28) 스토리 재현 — 실패 판정→자동 개선→재검증 통과.
-    # 상세 화면 completed 상태 데모용, 단계별 내용은 pages._run_stub()이 채운다 (ADR-0008).
     # started_at을 과거로 둬서 대시보드 '최신 실험'은 계속 running인 boutique 실험이 잡히게 한다
     exps.create(
         app_id=order_msa.id, chaos_type="PodChaos",
@@ -65,6 +67,14 @@ def seed_data(session: Session) -> None:
         status="completed",
         started_at=datetime(2026, 7, 28, 12, 53, tzinfo=timezone.utc),
         finished_at=datetime(2026, 7, 28, 12, 55, tzinfo=timezone.utc),
+    )
+
+    # AI 전달 데이터 스냅샷 1건 — 팀원이 /docs에서 바로 예시 확인 (하드코딩 JSON 금지)
+    payload = assemble_handoff(session, make_handoff_source(), exp)
+    HandoffRepository(session).create(
+        experiment_id=exp.id,
+        schema_version=payload.schema_version,
+        payload=payload.model_dump(),
     )
 
 

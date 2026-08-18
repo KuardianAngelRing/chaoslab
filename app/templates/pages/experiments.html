@@ -1,137 +1,121 @@
 {% extends layout|default("base.html") %}
-{% from "macros/components.html" import badge, framework_icon, env_badge %}
+{% from "macros/components.html" import framework_icon, env_badge %}
 
 {% block content %}
+{% set demo_runs = [
+  {"id":1, "code":"CL-042", "view":"plan", "stage":"후보 선택", "step":"1/4", "selected":"0 / 3", "verdict":"판정 전", "updated":"방금 전", "status":"선택 필요", "badge":"badge-warning"},
+  {"id":2, "code":"CL-041", "view":"execute", "stage":"순차 실행", "step":"2/4", "selected":"1 / 2", "verdict":"통과 1", "updated":"어제 17:42", "status":"실행 중", "badge":"badge-info"},
+  {"id":3, "code":"CL-040", "view":"result", "stage":"결과", "step":"4/4", "selected":"2 / 2", "verdict":"통과 1 · 검증 불충분 1", "updated":"07/31 14:18", "status":"완료 · 보완 필요", "badge":"badge-warning"}
+] %}
 <div class="max-w-7xl mx-auto px-8 py-8">
 
-  <!-- Hero (제목 행 h-11 고정 + hero-line — 전 페이지 동일 배치) -->
   <div class="mb-8">
     <div class="flex items-center justify-between h-11">
-      <h1 class="text-3xl font-extrabold flex items-center gap-4"><iconify-icon icon="solar:bug-bold" width="30" style="color: var(--primary);"></iconify-icon>카오스 테스트</h1>
-      <button class="tds-btn-primary" onclick="openDialog('newExperiment')">
+      <h1 class="text-3xl font-extrabold flex items-center gap-4">
+        <iconify-icon icon="solar:bug-bold" width="30" style="color: var(--primary);"></iconify-icon>
+        카오스 테스트
+      </h1>
+      <button class="tds-btn-primary" type="button" onclick="openDialog('newExperiment')">
         <iconify-icon icon="solar:bug-bold" width="18"></iconify-icon>
         새 실험 시작
       </button>
     </div>
     <div class="hero-line mt-4"></div>
-    <p class="text-base mt-4" style="color: var(--muted-foreground);">앱에 일부러 장애를 주입하고 AI Agent 가 R 지수를 자동으로 개선해요. 행을 클릭하면 메트릭과 개선 결과를 볼 수 있어요</p>
+    <p class="text-base mt-4" style="color: var(--muted-foreground);">검증 목표를 정하고, AI가 제안한 후보를 선택해 순차 실험과 최종 회귀까지 한 흐름으로 확인합니다.</p>
   </div>
 
-  <!-- 필터 -->
-  <div class="tds-card p-4 mb-4 flex items-center gap-3 flex-wrap">
+  <div class="tds-card px-4 py-3 mb-5 flex items-center gap-3" style="background: var(--primary-soft); border-color: var(--primary);">
+    <iconify-icon icon="solar:palette-bold" width="20" style="color: var(--primary);"></iconify-icon>
+    <div class="text-sm flex-1" style="color: var(--primary-soft-foreground);">
+      <span class="font-extrabold">UI 디자인 시안</span>
+      <span class="ml-1">모든 실행·메트릭·결과는 예시이며 저장하거나 실제 장애를 주입하지 않습니다.</span>
+    </div>
+    <span class="tds-badge badge-info">SAMPLE DATA</span>
+  </div>
+
+  <div class="grid grid-cols-4 gap-4 mb-5">
+    <div class="tds-card p-5">
+      <div class="text-xs font-bold" style="color: var(--muted-foreground);">전체 실행</div>
+      <div class="text-2xl font-extrabold mt-2">3</div>
+      <div class="text-xs mt-1" style="color: var(--muted-foreground);">최근 7일 예시</div>
+    </div>
+    <div class="tds-card p-5">
+      <div class="text-xs font-bold" style="color: var(--muted-foreground);">내 선택 필요</div>
+      <div class="text-2xl font-extrabold mt-2" style="color: var(--warning);">1</div>
+      <div class="text-xs mt-1" style="color: var(--muted-foreground);">후보 선택 대기</div>
+    </div>
+    <div class="tds-card p-5">
+      <div class="text-xs font-bold" style="color: var(--muted-foreground);">진행 중</div>
+      <div class="text-2xl font-extrabold mt-2" style="color: var(--primary);">1</div>
+      <div class="text-xs mt-1" style="color: var(--muted-foreground);">순차 실험 실행</div>
+    </div>
+    <div class="tds-card p-5">
+      <div class="text-xs font-bold" style="color: var(--muted-foreground);">완료</div>
+      <div class="text-2xl font-extrabold mt-2" style="color: var(--success);">1</div>
+      <div class="text-xs mt-1" style="color: var(--muted-foreground);">보완 필요 1건</div>
+    </div>
+  </div>
+
+  <div class="tds-card p-4 mb-4 flex items-center gap-3">
     <div class="flex items-center gap-2">
       <span class="text-xs font-bold" style="color: var(--muted-foreground);">앱</span>
-      <select class="tds-input text-sm h-10 w-40">
-        <option>모든 앱</option>
-        {% for a in apps %}<option>{{ a.name }}</option>{% endfor %}
-      </select>
+      <select class="tds-input text-sm h-10 w-44 cursor-not-allowed" disabled><option>모든 앱</option><option selected>online-boutique</option></select>
     </div>
     <div class="flex items-center gap-2">
-      <span class="text-xs font-bold" style="color: var(--muted-foreground);">카오스</span>
-      <select class="tds-input text-sm h-10 w-40">
-        <option>모든 종류</option>
-        <option>NetworkChaos</option>
-        <option>PodChaos</option>
-        <option>StressChaos</option>
-      </select>
+      <span class="text-xs font-bold" style="color: var(--muted-foreground);">단계</span>
+      <select class="tds-input text-sm h-10 w-36 cursor-not-allowed" disabled><option>전체 단계</option><option>후보 선택</option><option>순차 실행</option><option>최종 검증</option><option>결과</option></select>
     </div>
     <div class="flex items-center gap-2">
-      <span class="text-xs font-bold" style="color: var(--muted-foreground);">상태</span>
-      <select class="tds-input text-sm h-10 w-32">
-        <option>전체</option>
-        <option>진행 중</option>
-        <option>완료</option>
-        <option>실패</option>
-      </select>
+      <span class="text-xs font-bold" style="color: var(--muted-foreground);">결과</span>
+      <select class="tds-input text-sm h-10 w-40 cursor-not-allowed" disabled><option>모든 결과</option><option>통과</option><option>보완 필요</option><option>검증 불충분</option></select>
     </div>
     <div class="flex-1"></div>
-    <span class="text-xs" style="color: var(--muted-foreground);">총 {{ experiments|length }}건</span>
+    <span class="text-xs" style="color: var(--muted-foreground);">필터 동작 없음 · 총 3건</span>
   </div>
 
-  <!-- 실험 리스트 테이블 -->
   <div class="tds-card overflow-hidden">
     <table class="w-full text-sm">
       <thead style="background: var(--muted);">
         <tr class="text-center text-xs font-bold" style="color: var(--muted-foreground);">
-          <th class="px-6 py-3.5">대상 앱</th>
-          <th class="px-6 py-3.5">카오스 종류</th>
-          <th class="px-6 py-3.5">시작 시각</th>
-          <th class="px-6 py-3.5">기간</th>
-          <th class="px-6 py-3.5">R 지수</th>
-          <th class="px-6 py-3.5">개선 (Δ)</th>
-          <th class="px-6 py-3.5">상태</th>
-          <th class="px-6 py-3.5"></th>
+          <th class="px-5 py-3.5 text-left">실험 목표</th>
+          <th class="px-5 py-3.5">현재 단계</th>
+          <th class="px-5 py-3.5">선택 실험</th>
+          <th class="px-5 py-3.5">판정 요약</th>
+          <th class="px-5 py-3.5">최근 갱신</th>
+          <th class="px-5 py-3.5">상태</th>
+          <th class="px-3 py-3.5"></th>
         </tr>
       </thead>
       <tbody>
-        {% for exp in experiments %}
+        {% for run in demo_runs %}
         <tr class="border-t hover:bg-[var(--sidebar-accent)] cursor-pointer transition" style="border-color: var(--border);"
-            hx-get="/experiments/{{ exp.id }}"
-            hx-target="#main-content"
-            hx-swap="innerHTML"
-            hx-push-url="true">
-          <td class="px-6 py-4">
-            <div class="flex items-center justify-center gap-2.5">
-              <iconify-icon icon="solar:server-square-bold" width="22"></iconify-icon>
-              <div class="text-left">
-                <div class="font-bold">{{ exp.app.name }}</div>
-                <div class="text-[11px]" style="color: var(--muted-foreground);">{{ exp.chaos_type }}</div>
+            hx-get="/experiments/{{ run.id }}?view={{ run.view }}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+          <td class="px-5 py-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);">
+                <iconify-icon icon="solar:shield-check-bold" width="20"></iconify-icon>
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2"><span class="font-extrabold">{{ run.code }}</span><span class="text-[11px] mono" style="color: var(--muted-foreground);">online-boutique</span></div>
+                <div class="text-xs mt-1 truncate max-w-[400px]" style="color: var(--muted-foreground);">Checkout이 Pod 손실과 Catalog 지연 중에도 오류율 1% 이하를 유지하는지 검증</div>
               </div>
             </div>
           </td>
-          <td class="px-6 py-4 text-center"><span class="tds-badge badge-info">{{ exp.chaos_type }}</span></td>
-          <td class="px-6 py-4 text-xs text-center"><span class="font-mono" style="color: var(--muted-foreground);">{{ exp.started_at.strftime("%m/%d %H:%M") }}</span></td>
-          <td class="px-6 py-4 mono text-center">{{ exp.params.duration_s ~ "s" if exp.params.duration_s else "—" }}</td>
-          <td class="px-6 py-4 text-center">
-            <div class="font-extrabold" style="color: var(--primary);">{{ "%.2f"|format(exp.r_index) if exp.r_index is not none else "—" }}</div>
-            <div class="text-[11px]" style="color: var(--muted-foreground);">목표 {{ "%.2f"|format(exp.target_r) }}</div>
-          </td>
-          <td class="px-6 py-4 text-center">
-            {% if exp.r_index is not none %}
-            <span class="text-xs font-bold" style="color: var(--{% if exp.r_index >= exp.target_r %}success{% else %}warning{% endif %});">
-              {{ "%.2f"|format(exp.r_index - exp.target_r) }}
-            </span>
-            {% else %}
-            <span class="text-xs" style="color: var(--muted-foreground);">—</span>
-            {% endif %}
-          </td>
-          <td class="px-6 py-4 text-center">
-            {% if exp.status == "running" %}
-            <span class="tds-badge badge-warning"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--warning);"></span>주입 중</span>
-            {% elif exp.status == "pending" %}
-            <span class="tds-badge badge-muted">대기중</span>
-            {% elif exp.status == "completed" %}
-            <span class="tds-badge badge-success">완료</span>
-            {% elif exp.status == "stopped" %}
-            <span class="tds-badge badge-muted">중지됨</span>
-            {% elif exp.status in ("failed", "inject-failed") %}
-            <span class="tds-badge badge-danger">실패</span>
-            {% else %}
-            <span class="tds-badge badge-info">{{ exp.status }}</span>
-            {% endif %}
-          </td>
-          <td class="px-6 py-4 text-center">
-            {% if exp.status == "running" %}
-            <button class="tds-btn-muted text-xs h-8 px-3 justify-center" title="실험 중지"
-                    data-running-exp="{{ exp.id }}"
-                    onclick="event.stopPropagation()"
-                    hx-post="/experiments/{{ exp.id }}/stop" hx-target="#main-content" hx-swap="innerHTML">
-              <iconify-icon icon="solar:stop-circle-bold" width="14"></iconify-icon>
-              실험 중지
-            </button>
-            {% else %}
-            <iconify-icon icon="lucide:chevron-right" width="18" style="color: var(--muted-foreground);"></iconify-icon>
-            {% endif %}
-          </td>
+          <td class="px-5 py-4 text-center"><div class="font-bold">{{ run.stage }}</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">{{ run.step }}</div></td>
+          <td class="px-5 py-4 text-center"><span class="font-bold">{{ run.selected }}</span></td>
+          <td class="px-5 py-4 text-center text-xs">{{ run.verdict }}</td>
+          <td class="px-5 py-4 text-center text-xs mono" style="color: var(--muted-foreground);">{{ run.updated }}</td>
+          <td class="px-5 py-4 text-center"><span class="tds-badge {{ run.badge }}">{{ run.status }}</span></td>
+          <td class="px-3 py-4 text-center"><iconify-icon icon="lucide:chevron-right" width="18" style="color: var(--muted-foreground);"></iconify-icon></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-
 </div>
 
-<!-- DIALOG: 새 실험 시작 (2-step 위저드 — 대상 앱 → 검증 목표. 설계는 항상 AI 후보 선택형: ADR-0006) -->
+<!-- DIALOG: 새 실험 시작 (2-step 위저드 — 대상 앱 → 검증 목표. 설계는 항상 AI 후보 선택형: ADR-0006)
+     제출 시 워크플로우 시안의 후보 선택 단계로 진입 (준비 탭은 제거 — 게이트는 배너로) -->
 <div class="dialog-backdrop" id="dialog-newExperiment">
   <div class="dialog-card" data-wizard data-wiz-steps="2">
     <div class="dialog-resize-handle" title="드래그하여 크기 조절">
@@ -216,8 +200,9 @@
           <iconify-icon icon="lucide:arrow-right" width="16"></iconify-icon>
         </button>
         <button type="button" class="tds-btn-primary text-base hidden" data-wiz-submit
-                hx-get="/experiments/candidates" hx-include="closest form"
-                hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+                hx-get="/experiments/1?view=plan"
+                hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+                onclick="closeDialog('newExperiment')">
           <iconify-icon icon="solar:magic-stick-3-bold" width="16"></iconify-icon>
           후보 생성 요청할게요
         </button>

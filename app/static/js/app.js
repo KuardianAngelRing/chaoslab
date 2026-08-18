@@ -389,13 +389,247 @@ document.body.addEventListener('htmx:afterSwap', watchExperiments);
 // ── 사이드바 active 동기화 (HTMX 부분 스왑은 사이드바 DOM을 안 바꿈) ──
 function syncSidebarActive() {
   const path = location.pathname;
-  document.querySelectorAll('.sidebar-nav-item').forEach((a) => {
+  const items = [...document.querySelectorAll('.sidebar-nav-item')];
+  // 루트는 정확히, 나머지는 하위경로(/experiments/3 등)까지 매칭 — 서버 active_nav와 동일.
+  // /infra vs /infra/local처럼 매칭이 겹치면 가장 긴 href 하나만 활성화
+  let best = null;
+  items.forEach((a) => {
     const href = a.getAttribute('hx-get');
-    // 루트는 정확히, 나머지는 하위경로(/experiments/3 등)까지 매칭 — 서버 active_nav와 동일
     const match = href === '/' ? path === '/' : path === href || path.startsWith(href + '/');
-    a.classList.toggle('active', match);
+    if (match && (!best || href.length > best.getAttribute('hx-get').length)) best = a;
   });
+  items.forEach((a) => a.classList.toggle('active', a === best));
 }
 document.addEventListener('DOMContentLoaded', syncSidebarActive);
 document.body.addEventListener('htmx:afterSwap', syncSidebarActive);
 document.body.addEventListener('htmx:historyRestore', syncSidebarActive);
+
+// ── 카오스 워크플로우 UI 시안 (브라우저 상태만 변경, 서버 요청 없음) ──
+function syncWorkflowStageState(root) {
+  if (!root) return;
+  const stages = [...root.querySelectorAll('[data-workflow-stage]')];
+  const active = stages.find((stage) => stage.classList.contains('active')) || stages[0];
+  if (!active) return;
+  const currentIndex = Number(root.dataset.workflowCurrentStage || 1);
+  stages.forEach((stage) => {
+    const isActive = stage === active;
+    stage.classList.toggle('is-complete', Number(stage.dataset.stageIndex) < currentIndex);
+    stage.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  const setText = (selector, value) => {
+    const el = root.querySelector(selector);
+    if (el) el.textContent = value;
+  };
+  setText('[data-workflow-view-label]', active.dataset.stageLabel);
+  setText('[data-workflow-aside-view]', active.dataset.stageLabel);
+}
+
+function syncWorkflowCandidates(root) {
+  if (!root) return;
+  const candidates = [...root.querySelectorAll('[data-workflow-candidate]')];
+  candidates.forEach((candidate) => {
+    const card = candidate.closest('label')?.querySelector('[data-candidate-card]');
+    if (card) card.classList.toggle('is-selected', candidate.checked);
+  });
+  const selectedCandidates = candidates.filter((candidate) => candidate.checked);
+  const selectedIds = selectedCandidates.map((candidate) => candidate.dataset.candidateId);
+  const selected = selectedIds.length;
+  const maxSelected = Number(root.dataset.workflowMaxSelected || 3);
+  candidates.forEach((candidate) => {
+    const card = candidate.closest('label')?.querySelector('[data-candidate-card]');
+    if (candidate.disabled && !candidate.dataset.limitDisabled) return;
+    const limitDisabled = selected >= maxSelected && !candidate.checked;
+    candidate.disabled = limitDisabled;
+    if (limitDisabled) candidate.dataset.limitDisabled = 'true';
+    else delete candidate.dataset.limitDisabled;
+    if (card) card.classList.toggle('is-limit-disabled', limitDisabled);
+  });
+  const summary = root.querySelector('[data-workflow-selection-summary]');
+  if (summary) summary.textContent = selected ? `${selected}개 후보를 선택했어요` : '아직 선택한 후보가 없어요';
+  const help = root.querySelector('[data-workflow-selection-help]');
+  if (help) help.textContent = selected >= maxSelected ? `최대 ${maxSelected}개를 선택했어요. 하나를 해제하면 다른 후보를 고를 수 있습니다.` : `1개 이상, 최대 ${maxSelected}개까지 선택할 수 있습니다.`;
+  const next = root.querySelector('[data-workflow-selection-next]');
+  if (next) next.disabled = selected === 0;
+  const count = root.querySelector('[data-workflow-selected-count]');
+  if (count) count.textContent = `${selected}개`;
+  const executeStage = root.querySelector('[data-workflow-stage="execute"]');
+  if (executeStage && Number(root.dataset.workflowCurrentStage) < 2) {
+    executeStage.disabled = selected === 0;
+    executeStage.setAttribute('aria-disabled', selected === 0 ? 'true' : 'false');
+    executeStage.title = selected === 0 ? '후보를 하나 이상 선택하면 열립니다' : '';
+  }
+  syncWorkflowExecutionSelection(root, selectedIds);
+}
+
+function syncWorkflowExecutionSelection(root, selectedIds) {
+  const queueItems = [...root.querySelectorAll('[data-execution-queue-item]')];
+  queueItems.forEach((item) => {
+    const order = selectedIds.indexOf(item.dataset.executionQueueItem);
+    const selected = order >= 0;
+    item.classList.toggle('hidden', !selected);
+    item.classList.toggle('is-current', order === 0);
+    const orderEl = item.querySelector('[data-queue-order]');
+    if (orderEl && selected) orderEl.textContent = String(order + 1);
+    const status = item.querySelector('[data-queue-status]');
+    if (status && selected) status.textContent = order === 0 ? '현재 상세 · 개선 1회 예시' : '다음 실행 · 대기';
+  });
+  const empty = root.querySelector('[data-workflow-queue-empty]');
+  if (empty) empty.classList.toggle('hidden', selectedIds.length > 0);
+  root.querySelectorAll('[data-candidate-execution]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.candidateExecution !== selectedIds[0]);
+  });
+  const executionCount = root.querySelector('[data-workflow-execution-count]');
+  if (executionCount) executionCount.textContent = selectedIds.length ? `${selectedIds.length}개 선택 · 화면 예시` : '후보 선택 필요';
+  maybePlayExecution(root);
+}
+
+// ── 실행 탭 모의 실행 애니메이션 (시안) — 6단계 파이프라인이 실제 도는 듯한 연출 ──
+const EXEC_STEP_MS = 950;
+const EXEC_TIMELINE = [
+  { badge: ['badge-info', '기준선 관측 중'] },
+  { badge: ['badge-warning', '장애 주입 중'] },
+  { badge: ['badge-info', '정리 확인 중'] },
+  { badge: ['badge-danger', '초기 판정 실패'] },
+  { badge: ['badge-info', 'AI 분석·개선 중'], reveal: true, attempt: 'attempt 2 / 3' },
+  { badge: ['badge-warning', '동조건 재실험 중'] },
+];
+
+function execFinish(card) {
+  card.querySelectorAll('[data-exec-step]').forEach((s) => s.classList.remove('exec-pending', 'exec-active'));
+  card.querySelectorAll('[data-exec-after]').forEach((a) => a.classList.remove('exec-hidden'));
+  const analysis = card.querySelector('[data-exec-analysis]');
+  if (analysis) analysis.classList.remove('exec-hidden');
+  const badge = card.querySelector('[data-exec-status]');
+  if (badge) { badge.className = 'tds-badge badge-success'; badge.textContent = '재실험 통과'; }
+  const attempt = card.querySelector('[data-exec-attempt]');
+  if (attempt) attempt.textContent = 'attempt 2 / 3';
+}
+
+function playExecutionDemo(card) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { execFinish(card); return; }
+  const steps = [...card.querySelectorAll('[data-exec-step]')];
+  const badge = card.querySelector('[data-exec-status]');
+  const attempt = card.querySelector('[data-exec-attempt]');
+  const analysis = card.querySelector('[data-exec-analysis]');
+  steps.forEach((s) => s.classList.add('exec-pending'));
+  card.querySelectorAll('[data-exec-after]').forEach((a) => a.classList.add('exec-hidden'));
+  if (analysis) analysis.classList.add('exec-hidden');
+  if (attempt) attempt.textContent = 'attempt 1 / 3';
+  steps.forEach((step, i) => {
+    setTimeout(() => {
+      steps.forEach((s) => s.classList.remove('exec-active'));
+      step.classList.remove('exec-pending');
+      step.classList.add('exec-active');
+      const t = EXEC_TIMELINE[i] || {};
+      if (badge && t.badge) { badge.className = `tds-badge ${t.badge[0]} exec-live`; badge.textContent = t.badge[1]; }
+      if (t.reveal && analysis) analysis.classList.remove('exec-hidden');
+      if (t.attempt && attempt) attempt.textContent = t.attempt;
+    }, i * EXEC_STEP_MS);
+  });
+  setTimeout(() => execFinish(card), steps.length * EXEC_STEP_MS + 400);
+}
+
+// 실행 탭이 보일 때 현재 표시 중인 실험 카드를 1회 재생 (카드별 1번만)
+function maybePlayExecution(root) {
+  if (!root) return;
+  const section = root.querySelector('[data-tab-content="execute"]');
+  if (!section || !section.classList.contains('active')) return;
+  const card = section.querySelector('[data-candidate-execution]:not(.hidden)');
+  if (!card || card.dataset.execPlayed) return;
+  card.dataset.execPlayed = 'true';
+  playExecutionDemo(card);
+}
+
+function syncCandidatePrompt(root) {
+  if (!root) return;
+  const prompt = root.querySelector('[data-candidate-prompt]');
+  const generate = root.querySelector('[data-candidate-generate]');
+  if (!prompt || !generate) return;
+  const value = prompt.value.trim();
+  generate.disabled = !value || value === generate.dataset.lastPrompt;
+  const count = root.querySelector('[data-candidate-prompt-count]');
+  if (count) count.textContent = `${prompt.value.length} / 200`;
+}
+
+function showGeneratedCandidate(root) {
+  const prompt = root?.querySelector('[data-candidate-prompt]');
+  const generate = root?.querySelector('[data-candidate-generate]');
+  const generated = root?.querySelector('[data-generated-candidate]');
+  const value = prompt?.value.trim();
+  if (!root || !generate || !generated || !value) return;
+  generated.classList.remove('hidden');
+  const promptText = generated.querySelector('[data-generated-prompt-text]');
+  if (promptText) promptText.textContent = `“${value}”`;
+  const total = root.querySelector('[data-workflow-candidate-total]');
+  if (total) total.textContent = '4개 후보 · 예시';
+  const label = generate.querySelector('[data-candidate-generate-label]');
+  if (label) label.textContent = '다른 예시로 갱신';
+  generate.dataset.lastPrompt = value;
+  syncCandidatePrompt(root);
+  syncWorkflowCandidates(root);
+}
+
+function initWorkflowDemo() {
+  document.querySelectorAll('[data-workflow-shell]').forEach((root) => {
+    syncWorkflowStageState(root);
+    syncWorkflowCandidates(root);
+    syncCandidatePrompt(root);
+  });
+}
+
+document.addEventListener('click', (e) => {
+  const promptExample = e.target.closest && e.target.closest('[data-candidate-prompt-example]');
+  if (promptExample) {
+    const root = promptExample.closest('[data-workflow-shell]');
+    const prompt = root?.querySelector('[data-candidate-prompt]');
+    if (prompt) {
+      prompt.value = promptExample.dataset.candidatePromptExample;
+      syncCandidatePrompt(root);
+      prompt.focus();
+    }
+    return;
+  }
+
+  const generate = e.target.closest && e.target.closest('[data-candidate-generate]');
+  if (generate && !generate.disabled) {
+    showGeneratedCandidate(generate.closest('[data-workflow-shell]'));
+    return;
+  }
+
+  const stage = e.target.closest && e.target.closest('[data-workflow-stage]');
+  if (stage) {
+    const shell = stage.closest('[data-workflow-shell]');
+    syncWorkflowStageState(shell);
+    maybePlayExecution(shell);
+  }
+
+  const go = e.target.closest && e.target.closest('[data-workflow-go]');
+  if (!go || go.disabled) return;
+  const root = go.closest('[data-workflow-shell]');
+  const target = root?.querySelector(`[data-workflow-stage="${go.dataset.workflowGo}"]`);
+  if (target) {
+    if (go.hasAttribute('data-workflow-preview-unlock')) {
+      target.disabled = false;
+      target.setAttribute('aria-disabled', 'false');
+      target.title = '';
+    }
+    target.click();
+    root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.matches && e.target.matches('[data-workflow-candidate]')) {
+    syncWorkflowCandidates(e.target.closest('[data-workflow-shell]'));
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target.matches && e.target.matches('[data-candidate-prompt]')) {
+    syncCandidatePrompt(e.target.closest('[data-workflow-shell]'));
+  }
+});
+
+document.addEventListener('DOMContentLoaded', initWorkflowDemo);
+document.body.addEventListener('htmx:afterSwap', initWorkflowDemo);

@@ -1,273 +1,282 @@
 {% extends layout|default("base.html") %}
-{% from "macros/components.html" import badge %}
-
-{# 단계 섹션 헤더 — 번호 원 + 제목 + 상태 배지 (ADR-0008: 스테퍼 + 단일 스크롤) #}
-{% macro stage_head(n, title, status, extra='') %}
-<div class="flex items-center gap-3 mb-4">
-  <span class="w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-sm shrink-0"
-        style="{% if status == 'done' %}background: var(--primary); color: var(--primary-foreground);
-               {% elif status == 'active' %}background: var(--warning); color: white;
-               {% else %}background: var(--muted); color: var(--muted-foreground);{% endif %}">
-    {% if status == 'done' %}<iconify-icon icon="solar:check-read-linear" width="18"></iconify-icon>{% else %}{{ n }}{% endif %}
-  </span>
-  <span class="font-extrabold text-lg">{{ title }}</span>
-  {% if status == 'active' %}
-  <span class="tds-badge badge-warning"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--warning);"></span>진행 중</span>
-  {% elif status == 'wait' %}
-  <span class="tds-badge badge-muted">대기</span>
-  {% endif %}
-  {% if extra %}<span class="text-sm" style="color: var(--muted-foreground);">{{ extra }}</span>{% endif %}
-</div>
-{% endmacro %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto px-8 py-8">
+{# 준비(prepare) 단계는 탭에서 제거 — 게이트 결과는 후보 선택 탭 상단 배너로 흡수 (팀 결정) #}
+{% set stage_meta = {
+  "plan": {"index": 1, "label": "후보 선택", "status": "선택 필요"},
+  "execute": {"index": 2, "label": "순차 실행·개선", "status": "실행 예시"},
+  "verify": {"index": 3, "label": "최종 회귀 검증", "status": "검증 예시"},
+  "result": {"index": 4, "label": "결과", "status": "완료 · 보완 필요"}
+} %}
+{% set run_id = request.path_params.get("exp_id", 1)|int %}
+{% set run_meta = {
+  1: {"code":"CL-042", "current":1, "current_label":"후보 선택", "status":"선택 필요", "badge":"badge-warning", "default_view":"plan", "selected":[]},
+  2: {"code":"CL-041", "current":2, "current_label":"순차 실행·개선", "status":"실행 예시", "badge":"badge-info", "default_view":"execute", "selected":["frontend", "catalog"]},
+  3: {"code":"CL-040", "current":4, "current_label":"결과", "status":"완료 · 보완 필요", "badge":"badge-warning", "default_view":"result", "selected":["frontend", "catalog"]}
+} %}
+{% set run = run_meta.get(run_id) %}
+{% set requested_view = request.query_params.get("view", run.default_view) %}
+{% if requested_view not in stage_meta or stage_meta[requested_view].index > run.current %}{% set view = run.default_view %}{% else %}{% set view = requested_view %}{% endif %}
+{% set active = stage_meta.get(view) %}
 
-  <!-- Hero (제목 행 h-11 고정 + hero-line — 전 페이지 동일 배치) -->
-  <div class="mb-6">
-    <div class="flex items-center justify-between h-11">
-      <h1 class="text-3xl font-extrabold flex items-center gap-4">
-        <span class="tossface-lg">🧪</span>실험 #{{ exp.id }}
-        <span class="tds-badge badge-info">{{ exp.chaos_type }}</span>
-        {% if exp.status == 'running' %}
-        <span class="tds-badge badge-warning"><span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--warning);"></span>running</span>
-        {% elif exp.status == 'completed' %}
-        <span class="tds-badge badge-success">completed</span>
-        {% else %}
-        <span class="tds-badge badge-muted">{{ exp.status }}</span>
-        {% endif %}
-      </h1>
-      <div class="flex items-center gap-2">
-        {% if exp.status == 'running' %}
-        <button class="tds-btn-muted" style="color: var(--danger); border-color: var(--danger);">
-          <iconify-icon icon="solar:stop-bold" width="14"></iconify-icon>
-          중단
-        </button>
-        {% endif %}
-        <a class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
-          <iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>
-          실험 목록
-        </a>
-      </div>
-    </div>
-    <div class="hero-line mt-4"></div>
-    <p class="text-base mt-4" style="color: var(--muted-foreground);">
-      {{ exp.app.name }} · <span class="mono text-sm">{{ run.execute.namespace }}</span>
-      — 실행부터 보고까지 한 흐름으로 볼 수 있어요
-    </p>
+<div class="max-w-7xl mx-auto px-8 py-8" data-workflow-shell data-initial-stage="{{ view }}" data-workflow-current-stage="{{ run.current }}" data-workflow-run-id="{{ run_id }}" data-workflow-max-selected="3">
+  <div class="flex items-center gap-3 mb-3">
+    <button type="button" class="p-2 rounded-xl hover:bg-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" style="color: var(--muted-foreground);" aria-label="카오스 테스트 목록으로">
+      <iconify-icon icon="lucide:arrow-left" width="18"></iconify-icon>
+    </button>
+    <span class="text-xs font-semibold" style="color: var(--muted-foreground);">카오스 테스트</span>
+    <iconify-icon icon="lucide:chevron-right" width="14" style="color: var(--muted-foreground);"></iconify-icon>
+    <span class="text-xs" style="color: var(--muted-foreground);">{{ run.code }}</span>
   </div>
 
-  <!-- 진행 스테퍼: 실행 → 판정 → 개선 → 보고 -->
-  <div class="tds-card px-6 py-4 mb-6">
-    <div class="flex items-center">
-      {% for s in run.stages %}
-      <a class="flex items-center gap-2 shrink-0" href="#stage-{{ s.key }}" style="text-decoration: none; color: inherit;">
-        <span class="w-7 h-7 rounded-full flex items-center justify-center font-extrabold text-xs"
-              style="{% if s.status == 'done' %}background: var(--primary); color: var(--primary-foreground);
-                     {% elif s.status == 'active' %}background: var(--warning); color: white;
-                     {% else %}background: var(--muted); color: var(--muted-foreground);{% endif %}">
-          {% if s.status == 'done' %}<iconify-icon icon="solar:check-read-linear" width="16"></iconify-icon>
-          {% else %}{{ loop.index }}{% endif %}
-        </span>
-        <span class="text-sm font-bold {% if s.status == 'wait' %}opacity-50{% endif %}">{{ s.title }}</span>
-      </a>
-      {% if not loop.last %}
-      <div class="flex-1 h-0.5 mx-3 rounded"
-           style="background: {{ 'var(--primary)' if s.status == 'done' else 'var(--border)' }};"></div>
-      {% endif %}
-      {% endfor %}
+  <div class="flex items-center gap-4 mb-6">
+    <div class="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);">
+      <iconify-icon icon="solar:shield-check-bold" width="30"></iconify-icon>
     </div>
+    <h1 class="text-2xl font-extrabold">Checkout 복원력 검증</h1>
   </div>
 
-  <!-- ============ ① 실행 ============ -->
-  <div id="stage-execute" class="tds-card p-6 mb-4">
-    {{ stage_head(1, '실행', run.stages[0].status) }}
-
-    <p class="text-sm font-semibold rounded-2xl px-4 py-3 mb-4"
-       style="background: var(--primary-soft); color: var(--primary-soft-foreground);">{{ run.execute.summary }}</p>
-
-    {% if run.execute.warn %}
-    <div class="flex items-start gap-2 rounded-2xl px-4 py-3 mb-4 text-sm"
-         style="background: rgba(245,158,11,0.08); border: 1px solid var(--warning);">
-      <span class="tossface shrink-0">⚠️</span>
-      <span style="color: var(--warning);">{{ run.execute.warn }}</span>
-    </div>
-    {% endif %}
-
-    {% if run.execute.progress_pct is not none %}
-    <div class="mb-4">
-      <div class="progress-track"><div class="progress-fill" style="width: {{ run.execute.progress_pct }}%;"></div></div>
-      <div class="text-xs mt-1.5 font-bold" style="color: var(--muted-foreground);">{{ run.execute.progress_label }}</div>
-    </div>
-    {% else %}
-    <div class="text-xs font-bold mb-4" style="color: var(--muted-foreground);">{{ run.execute.progress_label }}</div>
-    {% endif %}
-
-    <div class="space-y-2">
-      {% for ev in run.execute.events %}
-      <div class="flex items-center gap-3 text-sm rounded-xl px-3 py-2"
-           {% if ev.state == 'active' %}style="background: rgba(245,158,11,0.08);"{% endif %}>
-        <span class="tossface shrink-0">{{ ev.emoji }}</span>
-        <span class="{{ 'font-bold' if ev.state == 'active' }}"
-              style="{{ 'color: var(--muted-foreground);' if ev.state == 'done' }}">{{ ev.text }}</span>
-        {% if ev.state == 'active' %}
-        <iconify-icon icon="solar:loading-bold" width="14" class="animate-spin" style="color: var(--warning);"></iconify-icon>
-        {% endif %}
-        <span class="ml-auto text-[11px] mono shrink-0" style="color: var(--muted-foreground);">{{ ev.ts }}</span>
-      </div>
-      {% endfor %}
-    </div>
-
-    <details class="rounded-2xl border overflow-hidden mt-4" style="border-color: var(--border);">
-      <summary class="px-5 py-3 font-bold text-sm cursor-pointer" style="color: var(--muted-foreground);">대상 파드 로그 보기</summary>
-      <pre class="mono text-xs leading-relaxed p-5 overflow-auto" style="background: #0f1419; color: #e8eaed; max-height: 320px;">{% for line in logs %}{{ line }}
-{% endfor %}</pre>
-    </details>
-  </div>
-
-  <!-- ============ ② 판정 ============ -->
-  <div id="stage-verdict" class="tds-card p-6 mb-4 {% if not run.verdict %}opacity-60{% endif %}">
-    {{ stage_head(2, '판정', run.stages[1].status) }}
-
-    {% if run.verdict %}
-    <div class="flex items-center gap-3 mb-1 flex-wrap">
-      {% if run.verdict.result == 'passed' %}
-      <span class="text-2xl font-extrabold" style="color: var(--success);">✓ PASSED</span>
-      {% else %}
-      <span class="text-2xl font-extrabold" style="color: var(--danger);">✗ FAILED</span>
-      {% endif %}
-      <span class="text-sm font-bold" style="color: var(--muted-foreground);">{{ run.verdict.passed }}/{{ run.verdict.total }} 체크 통과</span>
-      <span class="tds-badge badge-muted">관측값 기반 · LLM 판정 아님</span>
-    </div>
-    <p class="text-sm mb-4" style="color: var(--muted-foreground);">{{ run.verdict.headline }}</p>
-
-    <div class="rounded-2xl border overflow-hidden" style="border-color: var(--border);">
-      {% for c in run.verdict.checks %}
-      <div class="flex items-start gap-3 px-4 py-2.5 text-sm {{ 'border-t' if not loop.first }}"
-           style="border-color: var(--border); {% if not c.ok %}background: rgba(220,38,38,0.06);{% endif %}">
-        {% if c.ok %}
-        <iconify-icon icon="solar:check-circle-bold" width="18" class="mt-0.5 shrink-0" style="color: var(--success);"></iconify-icon>
-        {% else %}
-        <iconify-icon icon="solar:close-circle-bold" width="18" class="mt-0.5 shrink-0" style="color: var(--danger);"></iconify-icon>
-        {% endif %}
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 flex-wrap">
-            <code class="mono text-xs {{ 'font-bold' if not c.ok }}"
-                  style="{% if not c.ok %}color: var(--danger);{% endif %}">{{ c.key }}</code>
-            <span style="color: var(--muted-foreground);">{{ c.desc }}</span>
-          </div>
-          <div class="text-xs mt-0.5 {{ 'font-bold' if not c.ok }}"
-               style="color: {{ 'var(--danger)' if not c.ok else 'var(--muted-foreground)' }};">{{ c.evidence }}</div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="text-sm" style="color: var(--muted-foreground);">실행이 끝나면 관측값 기반 체크 12종으로 판정해요</p>
-    {% endif %}
-  </div>
-
-  <!-- ============ ③ 개선 ============ -->
-  <div id="stage-improve" class="tds-card p-6 mb-4 {% if not run.improve %}opacity-60{% endif %}">
-    {{ stage_head(3, '개선', run.stages[2].status) }}
-
-    {% if run.improve %}
-    {% for it in run.improve.iterations %}
-    <div class="rounded-2xl border p-5 {{ 'mb-3' if not loop.last }}" style="border-color: var(--border);">
-      <div class="flex items-center gap-2 mb-3 flex-wrap">
-        <span class="w-6 h-6 rounded-full flex items-center justify-center font-extrabold text-xs"
-              style="background: var(--primary); color: var(--primary-foreground);">{{ it.n }}</span>
-        <span class="font-extrabold">iteration {{ it.n }}</span>
-        <span class="mono text-xs" style="color: var(--muted-foreground);">{{ it.patch_summary }}</span>
-      </div>
-
-      <p class="text-sm mb-3" style="color: var(--muted-foreground);">{{ it.reason }}</p>
-
-      <div class="space-y-2 text-sm mb-3">
-        <div class="flex items-start gap-2">
-          <iconify-icon icon="solar:shield-check-bold" width="16" class="mt-0.5 shrink-0" style="color: var(--success);"></iconify-icon>
-          <span><b>안전 검증</b> — {{ it.safety }}</span>
-        </div>
-        <div class="flex items-start gap-2">
-          {% if it.rerun.result == 'passed' %}
-          <iconify-icon icon="solar:check-circle-bold" width="16" class="mt-0.5 shrink-0" style="color: var(--success);"></iconify-icon>
-          <span><b>재실험 PASSED</b> ({{ it.rerun.passed }}/{{ it.rerun.total }}) — {{ it.rerun.highlights }}</span>
-          {% else %}
-          <iconify-icon icon="solar:close-circle-bold" width="16" class="mt-0.5 shrink-0" style="color: var(--danger);"></iconify-icon>
-          <span><b>재실험 FAILED</b> ({{ it.rerun.passed }}/{{ it.rerun.total }}) — {{ it.rerun.highlights }}</span>
-          {% endif %}
-        </div>
-      </div>
-
-      <details class="rounded-2xl border overflow-hidden" style="border-color: var(--border);">
-        <summary class="px-5 py-3 font-bold text-sm cursor-pointer" style="color: var(--muted-foreground);">적용된 패치 diff 보기</summary>
-        <pre class="mono text-xs leading-relaxed p-5 overflow-x-auto" style="background: #0f1419; color: #e8eaed;">{% for line in it.diff.split('\n') %}<span style="color: {{ '#4ade80' if line.startswith('+') else ('#f87171' if line.startswith('-') else '#9ca3af') }};">{{ line }}</span>
-{% endfor %}</pre>
-      </details>
-    </div>
+  <div class="tds-card p-2 grid grid-cols-4 gap-2 mb-5" role="tablist" aria-label="실험 워크플로우 단계">
+    {% for key, icon, label, caption in [
+      ("plan", "solar:checklist-minimalistic-bold", "후보 선택", "가설 비교·선택"),
+      ("execute", "solar:play-circle-bold", "순차 실행·개선", "실험별 반복"),
+      ("verify", "solar:shield-check-bold", "최종 회귀 검증", "누적 상태 재검증"),
+      ("result", "solar:document-text-bold", "결과", "근거·보고서")
+    ] %}
+    <button type="button"
+            class="workflow-stage-button {% if view == key %}active{% endif %}"
+            data-tab-trigger="{{ key }}" data-tab-group="workflow" data-workflow-stage="{{ key }}" data-stage-index="{{ loop.index }}" data-stage-label="{{ label }}"
+            role="tab" aria-selected="{{ 'true' if view == key else 'false' }}" {% if loop.index > run.current %}disabled aria-disabled="true" title="현재 실행 단계가 완료된 뒤 열립니다"{% endif %}>
+      <span class="workflow-stage-number"><span data-stage-number>{{ loop.index }}</span><iconify-icon data-stage-check icon="solar:check-circle-bold" width="18"></iconify-icon></span>
+      <span class="min-w-0 text-left"><span class="block text-sm font-extrabold truncate">{{ label }}</span><span class="block text-[11px] mt-0.5 truncate" style="color: var(--muted-foreground);">{{ caption }}</span></span>
+    </button>
     {% endfor %}
-
-    <div class="flex items-center gap-2 text-sm mt-1" style="color: var(--muted-foreground);">
-      <iconify-icon icon="solar:flag-bold" width="14"></iconify-icon>
-      {{ run.improve.ended }}
-    </div>
-    {% else %}
-    <p class="text-sm" style="color: var(--muted-foreground);">판정이 실패하면 패치를 검증·적용하고 같은 실험을 다시 돌려요 (통과 시 이 단계는 건너뜀)</p>
-    {% endif %}
   </div>
 
-  <!-- ============ ④ 보고 ============ -->
-  <div id="stage-report" class="tds-card p-6 {% if not run.report %}opacity-60{% endif %}">
-    {{ stage_head(4, '보고', run.stages[3].status) }}
+  <div class="min-w-0">
+      <section data-tab-content="plan" data-tab-group="workflow" class="{% if view == 'plan' %}active{% endif %} space-y-4">
+        <!-- 사전 점검 배너 — 구 준비 탭의 게이트 3종을 흡수. 실패 시엔 후보 영역을 차단하는 자리 -->
+        <details class="tds-card" data-precheck-banner>
+          <summary class="px-5 py-3.5 cursor-pointer flex items-center gap-3">
+            <iconify-icon icon="solar:clipboard-check-bold" width="18" style="color: var(--success);"></iconify-icon>
+            <span class="text-sm font-extrabold flex-1">사전 점검 3/3 통과 — 후보 생성을 막는 항목이 없어요</span>
+            <span class="tds-badge badge-success">후보 생성 가능</span>
+            <iconify-icon icon="solar:alt-arrow-down-linear" width="14" style="color: var(--muted-foreground);"></iconify-icon>
+          </summary>
+          <div class="px-5 pb-4 divide-y border-t" style="border-color: var(--border);">
+            <div class="py-3.5 flex items-start gap-3">
+              <iconify-icon icon="solar:server-square-bold" width="17" class="shrink-0 mt-0.5" style="color: var(--primary);"></iconify-icon>
+              <div class="flex-1 min-w-0 text-xs"><div class="flex items-center gap-2"><b class="text-[13px]">대상 유효성</b><span class="tds-badge badge-success">통과</span><span class="mono text-[11px]" style="color: var(--muted-foreground);">a32f6c91</span></div><p class="mt-1" style="color: var(--muted-foreground);">허용 namespace <code class="mono">online-boutique</code> · Ready replica가 있는 대상만 포함 — frontend · checkoutservice · productcatalogservice</p></div>
+            </div>
+            <div class="py-3.5 flex items-start gap-3" style="border-color: var(--border);">
+              <iconify-icon icon="solar:graph-up-bold" width="17" class="shrink-0 mt-0.5" style="color: var(--primary);"></iconify-icon>
+              <div class="flex-1 text-xs"><div class="flex items-center gap-2"><b class="text-[13px]">판정 가능한 관측</b><span class="tds-badge badge-success">통과</span></div><p class="mt-1" style="color: var(--muted-foreground);">필수 신호: Pod Ready · restart · Warning event · 회복 시간 — 오류율·p95는 보조 샘플, 누락 시 검증 불충분으로 분리</p></div>
+            </div>
+            <div class="py-3.5 flex items-start gap-3" style="border-color: var(--border);">
+              <iconify-icon icon="solar:trash-bin-trash-bold" width="17" class="shrink-0 mt-0.5" style="color: var(--primary);"></iconify-icon>
+              <div class="flex-1 text-xs"><div class="flex items-center gap-2"><b class="text-[13px]">장애 정리 보장</b><span class="tds-badge badge-success">통과</span></div><p class="mt-1" style="color: var(--muted-foreground);">성공·실패·timeout과 관계없이 장애 리소스를 삭제한 뒤 판정 — 게이트가 하나라도 실패하면 후보 생성이 차단됩니다</p></div>
+            </div>
+          </div>
+        </details>
 
-    {% if run.report %}
-    <p class="text-sm font-semibold rounded-2xl px-4 py-3 mb-4"
-       style="background: var(--primary-soft); color: var(--primary-soft-foreground);">{{ run.report.summary }}</p>
+        <div class="space-y-3">
+          <label class="block {% if run.current == 1 %}cursor-pointer{% else %}cursor-default{% endif %}">
+            <input type="checkbox" class="sr-only" data-workflow-candidate data-candidate-id="frontend" data-candidate-title="Frontend Pod 1개 손실" {% if 'frontend' in run.selected %}checked{% endif %} {% if run.current != 1 %}disabled{% endif %} />
+            <div class="tds-card p-5 workflow-candidate-card" data-candidate-card>
+              <div class="flex items-start gap-4">
+                <span class="workflow-candidate-check"><iconify-icon icon="solar:check-read-bold" width="18"></iconify-icon></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2"><span class="font-extrabold text-base">Frontend Pod 1개 손실</span></div>
+                  <p class="text-sm mt-2">단일 Pod 종료 시 연결 재분배가 늦어져 Checkout 오류율이 임계값을 넘을 수 있습니다.</p>
+                  <div class="grid grid-cols-4 gap-3 mt-4 text-xs">
+                    <div><span class="block mb-1" style="color: var(--muted-foreground);">대상</span><b>frontend</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">장애 유형</span><b>Pod 손실</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">예상 실패</span><b>5xx 급증</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">관측 근거</span><b>Replica 2 · PDB 없음</b></div>
+                  </div>
+                </div>
+                <span class="text-xs font-bold" style="color: var(--primary);">후보 A</span>
+              </div>
+            </div>
+          </label>
 
-    <table class="w-full text-sm mb-4">
-      <thead>
-        <tr class="text-xs" style="color: var(--muted-foreground);">
-          <th class="text-left py-2 font-bold">원시 지표</th>
-          <th class="text-right py-2 font-bold">개선 전</th>
-          <th class="text-right py-2 font-bold">개선 후</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in run.report.rows %}
-        <tr class="border-t" style="border-color: var(--border);">
-          <td class="py-2.5" style="color: var(--muted-foreground);">{{ row.label }}</td>
-          <td class="py-2.5 text-right mono text-[13px]">{{ row.before }}</td>
-          <td class="py-2.5 text-right mono text-[13px] font-bold" style="color: var(--success);">{{ row.after }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+          <label class="block {% if run.current == 1 %}cursor-pointer{% else %}cursor-default{% endif %}">
+            <input type="checkbox" class="sr-only" data-workflow-candidate data-candidate-id="catalog" data-candidate-title="Product Catalog 800ms 지연" {% if 'catalog' in run.selected %}checked{% endif %} {% if run.current != 1 %}disabled{% endif %} />
+            <div class="tds-card p-5 workflow-candidate-card" data-candidate-card>
+              <div class="flex items-start gap-4">
+                <span class="workflow-candidate-check"><iconify-icon icon="solar:check-read-bold" width="18"></iconify-icon></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2"><span class="font-extrabold text-base">Product Catalog 800ms 지연</span></div>
+                  <p class="text-sm mt-2">Catalog 응답이 느려질 때 Checkout의 timeout과 fallback이 사용자 요청을 보호하는지 검증합니다.</p>
+                  <div class="grid grid-cols-4 gap-3 mt-4 text-xs">
+                    <div><span class="block mb-1" style="color: var(--muted-foreground);">대상</span><b>productcatalogservice</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">장애 유형</span><b>Network 지연</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">예상 실패</span><b>p95 초과</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">관측 근거</span><b>timeout 1s · retry 0</b></div>
+                  </div>
+                </div>
+                <span class="text-xs font-bold" style="color: var(--primary);">후보 B</span>
+              </div>
+            </div>
+          </label>
 
-    <div class="flex items-start gap-2 rounded-2xl px-4 py-3 mb-4 text-sm"
-         style="background: var(--muted);">
-      <span class="tossface shrink-0">🧮</span>
-      <span style="color: var(--muted-foreground);">{{ run.report.r_note }}</span>
-    </div>
+          <label class="block {% if run.current == 1 %}cursor-pointer{% else %}cursor-default{% endif %}">
+            <input type="checkbox" class="sr-only" data-workflow-candidate data-candidate-id="cpu" data-candidate-title="Checkout CPU 압박" {% if 'cpu' in run.selected %}checked{% endif %} {% if run.current != 1 %}disabled{% endif %} />
+            <div class="tds-card p-5 workflow-candidate-card" data-candidate-card>
+              <div class="flex items-start gap-4">
+                <span class="workflow-candidate-check"><iconify-icon icon="solar:check-read-bold" width="18"></iconify-icon></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2"><span class="font-extrabold text-base">Checkout CPU 압박</span></div>
+                  <p class="text-sm mt-2">CPU 포화에서 큐가 쌓이기 전에 autoscaling이 반응하는지 확인합니다.</p>
+                  <div class="grid grid-cols-4 gap-3 mt-4 text-xs">
+                    <div><span class="block mb-1" style="color: var(--muted-foreground);">대상</span><b>checkoutservice</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">장애 유형</span><b>CPU pressure</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">예상 실패</span><b>대기열 증가</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">관측 근거</span><b>HPA 70% target</b></div>
+                  </div>
+                </div>
+                <span class="text-xs font-bold" style="color: var(--primary);">후보 C</span>
+              </div>
+            </div>
+          </label>
+        </div>
 
-    <div class="space-y-1.5 text-sm mb-5">
-      {% for n in run.report.next %}
-      <div class="flex items-start gap-2">
-        <iconify-icon icon="solar:check-square-bold" width="16" class="mt-0.5 shrink-0" style="color: var(--primary);"></iconify-icon>
-        <span>{{ n }}</span>
-      </div>
-      {% endfor %}
-    </div>
+        {% if run.current == 1 %}
+        <div class="tds-card p-5" data-candidate-generator style="border-style: dashed;">
+          <div class="flex items-start gap-4">
+            <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);"><iconify-icon icon="solar:magic-stick-3-bold" width="20"></iconify-icon></span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2"><h3 class="font-extrabold">원하는 후보가 없나요?</h3><span class="tds-badge badge-info">추가 후보 요청</span></div>
+              <p class="text-xs mt-1" style="color: var(--muted-foreground);">확인하고 싶은 장애, 제외할 대상, 기대하는 검증 방향을 자연어로 적어 주세요.</p>
 
-    <div class="flex justify-end">
-      <button class="tds-btn-primary">
-        <iconify-icon icon="solar:download-bold" width="16"></iconify-icon>
-        리포트 다운로드
-      </button>
-    </div>
-    {% else %}
-    <p class="text-sm" style="color: var(--muted-foreground);">실험이 끝나면 원시 지표 비교와 개선 요약을 정리해요</p>
-    {% endif %}
+              <div class="mt-4">
+                <textarea class="tds-input h-20 py-3 resize-none text-sm" maxlength="200" data-candidate-prompt placeholder="예: Checkout의 메모리 압박과 OOM 회복도 확인해줘"></textarea>
+                <div class="flex items-center gap-2 mt-2">
+                  <button type="button" class="tds-badge badge-muted cursor-pointer" data-candidate-prompt-example="Checkout의 메모리 압박과 OOM 회복도 확인해줘">메모리 · OOM</button>
+                  <button type="button" class="tds-badge badge-muted cursor-pointer" data-candidate-prompt-example="checkoutservice만 대상으로 memory stress 후보를 만들어줘">대상 제한</button>
+                  <span class="flex-1"></span>
+                  <span class="text-[11px] mono" style="color: var(--muted-foreground);" data-candidate-prompt-count>0 / 200</span>
+                  <button type="button" class="tds-btn-muted text-sm disabled:opacity-40 disabled:cursor-not-allowed" data-candidate-generate disabled><iconify-icon icon="solar:add-circle-bold" width="15"></iconify-icon><span data-candidate-generate-label>추가 후보 만들기</span></button>
+                </div>
+              </div>
+
+              <div class="hidden mt-4 pt-4 border-t" style="border-color: var(--border);" data-generated-candidate>
+                <div class="flex items-center gap-2 mb-3"><iconify-icon icon="solar:check-circle-bold" width="18" style="color: var(--success);"></iconify-icon><b class="text-sm">고정 UI 예시 후보를 추가했어요</b><span class="tds-badge badge-info">SAMPLE</span></div>
+                <p class="text-[11px] mb-3" style="color: var(--muted-foreground);">기능을 연결하지 않은 시안이므로 입력 내용과 무관하게 아래 예시 1개를 보여줍니다.</p>
+                <div class="p-3 rounded-xl mb-3 text-xs" style="background: var(--muted); color: var(--muted-foreground);">요청: <span data-generated-prompt-text></span></div>
+                <label class="block cursor-pointer">
+                  <input type="checkbox" class="sr-only" data-workflow-candidate data-candidate-id="custom" data-candidate-title="Checkout 메모리 압박과 OOM 회복" />
+                  <div class="tds-card p-5 workflow-candidate-card" data-candidate-card>
+                    <div class="flex items-start gap-4">
+                      <span class="workflow-candidate-check"><iconify-icon icon="solar:check-read-bold" width="18"></iconify-icon></span>
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2"><span class="font-extrabold text-base">Checkout 메모리 압박과 OOM 회복</span></div>
+                        <p class="text-sm mt-2">메모리 압박 중 GC 지연과 재시작이 발생해도 Checkout이 목표 시간 안에 회복하는지 검증합니다.</p>
+                        <div class="grid grid-cols-4 gap-3 mt-4 text-xs">
+                          <div><span class="block mb-1" style="color: var(--muted-foreground);">대상</span><b>checkoutservice</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">장애 유형</span><b>Memory stress</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">예상 실패</span><b>OOM · 재시작</b></div><div><span class="block mb-1" style="color: var(--muted-foreground);">관측 근거</span><b>limit 512Mi · restart 0</b></div>
+                        </div>
+                      </div>
+                      <span class="text-xs font-bold" style="color: var(--primary);">후보 D</span>
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <div class="tds-card p-4 flex items-center gap-4">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: var(--muted);"><iconify-icon icon="solar:checklist-bold" width="20"></iconify-icon></div>
+          <div class="flex-1"><div class="font-extrabold" data-workflow-selection-summary>아직 선택한 후보가 없어요</div><div class="text-xs mt-1" style="color: var(--muted-foreground);" data-workflow-selection-help>1개 이상, 최대 3개까지 선택할 수 있습니다.</div></div>
+          <button type="button" class="tds-btn-primary disabled:opacity-40 disabled:cursor-not-allowed" data-workflow-selection-next data-workflow-go="execute" disabled>선택한 후보로 계속<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
+        </div>
+      </section>
+
+      {% set execution_samples = [
+        {"id":"frontend", "title":"Frontend Pod 1개 손실", "target":"frontend · pod-kill", "error_before":"3.8%", "error_after":"0.6%", "latency_before":"612ms", "latency_after":"284ms", "recovery_before":"74s", "recovery_after":"38s", "analysis":"Pod가 종료된 8초 동안 ready endpoint가 남아 연결 오류가 집중됐습니다. 종료 전 drain 시간을 확보한 뒤 동일한 Pod 손실 조건으로 다시 검증했습니다.", "change":"preStop + 10s", "validation":"manifest · rollout 통과"},
+        {"id":"catalog", "title":"Product Catalog 800ms 지연", "target":"productcatalogservice · network-delay", "error_before":"1.3%", "error_after":"0.8%", "latency_before":"944ms", "latency_after":"362ms", "recovery_before":"52s", "recovery_after":"46s", "analysis":"Catalog 지연이 Checkout timeout을 넘을 때 fallback 없이 요청이 종료됐습니다. 제한된 timeout과 fallback 정책을 조정한 뒤 같은 800ms 조건으로 다시 검증했습니다.", "change":"timeout 1s → 1.5s", "validation":"config · smoke 통과"},
+        {"id":"cpu", "title":"Checkout CPU 압박", "target":"checkoutservice · cpu-stress", "error_before":"0.9%", "error_after":"0.4%", "latency_before":"708ms", "latency_after":"335ms", "recovery_before":"65s", "recovery_after":"44s", "analysis":"CPU request가 실제 정상 사용량보다 낮아 포화 직후 throttling이 먼저 발생했습니다. request와 HPA 안정화 구간을 조정한 뒤 같은 CPU 압박으로 재검증했습니다.", "change":"CPU request 250m", "validation":"HPA · rollout 통과"},
+        {"id":"custom", "title":"Checkout 메모리 압박과 OOM 회복", "target":"checkoutservice · memory-stress", "error_before":"3.6%", "error_after":"0.7%", "latency_before":"742ms", "latency_after":"326ms", "recovery_before":"81s", "recovery_after":"47s", "analysis":"메모리 압박 중 GC 지연 뒤 재시작이 발생하며 요청 실패가 집중됐습니다. 메모리 request와 회복 여유를 조정한 뒤 같은 memory stress 조건으로 재검증했습니다.", "change":"memory request 256Mi", "validation":"manifest · rollout 통과"}
+      ] %}
+      <section data-tab-content="execute" data-tab-group="workflow" class="{% if view == 'execute' %}active{% endif %} space-y-4">
+        <div class="min-w-0">
+            {% for sample in execution_samples %}
+            <div class="tds-card p-5 hidden" data-candidate-execution="{{ sample.id }}" style="border-color: var(--primary);">
+              <div class="flex items-start justify-between gap-4 mb-5"><div><div class="flex items-center gap-2"><span class="font-extrabold text-lg">#1 {{ sample.title }}</span><span class="tds-badge badge-success" data-exec-status>재실험 통과</span></div><p class="text-xs mt-1" style="color: var(--muted-foreground);">{{ sample.target }} · 정리 확인 후 판정</p></div><span class="text-xs mono" style="color: var(--muted-foreground);" data-exec-attempt>attempt 2 / 3</span></div>
+
+              <div class="grid grid-cols-6 gap-2 mb-5">
+                {% for title, sub, variant in [("기준선", "완료", "success"), ("장애 주입", "완료", "success"), ("정리", "완료", "success"), ("초기 판정", "실패", "danger"), ("분석·개선", "1회 적용", "info"), ("동조건 재실험", "통과", "success")] %}
+                <div class="p-3 rounded-xl text-center" data-exec-step="{{ loop.index }}" style="background: var(--muted);"><iconify-icon icon="{{ 'solar:check-circle-bold' if variant == 'success' else ('solar:danger-triangle-bold' if variant == 'danger' else 'solar:magic-stick-3-bold') }}" width="18" style="color: var(--{{ variant }});"></iconify-icon><div class="text-[11px] font-bold mt-1">{{ title }}</div><div class="text-[10px] mt-0.5" style="color: var(--{{ variant }});">{{ sub }}</div></div>
+                {% endfor %}
+              </div>
+
+              <div class="grid grid-cols-3 gap-3 mb-4">
+                <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">오류율</div><div class="text-xl font-extrabold mt-1">{{ sample.error_before }} <span class="text-xs" data-exec-after style="color: var(--success);">→ {{ sample.error_after }}</span></div><div class="text-[10px] mt-1" style="color: var(--muted-foreground);">목표 ≤ 1.0%</div></div>
+                <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">p95 latency</div><div class="text-xl font-extrabold mt-1">{{ sample.latency_before }} <span class="text-xs" data-exec-after style="color: var(--success);">→ {{ sample.latency_after }}</span></div><div class="text-[10px] mt-1" style="color: var(--muted-foreground);">목표 ≤ 400ms</div></div>
+                <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">회복 시간</div><div class="text-xl font-extrabold mt-1">{{ sample.recovery_before }} <span class="text-xs" data-exec-after style="color: var(--success);">→ {{ sample.recovery_after }}</span></div><div class="text-[10px] mt-1" style="color: var(--muted-foreground);">목표 ≤ 60s</div></div>
+              </div>
+
+              <div class="p-4 rounded-2xl border" data-exec-analysis style="border-color: var(--border); background: var(--primary-soft);">
+                <div class="flex items-start gap-3"><div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style="background: var(--primary); color: white;"><iconify-icon icon="solar:magic-stick-3-bold" width="18"></iconify-icon></div><div class="min-w-0 flex-1"><div class="flex items-center gap-2"><b>실패 분석 → 개선 → 재실험</b><span class="tds-badge badge-info">샘플 스냅샷</span></div><p class="text-xs mt-2 leading-5" style="color: var(--primary-soft-foreground);">{{ sample.analysis }}</p><div class="grid grid-cols-3 gap-2 mt-3 text-[11px]"><div class="p-2 rounded-lg" style="background: var(--card);"><span style="color: var(--muted-foreground);">변경</span><br><b>{{ sample.change }}</b></div><div class="p-2 rounded-lg" style="background: var(--card);"><span style="color: var(--muted-foreground);">검증</span><br><b>{{ sample.validation }}</b></div><div class="p-2 rounded-lg" style="background: var(--card);"><span style="color: var(--muted-foreground);">동조건 결과</span><br><b style="color: var(--success);">목표 모두 충족</b></div></div></div></div>
+              </div>
+
+              <details class="mt-4 rounded-xl border" style="border-color: var(--border);"><summary class="px-4 py-3 cursor-pointer text-xs font-bold">메트릭·로그·변경 근거 펼치기</summary><div class="px-4 pb-4 grid grid-cols-3 gap-3 text-[11px]" style="color: var(--muted-foreground);"><div><b style="color: var(--foreground);">Metric</b><br>error_rate, p95, ready_pods</div><div><b style="color: var(--foreground);">Event</b><br>fault injected → replacement ready</div><div><b style="color: var(--foreground);">Cleanup</b><br>chaos resource removed · 확인</div></div></details>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="flex justify-between">
+          <button type="button" class="tds-btn-muted" data-workflow-go="plan"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>후보 다시 보기</button>
+          <button type="button" class="tds-btn-primary" data-workflow-go="verify" data-workflow-preview-unlock>최종 회귀 검증 시안 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
+        </div>
+      </section>
+
+      <section data-tab-content="verify" data-tab-group="workflow" class="{% if view == 'verify' %}active{% endif %} space-y-4">
+        <div class="tds-card p-6">
+          <div class="flex items-start justify-between gap-5">
+            <div><div class="flex items-center gap-2"><span class="tds-badge badge-info">3단계</span><h2 class="text-xl font-extrabold">누적 개선 상태에서 전체 시나리오를 다시 확인해요</h2></div><p class="text-sm mt-2" style="color: var(--muted-foreground);">각 실험의 마지막 결과를 이어 붙이지 않고, 모든 변경이 누적된 최종 시스템에서 선택한 시나리오를 다시 순차 검증합니다.</p></div>
+            <div class="text-right shrink-0"><div class="text-2xl font-extrabold" style="color: var(--success);">2/2</div><div class="text-[11px]" style="color: var(--muted-foreground);">회귀 검증 완료 예시</div></div>
+          </div>
+          <div class="progress-track mt-5"><div class="progress-fill" style="width: 100%;"></div></div>
+        </div>
+
+        <div class="tds-card overflow-hidden">
+          <div class="px-5 py-4 flex items-center justify-between border-b" style="border-color: var(--border);"><h3 class="font-extrabold">최종 검증 시나리오</h3><span class="text-xs" style="color: var(--muted-foreground);">기준 버전 a32f6c91 + 누적 변경 1건</span></div>
+          <table class="w-full text-sm">
+            <thead style="background: var(--muted);"><tr class="text-xs text-left" style="color: var(--muted-foreground);"><th class="px-5 py-3">시나리오</th><th class="px-5 py-3 text-center">정리</th><th class="px-5 py-3 text-center">오류율</th><th class="px-5 py-3 text-center">p95</th><th class="px-5 py-3 text-center">회복</th><th class="px-5 py-3 text-center">최종 판정</th></tr></thead>
+            <tbody>
+              <tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4"><b>Frontend Pod 1개 손실</b><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">동일 강도 · 90초 관측</div></td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">확인</span></td><td class="px-5 py-4 text-center font-bold">0.7%</td><td class="px-5 py-4 text-center font-bold">292ms</td><td class="px-5 py-4 text-center font-bold">41s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">통과</span></td></tr>
+              <tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4"><b>Product Catalog 800ms 지연</b><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">관측 샘플 일부 누락</div></td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">확인</span></td><td class="px-5 py-4 text-center font-bold">0.8%</td><td class="px-5 py-4 text-center font-bold">—</td><td class="px-5 py-4 text-center font-bold">46s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-warning">검증 불충분</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-3"><iconify-icon icon="solar:code-square-bold" width="20" style="color: var(--primary);"></iconify-icon><h3 class="font-extrabold">누적 변경</h3></div><div class="p-3 rounded-xl text-sm" style="background: var(--muted);"><b>frontend deployment</b><div class="text-xs mt-1" style="color: var(--muted-foreground);">preStop hook · terminationGracePeriod 30s</div></div></div>
+          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-3"><iconify-icon icon="solar:danger-triangle-bold" width="20" style="color: var(--warning);"></iconify-icon><h3 class="font-extrabold">판정 원칙</h3></div><p class="text-xs leading-5" style="color: var(--muted-foreground);">메트릭 누락은 시스템 실패로 단정하지 않고 <b style="color: var(--warning);">검증 불충분</b>으로 분리합니다. 이 경우 자동 개선을 만들지 않습니다.</p></div>
+        </div>
+
+        <div class="flex justify-end"><button type="button" class="tds-btn-primary" data-workflow-go="result" data-workflow-preview-unlock>결과 화면 시안 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button></div>
+      </section>
+
+      <section data-tab-content="result" data-tab-group="workflow" class="{% if view == 'result' %}active{% endif %} space-y-4">
+        <div class="tds-card p-6" style="background: var(--primary-soft); border-color: var(--primary);">
+          <div class="flex items-start justify-between gap-5"><div><div class="flex items-center gap-2"><span class="tds-badge badge-warning">4단계</span><h2 class="text-xl font-extrabold" style="color: var(--primary-soft-foreground);">완료했지만, 관측 보완이 1건 필요해요</h2></div><p class="text-sm mt-2" style="color: var(--primary-soft-foreground);">Pod 손실 시나리오는 목표를 충족했습니다. Catalog 지연은 p95 샘플 누락으로 통과·실패를 확정하지 않았습니다.</p></div><span class="tds-badge badge-warning">완료 · 보완 필요</span></div>
+        </div>
+
+        <div class="grid grid-cols-4 gap-3">
+          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">최종 통과</div><div class="text-2xl font-extrabold mt-2" style="color: var(--success);">1</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">선택 시나리오 2개</div></div>
+          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">검증 불충분</div><div class="text-2xl font-extrabold mt-2" style="color: var(--warning);">1</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">p95 샘플 누락</div></div>
+          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">적용 변경</div><div class="text-2xl font-extrabold mt-2">1</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">rollback 0건</div></div>
+          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">예시 비용</div><div class="text-2xl font-extrabold mt-2">$0.84</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">실제 청구 없음</div></div>
+        </div>
+
+        <div class="tds-card overflow-hidden">
+          <div class="px-5 py-4 border-b" style="border-color: var(--border);"><h3 class="font-extrabold">최초 관측과 최종 회귀 비교</h3></div>
+          <table class="w-full text-sm"><thead style="background: var(--muted);"><tr class="text-xs text-left" style="color: var(--muted-foreground);"><th class="px-5 py-3">시나리오</th><th class="px-5 py-3">최초 관측</th><th class="px-5 py-3">최종 회귀</th><th class="px-5 py-3 text-center">판정</th><th class="px-5 py-3">근거</th></tr></thead><tbody><tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4 font-bold">Frontend Pod 손실</td><td class="px-5 py-4 text-xs">오류 3.8% · p95 612ms · 74s</td><td class="px-5 py-4 text-xs">오류 0.7% · p95 292ms · 41s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">통과</span></td><td class="px-5 py-4 mono text-xs">EV-042-REG-01</td></tr><tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4 font-bold">Catalog 800ms 지연</td><td class="px-5 py-4 text-xs">오류 1.3% · p95 944ms · 52s</td><td class="px-5 py-4 text-xs">오류 0.8% · p95 — · 46s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-warning">검증 불충분</span></td><td class="px-5 py-4 mono text-xs">EV-042-REG-02</td></tr></tbody></table>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-4"><iconify-icon icon="solar:branching-paths-up-bold" width="20" style="color: var(--primary);"></iconify-icon><h3 class="font-extrabold">변경 이력</h3></div><div class="relative pl-5 border-l-2" style="border-color: var(--border);"><div class="mb-4"><span class="absolute -left-2.5 w-4 h-4 rounded-full" style="background: var(--danger);"></span><b class="text-sm">초기 판정 실패</b><p class="text-xs mt-1" style="color: var(--muted-foreground);">Pod 손실 · error rate 3.8%</p></div><div class="mb-4"><span class="absolute -left-2.5 w-4 h-4 rounded-full" style="background: var(--primary);"></span><b class="text-sm">변경 #P-017 적용</b><p class="text-xs mt-1" style="color: var(--muted-foreground);">preStop + grace period</p></div><div><span class="absolute -left-2.5 w-4 h-4 rounded-full" style="background: var(--success);"></span><b class="text-sm">최종 회귀 통과</b><p class="text-xs mt-1" style="color: var(--muted-foreground);">동일 Pod 손실 조건</p></div></div></div>
+          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-4"><iconify-icon icon="solar:clipboard-remove-bold" width="20" style="color: var(--warning);"></iconify-icon><h3 class="font-extrabold">남은 확인 사항</h3></div><div class="p-4 rounded-2xl" style="background: rgba(245,158,11,.10);"><div class="flex gap-3"><iconify-icon icon="solar:danger-triangle-bold" width="18" style="color: var(--warning);"></iconify-icon><div><b class="text-sm">Catalog p95 메트릭 재수집</b><p class="text-xs mt-1 leading-5" style="color: var(--muted-foreground);">최종 회귀 구간의 24초 샘플이 비었습니다. 관측 경로를 확인한 뒤 같은 조건으로 다시 검증해야 합니다.</p></div></div></div></div>
+        </div>
+
+        <details class="tds-card p-5"><summary class="cursor-pointer flex items-center gap-3"><iconify-icon icon="solar:document-text-bold" width="20" style="color: var(--primary);"></iconify-icon><span class="font-extrabold flex-1">보고서 미리보기</span><span class="text-xs" style="color: var(--muted-foreground);">화면 안에서만 펼쳐집니다</span><iconify-icon icon="solar:alt-arrow-down-linear" width="16"></iconify-icon></summary><div class="mt-4 pt-4 border-t text-sm leading-6" style="border-color: var(--border); color: var(--muted-foreground);"><b style="color: var(--foreground);">요약</b> — Checkout 복원력 목표 중 Pod 손실 시나리오는 누적 개선 후 충족했습니다. Catalog 지연 시나리오는 오류율과 회복 시간은 기준 안이지만 p95 관측 누락으로 검증 불충분입니다. 적용 변경 1건은 유지하며 재수집을 후속 작업으로 남깁니다.</div></details>
+
+        <div class="flex justify-between"><button type="button" class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>실험 목록으로</button><span class="text-xs self-center" style="color: var(--muted-foreground);">다운로드·저장 기능은 연결하지 않았습니다.</span></div>
+      </section>
   </div>
-
 </div>
 {% endblock %}

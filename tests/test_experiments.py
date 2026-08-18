@@ -36,14 +36,16 @@ def _reset_sse_app_status():
         pass
 
 
-def test_experiments_page_shows_real_apps_and_no_mock(client):
+def test_experiments_page_is_disconnected_workflow_demo(client):
     resp = client.get("/experiments")
     assert resp.status_code == 200
-    assert "online-boutique" in resp.text      # 실제 등록 앱이 select에
-    assert "spring-boot-demo" not in resp.text  # 하드코딩 mock 제거
-    assert "총 12건" not in resp.text           # 가짜 카운트 제거
-    assert "후보 생성 요청할게요" in resp.text   # 수동 폼 제거 — AI 후보 선택형 위저드 (ADR-0006)
-    assert "실험 중지" in resp.text              # running 행 중지 버튼 (seed 1건 running)
+    assert "online-boutique" in resp.text
+    assert "spring-boot-demo" not in resp.text
+    assert "총 12건" not in resp.text
+    assert 'name="chaos_type"' not in resp.text
+    assert "실험 중지" not in resp.text
+    assert 'hx-post="/experiments"' not in resp.text
+    assert "후보 생성 요청할게요" in resp.text   # 새 실험 위저드(2-step)는 유지 — AI 후보 선택형 (ADR-0006)
 
 
 def test_create_experiment_success(client):
@@ -53,7 +55,7 @@ def test_create_experiment_success(client):
         "latency_ms": "200", "duration_s": "30",
     })
     assert resp.status_code == 200
-    assert "NetworkChaos" in resp.text  # 실험 목록 리렌더
+    assert "UI 디자인 시안" in resp.text  # 기존 POST가 돌아와도 새 화면은 정적 시안만 렌더
 
 
 def test_create_experiment_validation_error_422(client):
@@ -81,7 +83,7 @@ def test_stop_running_experiment(client):
     # seed 실험 1번이 running
     resp = client.post("/experiments/1/stop")
     assert resp.status_code == 200
-    assert "중지됨" in resp.text
+    assert "UI 디자인 시안" in resp.text  # 상태를 화면에 주입하지 않는 정적 시안
 
 
 def test_stop_non_running_409(client):
