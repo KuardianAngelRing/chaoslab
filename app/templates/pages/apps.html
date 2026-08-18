@@ -109,10 +109,12 @@
         {% endif %}
       </div>
       <div class="flex gap-2">
+        {% if app.env != "k3s" %}{# k3s는 빌드 없음 — manifest 저장→실험 시 현장 배포 (ADR-0009) #}
         <button class="flex-1 tds-btn-primary text-xs h-9 justify-center" hx-post="/apps/{{ app.id }}/build" hx-target="#main-content" hx-swap="innerHTML">
           <iconify-icon icon="solar:cloud-upload-bold" width="14"></iconify-icon>
           빌드
         </button>
+        {% endif %}
         <button class="flex-1 tds-btn-muted text-xs h-9 justify-center" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
           <iconify-icon icon="solar:bug-bold" width="14"></iconify-icon>
           카오스 실험
@@ -156,7 +158,7 @@
   </div>
 </div>
 
-<!-- DIALOG: 새 앱 등록 (4-step 위저드 — 첫 분기는 환경: ADR-0003, 등록=배포까지: ADR-0004) -->
+<!-- DIALOG: 새 앱 등록 (4-step 위저드 — 첫 분기는 환경: ADR-0003 · EKS 등록=빌드+배포 · k3s 등록=manifest 저장만: ADR-0009) -->
 <div class="dialog-backdrop" id="dialog-newApp">
   <div class="dialog-card" data-wizard data-wiz-steps="4">
     <div class="dialog-resize-handle" title="드래그하여 크기 조절">
@@ -232,9 +234,9 @@
             <label class="text-base font-bold mb-2 block">manifest 파일</label>
             <label class="block rounded-2xl border-2 border-dashed p-6 text-center cursor-pointer" style="border-color: var(--border);">
               <iconify-icon icon="solar:upload-bold" width="24" style="color: var(--muted-foreground);"></iconify-icon>
-              <div class="text-sm font-bold mt-1">Deployment·Service YAML 또는 ZIP 업로드</div>
-              <div class="text-xs mt-0.5" style="color: var(--muted-foreground);">모의 — 아직 파일을 저장하지 않아요</div>
-              <input type="file" name="manifest" accept=".yaml,.yml,.zip" class="sr-only" disabled />
+              <div class="text-sm font-bold mt-1">Deployment·Service YAML 업로드</div>
+              <div class="text-xs mt-0.5" style="color: var(--muted-foreground);">등록 시엔 저장만 해요 — 배포는 실험을 시작할 때</div>
+              <input type="file" name="manifest" accept=".yaml,.yml" class="sr-only" disabled />
             </label>
           </div>
         </div>
@@ -283,9 +285,9 @@
           <div class="p-5 rounded-2xl flex items-start gap-2.5" style="background: var(--primary-soft);">
             <span class="tossface">🚀</span>
             <div class="text-sm leading-relaxed" style="color: var(--primary-soft-foreground);">
-              <span class="font-bold">등록을 마치면 바로 클러스터에 배포돼요.</span><br />
-              manifest를 앱 네임스페이스에 apply하고, 파드가 준비되면 healthy로 표시돼요.
-              지금은 모의라 목록에 앱만 추가돼요
+              <span class="font-bold">등록은 manifest를 저장만 해요 (ADR-0009).</span><br />
+              배포는 실험을 시작할 때 — 실험 전용 네임스페이스에 앱을 새로 띄우고,
+              실험이 끝나면 네임스페이스째 정리돼요
             </div>
           </div>
         </div>
@@ -305,9 +307,10 @@
             등록하고 배포할게요
           </button>
           <button type="button" class="tds-btn-primary text-base hidden" data-submit-k3s
-                  hx-post="/apps/k3s" hx-include="closest form" hx-target="#main-content" hx-swap="innerHTML">
+                  hx-post="/apps/k3s" hx-include="closest form" hx-encoding="multipart/form-data"
+                  hx-target="#main-content" hx-swap="innerHTML">
             <iconify-icon icon="solar:add-circle-bold" width="14"></iconify-icon>
-            등록하고 배포할게요
+            등록할게요
           </button>
         </div>
       </div>

@@ -7,23 +7,38 @@
   <div class="mb-8">
     <div class="flex items-center justify-between h-11">
       <h1 class="text-3xl font-extrabold flex items-center gap-4"><span class="tossface-lg">🍓</span>로컬 인프라</h1>
-      <span class="tds-badge badge-info">{{ cluster.access }}</span>
+      {% if tunnel.state == "connected" %}
+        <span class="tds-badge badge-success" title="{{ tunnel.detail }}">SSH 터널 연결됨</span>
+      {% elif tunnel.state in ("connecting", "retrying") %}
+        <span class="tds-badge badge-warning" title="{{ tunnel.detail }}">SSH 터널 재접속 중…</span>
+      {% else %}
+        <span class="tds-badge badge-info" title="{{ tunnel.detail }}">{{ cluster.access }}</span>
+      {% endif %}
     </div>
     <div class="hero-line mt-4"></div>
-    <p class="text-base mt-4" style="color: var(--muted-foreground);">라즈베리파이 3대에 올린 k3s 클러스터의 노드·관측 스택 상태를 한눈에 봐요 (모의 데이터)</p>
+    <p class="text-base mt-4" style="color: var(--muted-foreground);">라즈베리파이 3대에 올린 k3s 클러스터의 노드·관측 스택 상태를 한눈에 봐요{% if is_stub %} (모의 데이터){% endif %}</p>
   </div>
+
+  {% if error %}
+  <div class="tds-card p-4 mb-6 flex items-center gap-3" style="border-color: var(--danger);">
+    <span class="tossface">⚠️</span>
+    <span class="text-sm font-bold" style="color: var(--danger);">{{ error }}</span>
+  </div>
+  {% endif %}
 
   <!-- 클러스터 개요 -->
   <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
     <div class="tds-card p-5">
-      <div class="flex items-start justify-between mb-3"><span class="tossface">🌐</span><span class="tds-badge badge-success">Healthy</span></div>
+      <div class="flex items-start justify-between mb-3"><span class="tossface">🌐</span>
+        {% if cluster.healthy %}<span class="tds-badge badge-success">Healthy</span>
+        {% else %}<span class="tds-badge badge-danger">Degraded</span>{% endif %}</div>
       <div class="text-2xl font-extrabold mb-1">{{ cluster.name }}</div>
       <div class="text-xs mono" style="color: var(--muted-foreground);">{{ cluster.version }} · {{ cluster.arch }}</div>
     </div>
     <div class="tds-card p-5">
       <div class="flex items-start justify-between mb-3"><span class="tossface">📦</span><span class="tds-badge badge-info">{{ nodes|length }} 노드</span></div>
-      <div class="text-2xl font-extrabold mb-1">1 + {{ nodes|length - 1 }}</div>
-      <div class="text-xs" style="color: var(--muted-foreground);">control-plane 1대 · worker {{ nodes|length - 1 }}대</div>
+      <div class="text-2xl font-extrabold mb-1">{{ nodes|length }}</div>
+      <div class="text-xs" style="color: var(--muted-foreground);">control-plane 1대 · worker {{ [nodes|length - 1, 0]|max }}대</div>
     </div>
     <div class="tds-card p-5">
       <div class="flex items-start justify-between mb-3"><span class="tossface">🚀</span><span class="tds-badge badge-success">정상</span></div>
@@ -81,7 +96,9 @@
             </div>
           </td>
           <td class="px-6 py-3">
-            {% if node.temp_c < 60 %}
+            {% if node.temp_c is none %}
+              <span class="text-xs mono" style="color: var(--muted-foreground);">—</span>
+            {% elif node.temp_c < 60 %}
               <span class="text-xs mono">{{ node.temp_c }}°C</span>
             {% else %}
               <span class="text-xs mono font-bold" style="color: var(--danger);">{{ node.temp_c }}°C 🔥</span>
@@ -124,7 +141,11 @@
             <div class="text-[11px]" style="color: var(--muted-foreground);">{{ component.detail }} · <span class="mono">{{ component.ns }}</span></div>
           </div>
         </div>
-        <span class="tds-badge badge-success">Running</span>
+        {% if component.status == "Running" %}
+          <span class="tds-badge badge-success">Running</span>
+        {% else %}
+          <span class="tds-badge badge-danger">{{ component.status }}</span>
+        {% endif %}
       </div>
       {% endfor %}
     </div>

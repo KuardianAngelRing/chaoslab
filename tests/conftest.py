@@ -15,6 +15,8 @@ def _force_stub_mode(monkeypatch):
     """테스트는 항상 Stub 모드 — 로컬 .env(USE_REAL_SERVICES=true)가 있어도
     boto3/git/k8s 실호출이 일어나지 않게 강제(hermetic·안전)."""
     monkeypatch.setattr(settings, "use_real_services", False)
+    monkeypatch.setattr(settings, "local_kubeconfig", "")  # 로컬 k3s도 항상 Stub
+    monkeypatch.setattr(settings, "local_ssh_host", "")    # SSH 터널도 항상 미관리(Stub)
 
 
 @pytest.fixture

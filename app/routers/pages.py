@@ -8,7 +8,7 @@ from app.db.repositories import (
     BuildRepository,
     ExperimentRepository,
 )
-from app.deps import get_app_count, get_k8s
+from app.deps import get_app_count, get_k8s, get_local_k8s, get_tunnel
 from app.rendering import render_page
 from app.services import interfaces
 
@@ -104,37 +104,17 @@ def infra_page(
     return render_page(request, "pages/infra.html", ctx)
 
 
-# 로컬(라즈베리파이 k3s) 인프라 목업 — 실배선 시 SSH 터널 경유 k8s API·Prometheus 조회로 대체.
-# 노드 온도는 node-exporter(hwmon), CPU·메모리는 metrics-server(kubectl top) 기준 값.
-LOCAL_K3S_STUB = {
-    "cluster": {"name": "chaospilot-k3s", "version": "v1.32.3+k3s1", "arch": "arm64",
-                "access": "SSH 터널 · localhost:6443"},
-    "pod_count": 24,
-    "namespaces": ["kube-system", "chaos-mesh", "chaospilot-observability", "order-msa"],
-    "nodes": [
-        {"name": "masternode", "model": "Raspberry Pi 4B 8GB", "role": "control-plane · etcd",
-         "cpu_pct": 21, "mem_pct": 48, "temp_c": 52.1, "status": "Ready"},
-        {"name": "worker1", "model": "Raspberry Pi 4B 4GB", "role": "worker",
-         "cpu_pct": 34, "mem_pct": 61, "temp_c": 55.3, "status": "Ready"},
-        {"name": "worker2", "model": "Raspberry Pi 4B 4GB", "role": "worker",
-         "cpu_pct": 18, "mem_pct": 44, "temp_c": 49.8, "status": "Ready"},
-    ],
-    "components": [
-        {"name": "Chaos Mesh", "detail": "controller 1/1 · daemon 3/3", "ns": "chaos-mesh"},
-        {"name": "Prometheus", "detail": "메트릭 수집 · service proxy 조회", "ns": "chaospilot-observability"},
-        {"name": "Loki", "detail": "로그 저장 · LogQL 조회", "ns": "chaospilot-observability"},
-        {"name": "kube-state-metrics", "detail": "리소스 상태 메트릭", "ns": "chaospilot-observability"},
-        {"name": "Alloy", "detail": "로그 수집 에이전트 (DaemonSet 3/3)", "ns": "chaospilot-observability"},
-    ],
-}
-
-
 @router.get("/infra/local")
 def local_infra_page(
     request: Request,
     app_count: int = Depends(get_app_count),
+    local_k8s: interfaces.LocalK8sService = Depends(get_local_k8s),
+    tunnel: interfaces.TunnelService = Depends(get_tunnel),
 ):
-    ctx = {"active_nav": "local-infra", "app_count": app_count, **LOCAL_K3S_STUB}
+    ctx = {"active_nav": "local-infra", "app_count": app_count,
+           "is_stub": not settings.local_kubeconfig,
+           "tunnel": tunnel.status(),
+           **local_k8s.overview()}
     return render_page(request, "pages/infra_local.html", ctx)
 
 

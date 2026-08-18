@@ -49,6 +49,22 @@ class GitOpsService(Protocol):
         ...
 
 
+class K3sWorkloadService(Protocol):
+    """k3s 실험용 현장 배포(ADR-0009) — 실험마다 전용 ns에 manifest 배포, 종료 시 삭제."""
+
+    def deploy(self, namespace: str, manifest_yaml: str) -> None:
+        """ns 생성(idempotent) + manifest 문서들 apply."""
+        ...
+
+    def wait_ready(self, namespace: str, timeout_s: int = 180) -> bool:
+        """ns 안 Deployment 전부 ready될 때까지 대기. 타임아웃이면 False."""
+        ...
+
+    def teardown(self, namespace: str) -> None:
+        """ns 통째 삭제 (idempotent — 이미 없으면 성공)."""
+        ...
+
+
 class ChaosService(Protocol):
     def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
         """Chaos CRD 생성 (selector = app 라벨). CRD 이름 반환."""
@@ -90,6 +106,40 @@ class K8sService(Protocol):
 
     def components(self) -> list[dict]:
         """시스템 컴포넌트 상태 (Prometheus/Grafana/Loki/Chaos Mesh/ArgoCD)."""
+        ...
+
+
+class TunnelService(Protocol):
+    """SSH 터널 생명주기 — 로컬 k3s API(localhost:6443) 접근 경로를 앱이 소유.
+
+    lifespan에서 start/stop 1회씩 호출되는 싱글턴(deps.make_tunnel).
+    """
+
+    async def start(self) -> None:
+        """감시 태스크 시작 — 터널을 열고, 끊기면 백오프 재접속."""
+        ...
+
+    async def stop(self) -> None:
+        """감시 태스크와 ssh 프로세스 정리."""
+        ...
+
+    def status(self) -> dict:
+        """{"state": "disabled|connecting|connected|retrying", "detail": str}."""
+        ...
+
+
+class LocalK8sService(Protocol):
+    """로컬(라즈베리파이 k3s) 클러스터 현황 — SSH 터널 경유 kubeconfig 읽기 전용 조회."""
+
+    def overview(self) -> dict:
+        """infra_local 페이지 컨텍스트 스냅샷.
+
+        {"cluster": {name, version, arch, access, healthy},
+         "pod_count": int, "namespaces": [str],
+         "nodes": [{name, model, role, cpu_pct, mem_pct, temp_c(None 가능), status}],
+         "components": [{name, detail, ns, status}],
+         "error": str}  # error 키는 조회 실패 시에만
+        """
         ...
 
 

@@ -6,7 +6,9 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile,
+)
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -113,30 +115,38 @@ def register_app(
     return _apps_response(request, session)
 
 
-K3S_SOURCE = "k3s://manifest-upload"  # 환경 배지 판별용 소스 마킹 — App 모델에 환경 필드 생기면 교체
+K3S_SOURCE = "k3s://manifest-upload"  # 소스 출처 표기 (배지 판별은 App.env)
 
 
-# ── k3s 등록 (ADR-0003/0004) — 목업 stub: manifest 저장·apply 없이 App 행만 생성 ──
+# ── k3s 등록 (ADR-0003/0009) — 등록=manifest 저장만, 배포는 실험 시작 시 전용 ns에 ──
 @router.post("/apps/k3s")
 def register_k3s_app(
     request: Request,
     name: str = Form(...),
     health_path: str = Form("/healthz"),
     namespace: str = Form(""),
+    manifest: UploadFile | None = File(None),
     session: Session = Depends(get_session),
 ):
-    ns = namespace.strip() or name  # ADR-0004: 네임스페이스는 앱 이름 자동 파생
+    ns = namespace.strip() or name  # 네임스페이스는 앱 이름 자동 파생 (실험 ns 이름의 재료)
+    manifest_text = ""
+    if manifest is not None:
+        manifest_text = manifest.file.read().decode("utf-8", errors="replace")
     repo = AppRepository(session)
     existing = next((a for a in repo.list_all() if a.name == name), None)
     if existing is None:
         repo.create(
-            name=name, repo_url=K3S_SOURCE, branch="", framework="manifest",
-            health_path=health_path.strip() or "/healthz", namespace=ns, status="healthy",
+            name=name, repo_url=K3S_SOURCE, branch="", framework="manifest", env="k3s",
+            manifest=manifest_text, health_path=health_path.strip() or "/healthz",
+            namespace=ns, status="registered",
         )
     else:
         existing.health_path = health_path.strip() or "/healthz"
         existing.namespace = ns
-        existing.status = "healthy"
+        existing.env = "k3s"
+        if manifest_text:  # 재등록 시 파일을 안 올리면 기존 manifest 유지
+            existing.manifest = manifest_text
+        existing.status = "registered"
         session.commit()
     return _apps_response(request, session)
 

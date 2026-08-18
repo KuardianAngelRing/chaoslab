@@ -32,5 +32,21 @@ class Settings(BaseSettings):
     sut_namespace: str = "sut"
     build_workflow_template: str = "build-and-push"
 
+    # ── 로컬(라즈베리파이 k3s) 인프라 — 경로가 설정되면 Real 조회, 비면 Stub ──
+    # use_real_services(AWS/EKS)와 독립. SSH 터널 선행 필요:
+    #   ssh -f -N -L 6443:localhost:6443 masternode  (접속 정보는 팀 내 개인 전달)
+    local_kubeconfig: str = ""  # 예: ~/projects/agent/k3s.yaml (server=https://127.0.0.1:6443)
+    # SSH 터널 자동 관리 — 호스트가 설정되면 기동 시 앱이 터널을 열고 유지(끊기면 재접속).
+    # 비면 수동 터널 전제. 포트가 이미 열려 있으면 외부 터널을 그대로 사용.
+    local_ssh_host: str = ""       # 예: capstone.jun0.dev
+    local_ssh_port: int = 22
+    local_ssh_user: str = ""
+    local_ssh_key_path: str = ""   # 예: ~/.ssh/id_rsa (비면 ssh 기본 키·agent)
+    local_tunnel_port: int = 6443              # 로컬 포워딩 포트
+    local_tunnel_target: str = "localhost:6443"  # 원격 측 대상
+    local_cluster_name: str = "chaospilot-k3s"
+    local_obs_namespace: str = "chaospilot-observability"
+    local_chaos_namespace: str = "chaos-mesh"
+
 
 settings = Settings()

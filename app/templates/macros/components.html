@@ -12,9 +12,9 @@
 <iconify-icon icon="{{ icons.get(framework | lower, 'logos:docker-icon') }}" width="{{ size }}"></iconify-icon>
 {%- endmacro %}
 
-{# 환경 배지 — 소스 마킹 규칙(repo_url "k3s://" 접두)으로 판별. App 모델에 환경 필드가 생기면 교체 (ADR-0002/0003) #}
+{# 환경 배지 — App.env 필드 기반 (ADR-0002/0003) #}
 {% macro env_badge(app, compact=False) %}
-{%- if app.repo_url.startswith("k3s://") -%}
+{%- if app.env == "k3s" -%}
 <span class="tds-badge badge-success">{{ "k3s" if compact else "k3s · 온프레미스" }}</span>
 {%- else -%}
 <span class="tds-badge badge-info">{{ "EKS" if compact else "EKS · 클라우드" }}</span>
@@ -36,7 +36,7 @@
 <div class="tds-card p-5 hover-lift">
   <div class="flex items-center justify-between mb-2">
     <div class="font-bold">{{ app.name }}</div>
-    {{ badge(app.status, "success" if app.status == "healthy" else "warning") }}
+    {{ badge(app.status, "success" if app.status == "healthy" else ("info" if app.status == "registered" else "warning")) }}
   </div>
   <div class="text-xs mono" style="color: var(--muted-foreground);">{{ app.namespace }}</div>
   <div class="text-xs mono mt-1" style="color: var(--muted-foreground);">{{ app.current_sha[:8] }}</div>
