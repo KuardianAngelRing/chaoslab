@@ -14,15 +14,19 @@ CHAOS_PLURALS = {
 }
 
 
-def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params: dict) -> dict:
-    """Chaos Mesh CRD 매니페스트. selector는 generic-app 차트의 `app:` 라벨.
+def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params: dict,
+                          label_selector: bool = True) -> dict:
+    """Chaos Mesh CRD 매니페스트.
 
+    selector: EKS는 generic-app 차트의 `app:` 라벨(label_selector=True),
+    k3s 현장 배포(ADR-0009)는 실험 전용 ns 전체(label_selector=False —
+    다중 서비스 manifest는 서비스별 app 라벨이라 앱 이름 매칭 불가).
     params는 chaos_specs.validate_params로 사전 검증된 값이어야 한다.
     """
-    spec: dict = {
-        "selector": {"namespaces": [namespace], "labelSelectors": {"app": app_name}},
-        "mode": "all",
-    }
+    selector: dict = {"namespaces": [namespace]}
+    if label_selector:
+        selector["labelSelectors"] = {"app": app_name}
+    spec: dict = {"selector": selector, "mode": "all"}
     if chaos_type == "NetworkChaos":
         spec["action"] = params["action"]
         spec["delay"] = {"latency": f"{params['latency_ms']}ms"}
@@ -41,14 +45,27 @@ def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params
 
 
 class RealChaos:
-    """Chaos Mesh CRD 주입/조회/삭제. namespace 인자는 항상 settings.sut_namespace와 같아야 한다 (phase/delete가 sut_namespace를 쓰므로)."""
+    """Chaos Mesh CRD 주입/조회/삭제 — 생성 시 namespace 바인딩.
 
-    def __init__(self, settings):
+    EKS: 기본(in-cluster/기본 kubeconfig) + sut_namespace + app 라벨 selector.
+    k3s: 로컬 kubeconfig(SSH 터널) + 실험 전용 ns + ns 전체 selector (ADR-0009).
+    """
+
+    def __init__(self, settings, namespace: str | None = None,
+                 kubeconfig: str = "", label_selector: bool = True):
         self.s = settings
+        self.namespace = namespace or settings.sut_namespace
+        self.kubeconfig = kubeconfig
+        self.label_selector = label_selector
 
     def _api(self):
         from kubernetes import client, config  # lazy
 
+        if self.kubeconfig:
+            import os
+            api_client = config.new_client_from_config(
+                config_file=os.path.expanduser(self.kubeconfig))
+            return client.CustomObjectsApi(api_client)
         try:
             config.load_incluster_config()
         except config.ConfigException:
@@ -56,8 +73,9 @@ class RealChaos:
         return client.CustomObjectsApi()
 
     def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
-        assert namespace == self.s.sut_namespace, "chaos CRD는 sut_namespace에만 생성해야 함"
-        manifest = render_chaos_manifest(chaos_type, namespace, app_name, params)
+        assert namespace == self.namespace, "chaos CRD는 바인딩된 namespace에만 생성해야 함"
+        manifest = render_chaos_manifest(chaos_type, namespace, app_name, params,
+                                         label_selector=self.label_selector)
         resp = self._api().create_namespaced_custom_object(
             group=_GROUP, version=_VERSION, namespace=namespace,
             plural=CHAOS_PLURALS[chaos_type], body=manifest,
@@ -67,7 +85,7 @@ class RealChaos:
     def phase(self, chaos_type: str, crd_name: str) -> str:
         """status.conditions 기반: AllRecovered=True → recovered, AllInjected=True → running, 그 외 injecting."""
         obj = self._api().get_namespaced_custom_object(
-            group=_GROUP, version=_VERSION, namespace=self.s.sut_namespace,
+            group=_GROUP, version=_VERSION, namespace=self.namespace,
             plural=CHAOS_PLURALS[chaos_type], name=crd_name,
         )
         conditions = {c.get("type"): c.get("status") for c in (obj.get("status") or {}).get("conditions", [])}
@@ -82,7 +100,7 @@ class RealChaos:
 
         try:
             self._api().delete_namespaced_custom_object(
-                group=_GROUP, version=_VERSION, namespace=self.s.sut_namespace,
+                group=_GROUP, version=_VERSION, namespace=self.namespace,
                 plural=CHAOS_PLURALS[chaos_type], name=crd_name,
             )
         except ApiException as e:

@@ -8,6 +8,7 @@ from app.config import settings
 from app.db.database import SessionLocal, init_db
 from app.db.repositories import AppRepository
 from app.db.seed import seed_data
+from app.deps import make_tunnel
 from app.routers import apps, builds, experiments, handoffs, pages, stream
 
 
@@ -22,7 +23,12 @@ async def lifespan(app: FastAPI):
                 seed_data(session)
         finally:
             session.close()
-    yield
+    tunnel = make_tunnel()
+    await tunnel.start()
+    try:
+        yield
+    finally:
+        await tunnel.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

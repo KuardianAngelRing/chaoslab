@@ -32,11 +32,50 @@ def make_k8s() -> interfaces.K8sService:
     return stubs.StubK8s()
 
 
-def make_chaos() -> interfaces.ChaosService:
+def make_chaos(env: str = "eks", namespace: str | None = None) -> interfaces.ChaosService:
+    """앱 환경 기반 라우팅(ADR-0002): k3s는 SSH 터널 경유 로컬 kubeconfig + 실험 전용 ns
+    전체 selector(ADR-0009), eks는 기존(sut_namespace + app 라벨). Real 게이트는
+    k3s=local_kubeconfig(로컬 인프라와 동일), eks=use_real_services."""
+    if env == "k3s":
+        if settings.local_kubeconfig:
+            from app.services.real.chaos import RealChaos  # lazy: k8s SDK
+            return RealChaos(settings, namespace=namespace,
+                             kubeconfig=settings.local_kubeconfig, label_selector=False)
+        return stubs.StubChaos()
     if settings.use_real_services:
         from app.services.real.chaos import RealChaos  # lazy: k8s SDK
         return RealChaos(settings)
     return stubs.StubChaos()
+
+
+def make_k3s_workload() -> interfaces.K3sWorkloadService:
+    if settings.local_kubeconfig:
+        from app.services.real.k3s_workload import RealK3sWorkload  # lazy: k8s SDK
+        return RealK3sWorkload(settings)
+    return stubs.StubK3sWorkload()
+
+
+_tunnel: interfaces.TunnelService | None = None
+
+
+def make_tunnel() -> interfaces.TunnelService:
+    """터널은 프로세스 생명주기를 갖는 싱글턴 — 매 호출 새로 만들지 않는다."""
+    global _tunnel
+    if _tunnel is None:
+        if settings.local_ssh_host:
+            from app.services.real.tunnel import RealTunnel  # lazy
+            _tunnel = RealTunnel(settings)
+        else:
+            _tunnel = stubs.StubTunnel()
+    return _tunnel
+
+
+def make_local_k8s() -> interfaces.LocalK8sService:
+    # use_real_services(AWS)와 독립 — 로컬 k3s는 kubeconfig 경로 설정 여부로 전환.
+    if settings.local_kubeconfig:
+        from app.services.real.local_k8s import RealLocalK8s  # lazy: k8s SDK
+        return RealLocalK8s(settings)
+    return stubs.StubLocalK8s()
 
 
 def make_handoff_source() -> interfaces.HandoffSourceService:
@@ -66,6 +105,14 @@ def get_loki() -> interfaces.LokiService:
 
 def get_k8s() -> interfaces.K8sService:
     return make_k8s()
+
+
+def get_local_k8s() -> interfaces.LocalK8sService:
+    return make_local_k8s()
+
+
+def get_tunnel() -> interfaces.TunnelService:
+    return make_tunnel()
 
 
 def get_handoff_source() -> interfaces.HandoffSourceService:

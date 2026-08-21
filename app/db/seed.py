@@ -35,10 +35,10 @@ def seed_data(session: Session) -> None:
         framework="node", namespace="order", current_sha="c9d0e1f2", status="degraded",
     )
     # 온프레미스(k3s) manifest 업로드형 SUT — ChaosPilot 흡수 데모용.
-    # repo_url의 "k3s://" 접두가 환경 배지 판별 마킹 (App 모델에 환경 필드 생기면 교체)
+    # 등록=저장만(ADR-0009) — 배포는 실험 시작 시 전용 ns에.
     order_msa = apps.create(
-        name="order-msa", repo_url="k3s://manifest-upload",
-        framework="manifest", namespace="order-msa", current_sha="", status="healthy",
+        name="order-msa", repo_url="k3s://manifest-upload", env="k3s",
+        framework="manifest", namespace="order-msa", current_sha="", status="registered",
     )
 
     builds.create(app_id=boutique.id, status="succeeded", image_tag="a1b2c3d4",

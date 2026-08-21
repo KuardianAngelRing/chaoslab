@@ -119,7 +119,7 @@ def test_watch_experiment_completes_and_cleans(monkeypatch):
             deleted.append((chaos_type, crd_name))
 
     monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
-    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: _SpyChaos())
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: _SpyChaos())
     monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
 
     _watch_experiment(exp_id)
@@ -152,7 +152,7 @@ def test_watch_experiment_failure_marks_failed(monkeypatch, caplog):
             return None
 
     monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
-    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: _BoomChaos())
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: _BoomChaos())
     monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
 
     with caplog.at_level(logging.ERROR):
@@ -189,7 +189,7 @@ def test_watch_skips_when_already_stopped(monkeypatch):
 
     spy = _SpyChaos()
     monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
-    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: spy)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: spy)
     monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
 
     _watch_experiment(exp_id)
@@ -242,7 +242,7 @@ def test_watch_early_exits_when_stopped_midway(monkeypatch):
             stop_s.close()
 
     monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
-    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda: spy)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: spy)
     monkeypatch.setattr("app.routers.experiments.time.sleep", _fake_sleep)
 
     _watch_experiment(exp_id)
@@ -285,3 +285,127 @@ def test_experiment_stream_completed_immediately(monkeypatch, client):
         body = "".join(chunk for chunk in r.iter_text())
     assert "event: completed" in body
     assert '"status": "stopped"' in body
+
+
+def test_watch_k3s_experiment_deploys_injects_and_tears_down(monkeypatch):
+    """ADR-0009: k3s 워처는 배포→ready→주입→관측→CRD 삭제→ns 삭제 순서로 전체 수행."""
+    from app.routers.experiments import _watch_experiment
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(
+        name="msa", repo_url="k3s://manifest-upload", framework="manifest",
+        env="k3s", manifest="kind: Deployment")
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        status="deploying", namespace="chaoslab-msa-1")
+    exp_id = exp.id
+    s.close()
+
+    calls = []
+
+    class _SpyWorkload:
+        def deploy(self, ns, manifest):
+            calls.append(("deploy", ns, manifest))
+        def wait_ready(self, ns, timeout_s=180):
+            calls.append(("ready", ns))
+            return True
+        def teardown(self, ns):
+            calls.append(("teardown", ns))
+
+    class _SpyChaos:
+        def inject(self, ns, app_name, chaos_type, params):
+            calls.append(("inject", ns))
+            return "exp-msa-xyz"
+        def phase(self, chaos_type, crd_name):
+            return "recovered"
+        def delete(self, chaos_type, crd_name):
+            calls.append(("delete-crd", crd_name))
+
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: _SpyChaos())
+    monkeypatch.setattr("app.routers.experiments.make_k3s_workload", lambda: _SpyWorkload())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+
+    _watch_experiment(exp_id)
+
+    s = Session()
+    exp = ExperimentRepository(s).get(exp_id)
+    assert exp.status == "completed"
+    assert exp.crd_name == "exp-msa-xyz"
+    s.close()
+    kinds = [c[0] for c in calls]
+    assert kinds == ["deploy", "ready", "inject", "delete-crd", "teardown"]
+    assert calls[0][1] == "chaoslab-msa-1" and calls[0][2] == "kind: Deployment"
+
+
+def test_watch_k3s_deploy_failure_marks_failed_and_tears_down(monkeypatch, caplog):
+    from app.routers.experiments import _watch_experiment
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(
+        name="msa", repo_url="k3s://manifest-upload", framework="manifest",
+        env="k3s", manifest="")
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        status="deploying", namespace="chaoslab-msa-1")
+    exp_id = exp.id
+    s.close()
+
+    torn = []
+
+    class _BoomWorkload:
+        def deploy(self, ns, manifest):
+            raise ValueError("manifest 비어 있음")
+        def wait_ready(self, ns, timeout_s=180):
+            return True
+        def teardown(self, ns):
+            torn.append(ns)
+
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: object())
+    monkeypatch.setattr("app.routers.experiments.make_k3s_workload", lambda: _BoomWorkload())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+
+    with caplog.at_level(logging.ERROR):
+        _watch_experiment(exp_id)
+
+    s = Session()
+    assert ExperimentRepository(s).get(exp_id).status == "failed"
+    s.close()
+    assert torn == ["chaoslab-msa-1"]  # 실패해도 ns 정리
+
+
+def test_watch_marks_failed_when_never_recovered(monkeypatch):
+    """회복 상한까지 recovered가 안 오면(주입 실패 등) completed가 아니라 failed."""
+    from app.routers.experiments import _watch_experiment
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="NetworkChaos",
+        params={"action": "delay", "latency_ms": 100, "duration_s": 30},
+        status="running", crd_name="exp-demo-stuck")
+    exp_id = exp.id
+    s.close()
+
+    deleted = []
+
+    class _StuckChaos:
+        def phase(self, chaos_type, crd_name):
+            return "injecting"  # 영원히 회복 안 됨
+        def delete(self, chaos_type, crd_name):
+            deleted.append(crd_name)
+
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: _StuckChaos())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+
+    _watch_experiment(exp_id)
+
+    s = Session()
+    assert ExperimentRepository(s).get(exp_id).status == "failed"
+    s.close()
+    assert deleted == ["exp-demo-stuck"]  # CRD 정리는 여전히 수행

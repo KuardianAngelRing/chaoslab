@@ -15,7 +15,7 @@ from app.config import settings
 from app.db.database import SessionLocal, get_session
 from app.db.models import Experiment
 from app.db.repositories import AppRepository, ExperimentRepository
-from app.deps import make_chaos
+from app.deps import make_chaos, make_k3s_workload
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
 
@@ -58,14 +58,24 @@ def create_experiment(
     if errors:
         raise HTTPException(status_code=422, detail=" / ".join(errors))
 
-    busy = [e for e in app.experiments if e.status in ("pending", "running")]
+    busy = [e for e in app.experiments if e.status in ("pending", "deploying", "running")]
     if busy:
         raise HTTPException(status_code=409, detail="이 앱에 진행 중인 실험이 있어요")
 
     exp = ExperimentRepository(session).create(
         app_id=app.id, chaos_type=chaos_type, params=params, status="pending")
+
+    if app.env == "k3s":
+        # ADR-0009: 현장 배포 — 전용 ns에 배포→ready→주입까지 전부 워처(백그라운드)가 수행
+        exp.namespace = f"chaoslab-{app.name}-{exp.id}"[:63].rstrip("-")
+        exp.status = "deploying"
+        session.commit()
+        background.add_task(_watch_experiment, exp.id)
+        return _experiments_response(request, session)
+
     try:
-        crd = make_chaos().inject(settings.sut_namespace, app.name, chaos_type, params)
+        crd = make_chaos(app.env, settings.sut_namespace).inject(
+            settings.sut_namespace, app.name, chaos_type, params)
         exp.crd_name = crd
         exp.status = "running"
         session.commit()
@@ -80,51 +90,80 @@ def create_experiment(
 
 
 def _watch_experiment(exp_id: int) -> None:
-    """duration 경과·회복 확인 → CRD 삭제 + completed. 오류/상한 → failed.
+    """실험 생명주기 워처.
 
-    매 폴링마다 DB의 status를 재조회 — stop으로 이미 중지된 경우(CRD는
-    stop 라우트가 이미 삭제 처리함) 즉시 return하고 재삭제·완료 처리는 생략.
+    EKS: (CRD는 라우트가 이미 주입) duration 경과·회복 확인 → CRD 삭제 + completed.
+    k3s(ADR-0009): 전용 ns 배포 → ready 대기 → CRD 주입 → 동일 진행 → ns까지 삭제.
+    매 폴링마다 DB status 재조회 — stop으로 중지된 경우(정리는 stop 라우트 담당)
+    즉시 return. 오류/상한 → failed (k3s는 이때도 ns 정리).
     """
-    chaos = make_chaos()
     s = SessionLocal()
     try:
         exp = s.get(Experiment, exp_id)
         if exp is None:
             return
+        app = exp.app
+        is_k3s = app.env == "k3s"
+        namespace = exp.namespace if is_k3s else settings.sut_namespace
+        chaos = make_chaos(app.env, namespace)
         chaos_type, crd_name = exp.chaos_type, exp.crd_name
         duration = int(exp.params.get("duration_s") or _PODKILL_GRACE_S)
+        params, app_name = exp.params, app.name
 
-        def _still_running() -> bool:
+        def _still_active() -> bool:
             # identity map 캐시 무시하고 최신 DB status를 읽기 위해 expire 후 재조회
             s.expire_all()
             cur = s.get(Experiment, exp_id)
-            return bool(cur and cur.status == "running")
+            return bool(cur and cur.status in ("deploying", "running"))
 
         status = "completed"
         try:
+            if is_k3s:                        # 현장 배포 단계
+                workload = make_k3s_workload()
+                workload.deploy(namespace, app.manifest or "")
+                if not workload.wait_ready(namespace):
+                    raise RuntimeError(f"워크로드가 준비되지 않음 ({namespace})")
+                if not _still_active():
+                    return
+                crd_name = chaos.inject(namespace, app_name, chaos_type, params)
+                exp = s.get(Experiment, exp_id)
+                exp.crd_name = crd_name
+                exp.status = "running"
+                s.commit()
             waited = 0
             while waited < duration:          # 장애 지속 구간
-                if not _still_running():
+                if not _still_active():
                     return
                 time.sleep(_POLL_S)
                 waited += _POLL_S
+            recovered = False
             for _ in range(_RECOVER_CAP):     # 회복 대기 (최대 5분)
-                if not _still_running():
+                if not _still_active():
                     return
                 if chaos.phase(chaos_type, crd_name) == "recovered":
+                    recovered = True
                     break
                 time.sleep(_POLL_S)
             chaos.delete(chaos_type, crd_name)
+            if not recovered:                 # 주입 실패·회복 미확인을 completed로 오표기하지 않음
+                status = "failed"
         except Exception:
             logger.exception("experiment watch failed (exp %s)", exp_id)
             try:
-                chaos.delete(chaos_type, crd_name)
+                if crd_name:
+                    chaos.delete(chaos_type, crd_name)
             except Exception:
                 logger.exception("chaos cleanup failed (exp %s)", exp_id)
             status = "failed"
+        finally:
+            if is_k3s:                        # 성공·실패·중지 모두 ns 정리 (idempotent)
+                try:
+                    make_k3s_workload().teardown(namespace)
+                except Exception:
+                    logger.exception("namespace teardown failed (%s)", namespace)
 
         exp = s.get(Experiment, exp_id)
-        if exp and exp.status == "running":   # stop이 먼저 처리했으면 덮어쓰지 않음
+        if exp and exp.status in ("deploying", "running"):  # stop이 먼저면 덮어쓰지 않음
             exp.status = status
             exp.finished_at = datetime.now(timezone.utc)
             s.commit()
@@ -142,21 +181,30 @@ def stop_experiment(
     exp = ExperimentRepository(session).get(exp_id)
     if exp is None:
         raise HTTPException(status_code=404, detail="experiment not found")
-    if exp.status != "running":
+    if exp.status not in ("deploying", "running"):
         raise HTTPException(status_code=409, detail="진행 중인 실험이 아니에요")
 
+    env = exp.app.env
+    namespace = exp.namespace if env == "k3s" else settings.sut_namespace
     exp.status = "stopped"
     exp.finished_at = datetime.now(timezone.utc)
     session.commit()
-    background.add_task(_delete_crd_task, exp.chaos_type, exp.crd_name)
+    background.add_task(_cleanup_task, env, namespace, exp.chaos_type, exp.crd_name)
     return _experiments_response(request, session)
 
 
-def _delete_crd_task(chaos_type: str, crd_name: str) -> None:
+def _cleanup_task(env: str, namespace: str, chaos_type: str, crd_name: str) -> None:
+    """중지 시 정리: CRD 삭제 + (k3s) 실험 전용 ns 삭제. 모두 idempotent."""
     try:
-        make_chaos().delete(chaos_type, crd_name)
+        if crd_name:
+            make_chaos(env, namespace).delete(chaos_type, crd_name)
     except Exception:
         logger.exception("chaos delete failed (%s/%s)", chaos_type, crd_name)
+    if env == "k3s":
+        try:
+            make_k3s_workload().teardown(namespace)
+        except Exception:
+            logger.exception("namespace teardown failed (%s)", namespace)
 
 
 @router.get("/experiments/{exp_id}/stream")
@@ -176,7 +224,7 @@ async def experiment_stream(exp_id: int, request: Request):
             if status != last:
                 yield {"event": "status", "data": json.dumps({"status": status})}
                 last = status
-            if status != "running":
+            if status not in ("deploying", "running"):
                 yield {"event": "completed", "data": json.dumps({"status": status})}
                 break
             await asyncio.sleep(2)

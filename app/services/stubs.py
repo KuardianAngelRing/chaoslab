@@ -25,6 +25,17 @@ class StubGitOps:
         return None
 
 
+class StubK3sWorkload:
+    def deploy(self, namespace: str, manifest_yaml: str) -> None:
+        return None
+
+    def wait_ready(self, namespace: str, timeout_s: int = 180) -> bool:
+        return True
+
+    def teardown(self, namespace: str) -> None:
+        return None
+
+
 class StubChaos:
     def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
         return f"exp-{app_name}-stub"
@@ -34,6 +45,54 @@ class StubChaos:
 
     def delete(self, chaos_type: str, crd_name: str) -> None:
         return None
+
+
+class StubTunnel:
+    """터널 미관리 모드(LOCAL_SSH_HOST 미설정) — start/stop 무동작."""
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+    def status(self) -> dict:
+        return {"state": "disabled", "detail": "LOCAL_SSH_HOST 미설정 — 수동 터널 전제"}
+
+
+class StubLocalK8s:
+    """로컬 k3s 목업 — Real(services/real/local_k8s.py)은 SSH 터널 경유 실조회.
+
+    노드 온도는 node-exporter(hwmon), CPU·메모리는 metrics-server(kubectl top) 기준 값.
+    """
+
+    def overview(self) -> dict:
+        return {
+            "cluster": {"name": "chaospilot-k3s", "version": "v1.32.3+k3s1", "arch": "arm64",
+                        "access": "SSH 터널 · localhost:6443", "healthy": True},
+            "pod_count": 24,
+            "namespaces": ["kube-system", "chaos-mesh", "chaospilot-observability", "order-msa"],
+            "nodes": [
+                {"name": "masternode", "model": "Raspberry Pi 4B 8GB", "role": "control-plane · etcd",
+                 "cpu_pct": 21, "mem_pct": 48, "temp_c": 52.1, "status": "Ready"},
+                {"name": "worker1", "model": "Raspberry Pi 4B 4GB", "role": "worker",
+                 "cpu_pct": 34, "mem_pct": 61, "temp_c": 55.3, "status": "Ready"},
+                {"name": "worker2", "model": "Raspberry Pi 4B 4GB", "role": "worker",
+                 "cpu_pct": 18, "mem_pct": 44, "temp_c": 49.8, "status": "Ready"},
+            ],
+            "components": [
+                {"name": "Chaos Mesh", "detail": "controller 1/1 · daemon 3/3",
+                 "ns": "chaos-mesh", "status": "Running"},
+                {"name": "Prometheus", "detail": "메트릭 수집 · service proxy 조회",
+                 "ns": "chaospilot-observability", "status": "Running"},
+                {"name": "Loki", "detail": "로그 저장 · LogQL 조회",
+                 "ns": "chaospilot-observability", "status": "Running"},
+                {"name": "kube-state-metrics", "detail": "리소스 상태 메트릭",
+                 "ns": "chaospilot-observability", "status": "Running"},
+                {"name": "Alloy", "detail": "로그 수집 에이전트 (DaemonSet 3/3)",
+                 "ns": "chaospilot-observability", "status": "Running"},
+            ],
+        }
 
 
 class StubPrometheus:
