@@ -9,12 +9,46 @@ from app.db.repositories import (
     BuildRepository,
     ExperimentRepository,
     HandoffRepository,
+    HypothesisRepository,
     IterationRepository,
 )
 from app.deps import make_handoff_source
 from app.services.agent.assembler import assemble_handoff
+from app.services.agent.hypothesis_assembler import assemble_hypothesis_input
+from app.services.agent.hypothesis_validation import run_generation
+from app.services.stubs import StubHypothesisAgent
 
 
+_ORDER_MSA_MANIFEST = """apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-api
+  template:
+    metadata:
+      labels:
+        app: order-api
+    spec:
+      containers:
+        - name: server
+          image: registry.local/order-api:latest
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-api
+spec:
+  selector:
+    app: order-api
+  ports:
+    - port: 8080
+"""
 
 
 def seed_data(session: Session) -> None:
@@ -41,6 +75,7 @@ def seed_data(session: Session) -> None:
     order_msa = apps.create(
         name="order-msa", repo_url="k3s://manifest-upload", env="k3s",
         framework="manifest", namespace="order-msa", current_sha="", status="registered",
+        manifest=_ORDER_MSA_MANIFEST,
     )
 
     builds.create(app_id=boutique.id, status="succeeded", image_tag="a1b2c3d4",
@@ -78,6 +113,21 @@ def seed_data(session: Session) -> None:
         schema_version=payload.schema_version,
         payload=payload.model_dump(),
     )
+
+    # 가설 수립 seed — ready Run 1건 + 후보 (Stub 조립 재사용, 하드코딩 JSON 금지)
+    hyp = HypothesisRepository(session)
+    hyp_payload = assemble_hypothesis_input(
+        session, order_msa,
+        goal_text="주문 API가 파드 장애에도 60초 안에 정상화되는지 확인", candidate_count=3)
+    hyp_run = hyp.create_run(
+        app_id=order_msa.id, goal_text=hyp_payload.goal_text,
+        candidate_count=hyp_payload.candidate_count,
+        input_payload=hyp_payload.model_dump(), status="generating")
+    hyp_agent = StubHypothesisAgent()
+    hyp.add_candidates(hyp_run.id, run_generation(hyp_agent, hyp_payload), source="agent")
+    snap = hyp_agent.snapshot()
+    hyp.set_snapshot(hyp_run, snap.get("model_name", ""), snap.get("cli_version", ""))
+    hyp.set_status(hyp_run, "ready", finished=True)
 
 
 def main() -> None:

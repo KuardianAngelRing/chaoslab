@@ -1,7 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AgentHandoff, AgentIteration, App, Build, Experiment, _now
+from app.db.models import (AgentHandoff, AgentIteration, App, Build, Experiment,
+                           ExperimentCandidate, HypothesisRun, _now)
 
 
 class AppRepository:
@@ -108,3 +109,85 @@ class HandoffRepository:
     def delete(self, handoff: AgentHandoff) -> None:
         self.session.delete(handoff)
         self.session.commit()
+
+
+class HypothesisRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    # ── Run ──
+    def create_run(self, **kwargs) -> HypothesisRun:
+        obj = HypothesisRun(**kwargs)
+        self.session.add(obj)
+        self.session.commit()
+        return obj
+
+    def get_run(self, run_id: int) -> HypothesisRun | None:
+        return self.session.get(HypothesisRun, run_id)
+
+    def latest_run_for_app(self, app_id: int) -> HypothesisRun | None:
+        stmt = (select(HypothesisRun).where(HypothesisRun.app_id == app_id)
+                .order_by(HypothesisRun.id.desc()).limit(1))
+        return self.session.scalars(stmt).first()
+
+    def set_status(self, run: HypothesisRun, status: str, error: str = "",
+                   finished: bool = False) -> HypothesisRun:
+        run.status = status
+        run.error = error
+        if finished:
+            run.finished_at = _now()
+        self.session.commit()
+        return run
+
+    def set_freeform(self, run: HypothesisRun, status: str, error: str = "") -> HypothesisRun:
+        run.freeform_status = status
+        run.freeform_error = error
+        self.session.commit()
+        return run
+
+    def set_snapshot(self, run: HypothesisRun, model_name: str, cli_version: str) -> HypothesisRun:
+        run.model_name = model_name
+        run.cli_version = cli_version
+        self.session.commit()
+        return run
+
+    # ── Candidate ──
+    def add_candidates(self, run_id: int, proposals, source: str = "agent",
+                       ) -> list[ExperimentCandidate]:
+        rows = [
+            ExperimentCandidate(
+                run_id=run_id, title=p.title, chaos_type=p.chaos_type,
+                target_workload=p.target_workload, hypothesis=p.hypothesis,
+                expected_impact=p.expected_impact, source=source)
+            for p in proposals
+        ]
+        self.session.add_all(rows)
+        self.session.commit()
+        return rows
+
+    def get_candidate(self, candidate_id: int) -> ExperimentCandidate | None:
+        return self.session.get(ExperimentCandidate, candidate_id)
+
+    def list_candidates(self, run_id: int) -> list[ExperimentCandidate]:
+        stmt = (select(ExperimentCandidate)
+                .where(ExperimentCandidate.run_id == run_id)
+                .order_by(ExperimentCandidate.id))
+        return list(self.session.scalars(stmt))
+
+    def set_candidate_detail(self, candidate: ExperimentCandidate, status: str,
+                             params: dict | None = None, rationale: str = "",
+                             error: str = "") -> ExperimentCandidate:
+        candidate.detail_status = status
+        if params is not None:
+            candidate.params = params
+        candidate.detail_rationale = rationale
+        candidate.error = error
+        self.session.commit()
+        return candidate
+
+    def experiment_for_run(self, run_id: int) -> Experiment | None:
+        """이 Run의 후보로 만들어진 실험 (승인 완료 여부 판단용)."""
+        cand_ids = select(ExperimentCandidate.id).where(ExperimentCandidate.run_id == run_id)
+        stmt = (select(Experiment).where(Experiment.candidate_id.in_(cand_ids))
+                .order_by(Experiment.id.desc()).limit(1))
+        return self.session.scalars(stmt).first()

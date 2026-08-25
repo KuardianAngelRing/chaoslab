@@ -200,8 +200,8 @@
           <iconify-icon icon="lucide:arrow-right" width="16"></iconify-icon>
         </button>
         <button type="button" class="tds-btn-primary text-base hidden" data-wiz-submit
-                hx-get="/experiments/1?view=plan"
-                hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+                hx-post="/hypothesis" hx-include="closest form"
+                hx-target="#main-content" hx-swap="innerHTML"
                 onclick="closeDialog('newExperiment')">
           <iconify-icon icon="solar:magic-stick-3-bold" width="16"></iconify-icon>
           후보 생성 요청할게요

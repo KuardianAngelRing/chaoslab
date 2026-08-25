@@ -240,3 +240,65 @@ class StubHandoffSource:
             f'[{app_name}] readiness probe failed: Get "/healthz": dial tcp refused',
         ]
         return samples[:limit]
+
+
+_STUB_PARAM_PREFS = {"latency_ms": 300, "duration_s": 60, "cpu_load": 80,
+                     "loss_percent": 25, "rate_mbps": 10, "memory_mb": 256}
+
+_STUB_CANDIDATE_TYPES = [
+    ("pod-kill", "파드 강제 종료를 버티는지"),
+    ("network-delay", "네트워크 지연에도 응답을 지키는지"),
+    ("cpu-stress", "CPU 압박에도 처리량을 지키는지"),
+]
+
+
+class StubHypothesisAgent:
+    """가설 수립 스텁 — 페이로드에서 대상을 골라 결정적으로 즉시 반환.
+
+    검증(hypothesis_validation)은 Real과 동일하게 바깥에서 적용된다.
+    """
+
+    def _target(self, payload) -> str:
+        if payload.manifest_findings:
+            return payload.manifest_findings[0].workload
+        return payload.app.get("name", "app")
+
+    def generate(self, payload, feedback: str = "") -> list:
+        target = self._target(payload)
+        count = max(1, min(payload.candidate_count, len(_STUB_CANDIDATE_TYPES)))
+        out = []
+        for chaos_type, angle in _STUB_CANDIDATE_TYPES[:count]:
+            from app.services.chaos_specs import CHAOS_SPECS
+            label = CHAOS_SPECS[chaos_type]["label"]
+            out.append({
+                "title": f"{target} {label} 검증",
+                "chaos_type": chaos_type,
+                "target_workload": target,
+                "hypothesis": f"{target}가 {angle} 확인하면, 현재 구성에서는 응답 오류가 발생할 것이다",
+                "expected_impact": f"{label} 구간 동안 응답 지연과 오류율 상승이 예상돼요",
+            })
+        return out
+
+    def concretize(self, payload, user_text: str, feedback: str = "") -> dict:
+        target = self._target(payload)
+        return {
+            "title": "직접 입력 시나리오 검증",
+            "chaos_type": "memory-stress",
+            "target_workload": target,
+            "hypothesis": f"요청 시나리오({user_text[:80]})에서 {target}의 응답이 실패할 것이다",
+            "expected_impact": "메모리 압박 구간에서 응답 지연과 재시작이 발생할 것으로 예상돼요",
+        }
+
+    def detail(self, payload, candidate, feedback: str = "") -> dict:
+        from app.services.chaos_specs import CHAOS_SPECS
+        params = {}
+        for name, rule in CHAOS_SPECS[candidate.chaos_type]["fields"].items():
+            if rule.get("type") == "str":
+                params[name] = candidate.target_workload
+            else:
+                params[name] = min(max(rule["min"], _STUB_PARAM_PREFS.get(name, rule["min"])),
+                                   rule["max"])
+        return {"params": params, "rationale": "스텁 기본값 — 필드 범위 안의 대표값"}
+
+    def snapshot(self) -> dict:
+        return {"model_name": "stub", "cli_version": "stub"}

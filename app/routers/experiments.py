@@ -68,16 +68,30 @@ def create_experiment(
     if busy:
         raise HTTPException(status_code=409, detail="이 앱에 진행 중인 실험이 있어요")
 
+    exp = start_experiment(session, app, chaos_type, params)
+    if exp.status in ("deploying", "running"):
+        background.add_task(_watch_experiment, exp.id)
+    return _experiments_response(request, session)
+
+
+def start_experiment(session: Session, app, chaos_type: str, params: dict,
+                     candidate_id: int | None = None) -> Experiment:
+    """실험 생성 + 환경 분기 — 폼 라우트와 가설 detailing 워처가 공유.
+
+    k3s(ADR-0009): 전용 ns 예약 + deploying (배포→주입은 워처).
+    eks: 즉시 주입 — 실패 시 inject-failed. 반환 exp.status가
+    deploying/running이면 호출자가 _watch_experiment를 스케줄해야 한다.
+    """
     exp = ExperimentRepository(session).create(
-        app_id=app.id, chaos_type=chaos_type, params=params, status="pending")
+        app_id=app.id, chaos_type=chaos_type, params=params, status="pending",
+        candidate_id=candidate_id)
 
     if app.env == "k3s":
         # ADR-0009: 현장 배포 — 전용 ns에 배포→ready→주입까지 전부 워처(백그라운드)가 수행
         exp.namespace = f"chaoslab-{app.name}-{exp.id}"[:63].rstrip("-")
         exp.status = "deploying"
         session.commit()
-        background.add_task(_watch_experiment, exp.id)
-        return _experiments_response(request, session)
+        return exp
 
     try:
         crd = make_chaos(app.env, settings.sut_namespace).inject(
@@ -89,10 +103,7 @@ def create_experiment(
         logger.exception("chaos inject failed (app %s, type %s)", app.name, chaos_type)
         exp.status = "inject-failed"
         session.commit()
-        return _experiments_response(request, session)
-
-    background.add_task(_watch_experiment, exp.id)
-    return _experiments_response(request, session)
+    return exp
 
 
 def _watch_experiment(exp_id: int) -> None:

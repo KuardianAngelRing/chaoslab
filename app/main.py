@@ -9,7 +9,7 @@ from app.db.database import SessionLocal, init_db
 from app.db.repositories import AppRepository
 from app.db.seed import seed_data
 from app.deps import make_tunnel
-from app.routers import apps, builds, experiments, handoffs, pages, stream
+from app.routers import apps, builds, experiments, handoffs, hypothesis, pages, stream
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app.include_router(apps.router)
 app.include_router(stream.router)
 app.include_router(builds.router)
 app.include_router(experiments.router)
+app.include_router(hypothesis.router)
 app.include_router(handoffs.router)
 
 

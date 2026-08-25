@@ -168,3 +168,27 @@ class HandoffSourceService(Protocol):
     def error_logs(self, namespace: str, app_name: str, limit: int = 20) -> list[str]:
         """중복 제거된 에러 로그 샘플, 최대 limit개."""
         ...
+
+
+class HypothesisAgentService(Protocol):
+    """가설 수립 에이전트 (ADR-0010) — 조립 페이로드 → 순수 추론, 도구 없음.
+
+    반환은 검증 전 원시 JSON 호환 데이터 — 검증·재시도는 hypothesis_validation
+    공통 함수가 담당(Stub·Real 동일 적용). feedback은 교정 재시도용 오류 요약.
+    """
+
+    def generate(self, payload, feedback: str = "") -> list:
+        """서사형 후보 N개(params 없음) — CandidateProposal 호환 dict 배열."""
+        ...
+
+    def concretize(self, payload, user_text: str, feedback: str = "") -> dict:
+        """직접 입력 텍스트 → 후보 1개 — CandidateProposal 호환 dict."""
+        ...
+
+    def detail(self, payload, candidate, feedback: str = "") -> dict:
+        """선택 후보의 params 구체화 — DetailingResult 호환 dict."""
+        ...
+
+    def snapshot(self) -> dict:
+        """{"model_name": str, "cli_version": str} — 재현성 기록(하이브리드 4)."""
+        ...

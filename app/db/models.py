@@ -58,6 +58,8 @@ class Experiment(Base):
     status: Mapped[str] = mapped_column(String(30), default="pending")
     crd_name: Mapped[str] = mapped_column(String(120), default="")
     namespace: Mapped[str] = mapped_column(String(120), default="")  # k3s 현장 배포 전용 ns (ADR-0009)
+    candidate_id: Mapped[int | None] = mapped_column(  # 승인된 가설 후보 (가설↔결과 추적)
+        ForeignKey("experiment_candidates.id"), nullable=True)
     baseline_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     fault_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     recovery_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -104,3 +106,48 @@ class AgentHandoff(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     experiment: Mapped["Experiment"] = relationship(back_populates="handoffs")
+
+
+class HypothesisRun(Base):
+    """가설 수립 요청 (GLOSSARY) — 입력 페이로드 스냅샷 + 모델 스냅샷(하이브리드 4)."""
+
+    __tablename__ = "hypothesis_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("apps.id"))
+    goal_text: Mapped[str] = mapped_column(Text, default="")
+    candidate_count: Mapped[int] = mapped_column(Integer, default=5)
+    status: Mapped[str] = mapped_column(String(30), default="generating")  # generating | ready | failed
+    error: Mapped[str] = mapped_column(Text, default="")
+    freeform_status: Mapped[str] = mapped_column(String(30), default="")  # "" | generating | failed
+    freeform_error: Mapped[str] = mapped_column(Text, default="")
+    input_payload: Mapped[dict] = mapped_column(JSON, default=dict)  # 재현·디버깅용 스냅샷
+    model_name: Mapped[str] = mapped_column(String(100), default="")
+    cli_version: Mapped[str] = mapped_column(String(50), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    app: Mapped["App"] = relationship()
+    candidates: Mapped[list["ExperimentCandidate"]] = relationship(back_populates="run")
+
+
+class ExperimentCandidate(Base):
+    """실험 후보 — 1차(서사)는 생성 시, params는 선택 후 detailing이 채움."""
+
+    __tablename__ = "experiment_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("hypothesis_runs.id"))
+    title: Mapped[str] = mapped_column(String(200))
+    chaos_type: Mapped[str] = mapped_column(String(40))  # chaos_specs 슬러그
+    target_workload: Mapped[str] = mapped_column(String(120))
+    hypothesis: Mapped[str] = mapped_column(Text, default="")
+    expected_impact: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(20), default="agent")  # agent | user_input
+    detail_status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed | detailing | detailed | failed
+    params: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # detailing 성공 시
+    detail_rationale: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    run: Mapped["HypothesisRun"] = relationship(back_populates="candidates")

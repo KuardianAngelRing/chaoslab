@@ -78,6 +78,15 @@ def make_local_k8s() -> interfaces.LocalK8sService:
     return stubs.StubLocalK8s()
 
 
+def make_hypothesis_agent() -> interfaces.HypothesisAgentService:
+    # use_real_services(AWS)와 독립 — 에이전트는 use_claude_agent로만 전환
+    # (호스트 claude 구독 로그인 전제, ADR-0010).
+    if settings.use_claude_agent:
+        from app.services.real.claude_agent import ClaudeCliHypothesisAgent  # lazy: subprocess
+        return ClaudeCliHypothesisAgent(settings)
+    return stubs.StubHypothesisAgent()
+
+
 def make_handoff_source() -> interfaces.HandoffSourceService:
     # Real(Prometheus/Loki/K8s 실조회)은 Slice 4·5 — 그 전까지 항상 Stub.
     return stubs.StubHandoffSource()

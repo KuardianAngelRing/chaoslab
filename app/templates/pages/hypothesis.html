@@ -1,0 +1,138 @@
+{% extends layout|default("base.html") %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-8 py-8"
+     data-hypothesis-run="{{ run.id }}" {% if hypothesis_active %}data-hypothesis-active="1"{% endif %}>
+
+  <div class="mb-8">
+    <div class="flex items-center justify-between h-11">
+      <h1 class="text-3xl font-extrabold flex items-center gap-4">
+        <iconify-icon icon="solar:magic-stick-3-bold" width="30" style="color: var(--primary);"></iconify-icon>
+        가설 수립
+      </h1>
+      {% if run.status == "generating" %}<span class="tds-badge badge-info">후보 생성 중</span>
+      {% elif run.status == "failed" %}<span class="tds-badge badge-danger">실패</span>
+      {% elif experiment %}<span class="tds-badge badge-success">실험 시작됨</span>
+      {% else %}<span class="tds-badge badge-warning">선택 필요</span>{% endif %}
+    </div>
+    <div class="hero-line mt-4"></div>
+    <p class="text-base mt-4" style="color: var(--muted-foreground);">
+      <span class="font-bold">{{ run.app.name }}</span>
+      {% if run.goal_text %} · 검증 목표: {{ run.goal_text }}{% endif %}
+      {% if run.model_name %} · <span class="mono text-xs">{{ run.model_name }}</span>{% endif %}
+    </p>
+  </div>
+
+  {% if experiment %}
+  <div class="tds-card px-5 py-4 mb-5 flex items-center gap-3" style="background: var(--primary-soft); border-color: var(--primary);">
+    <span class="tossface-lg">🧪</span>
+    <div class="text-sm flex-1" style="color: var(--primary-soft-foreground);">
+      <span class="font-extrabold">승인한 후보로 실험이 시작됐어요</span>
+      <span class="ml-1 mono text-xs">experiment #{{ experiment.id }}</span>
+    </div>
+    <button class="tds-btn-primary" hx-get="/experiments" hx-target="#main-content"
+            hx-swap="innerHTML" hx-push-url="true">실험 현황 보기</button>
+  </div>
+  {% endif %}
+
+  {% if run.status == "generating" %}
+  <div class="tds-card p-8 text-center">
+    <span class="tossface-lg">🤖</span>
+    <div class="font-extrabold text-lg mt-3">AI가 실험 후보를 만들고 있어요</div>
+    <p class="text-sm mt-2" style="color: var(--muted-foreground);">
+      앱 구조와 과거 실험을 근거로 후보 {{ run.candidate_count }}개를 제안해요 — 준비되면 화면이 갱신돼요
+    </p>
+    <div class="progress-track mt-6 max-w-md mx-auto"><div class="progress-fill" style="width: 60%;"></div></div>
+  </div>
+
+  {% elif run.status == "failed" %}
+  <div class="tds-card p-8">
+    <div class="flex items-center gap-2.5">
+      <iconify-icon icon="solar:danger-triangle-bold" width="22" style="color: var(--danger);"></iconify-icon>
+      <span class="font-extrabold text-lg">후보 생성에 실패했어요</span>
+    </div>
+    <p class="text-sm mt-3 mono" style="color: var(--muted-foreground);">{{ run.error }}</p>
+    <form class="mt-5">
+      <input type="hidden" name="app_id" value="{{ run.app_id }}" />
+      <input type="hidden" name="objective" value="{{ run.goal_text }}" />
+      <input type="hidden" name="max_candidates" value="{{ run.candidate_count }}" />
+      <button type="button" class="tds-btn-primary" hx-post="/hypothesis" hx-include="closest form"
+              hx-target="#main-content" hx-swap="innerHTML">
+        <iconify-icon icon="solar:refresh-bold" width="16"></iconify-icon> 다시 생성
+      </button>
+    </form>
+  </div>
+
+  {% else %}
+  <div class="space-y-4">
+    {% for c in candidates %}
+    <div class="tds-card p-5">
+      <div class="flex items-start gap-4">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);">
+          <iconify-icon icon="solar:test-tube-bold" width="20"></iconify-icon>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-extrabold">{{ c.title }}</span>
+            <span class="tds-badge badge-info">{{ chaos_labels.get(c.chaos_type, c.chaos_type) }}</span>
+            <span class="text-[11px] mono" style="color: var(--muted-foreground);">{{ c.target_workload }}</span>
+            {% if c.source == "user_input" %}<span class="tds-badge badge-muted">직접 입력</span>{% endif %}
+          </div>
+          <p class="text-sm mt-2">{{ c.hypothesis }}</p>
+          <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">{{ c.expected_impact }}</p>
+          {% if c.detail_status == "failed" %}
+          <p class="text-xs mt-2 mono" style="color: var(--danger);">구체화 실패: {{ c.error }}</p>
+          {% endif %}
+        </div>
+        <div class="shrink-0 text-right">
+          {% if c.detail_status == "detailing" %}
+          <span class="tds-badge badge-info">파라미터 구체화 중…</span>
+          {% elif c.detail_status == "detailed" %}
+          <span class="tds-badge badge-success">승인됨</span>
+          {% elif not experiment %}
+          <form>
+            <input type="hidden" name="candidate_id" value="{{ c.id }}" />
+            <button type="button" class="tds-btn-primary text-sm"
+                    hx-post="/hypothesis/{{ run.id }}/select" hx-include="closest form"
+                    hx-target="#main-content" hx-swap="innerHTML">
+              {% if c.detail_status == "failed" %}다시 시도{% else %}이 후보로 실험 시작{% endif %}
+            </button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+
+    {% if not experiment %}
+    <div class="tds-card p-5" style="border-style: dashed;">
+      <div class="flex items-center gap-2">
+        <h3 class="font-extrabold">원하는 후보가 없나요?</h3>
+        <span class="tds-badge badge-info">직접 입력</span>
+      </div>
+      {% if run.freeform_status == "generating" %}
+      <p class="text-sm mt-3" style="color: var(--muted-foreground);">
+        <span class="tossface">🤖</span> 요청하신 시나리오를 후보로 구체화하고 있어요…
+      </p>
+      {% else %}
+      {% if run.freeform_status == "failed" %}
+      <p class="text-xs mt-2 mono" style="color: var(--danger);">직접 입력 실패: {{ run.freeform_error }}</p>
+      {% endif %}
+      <form class="mt-3">
+        <textarea name="user_text" rows="2" maxlength="200" class="env-textarea text-sm"
+          placeholder="예: 주문 API의 메모리 압박과 OOM 회복도 확인해줘"></textarea>
+        <div class="flex justify-end mt-2">
+          <button type="button" class="tds-btn-muted text-sm"
+                  hx-post="/hypothesis/{{ run.id }}/freeform" hx-include="closest form"
+                  hx-target="#main-content" hx-swap="innerHTML">
+            <iconify-icon icon="solar:add-circle-bold" width="15"></iconify-icon> 후보로 추가
+          </button>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

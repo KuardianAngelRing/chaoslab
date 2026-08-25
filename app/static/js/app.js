@@ -633,3 +633,28 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('DOMContentLoaded', initWorkflowDemo);
 document.body.addEventListener('htmx:afterSwap', initWorkflowDemo);
+
+// ── 가설 수립 watch (생성·직접입력·구체화 진행 중일 때만 EventSource) ──
+const _hypStreams = new Set();
+function watchHypothesis() {
+  document.querySelectorAll('[data-hypothesis-active]').forEach((el) => {
+    const id = el.dataset.hypothesisRun;
+    if (_hypStreams.has(id)) return;
+    _hypStreams.add(id);
+    const es = new EventSource(`/hypothesis/${id}/stream`);
+    let first = true; // 최초 스냅샷은 방금 렌더된 화면과 같음 — 재요청 생략
+    es.addEventListener('status', () => {
+      if (first) { first = false; return; }
+      if (window.htmx) htmx.ajax('GET', `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+    });
+    es.addEventListener('completed', (e) => {
+      es.close(); _hypStreams.delete(id);
+      let redirect = '';
+      try { redirect = JSON.parse(e.data).redirect || ''; } catch (err) { /* noop */ }
+      if (window.htmx) htmx.ajax('GET', redirect || `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+    });
+    es.onerror = () => { es.close(); _hypStreams.delete(id); };
+  });
+}
+document.addEventListener('DOMContentLoaded', watchHypothesis);
+document.body.addEventListener('htmx:afterSwap', watchHypothesis);
