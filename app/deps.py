@@ -79,9 +79,10 @@ def make_local_k8s() -> interfaces.LocalK8sService:
 
 
 def make_hypothesis_agent() -> interfaces.HypothesisAgentService:
-    # use_real_services(AWS)와 독립 — 에이전트는 use_claude_agent로만 전환
-    # (호스트 claude 구독 로그인 전제, ADR-0010).
-    if settings.use_claude_agent:
+    # use_real_services(AWS)와 독립 — HYPOTHESIS_AGENT 선택형 게이트(ADR-0010).
+    # "claude"=구독제 CLI 실호출(호스트 로그인 전제) · 그 외/"stub"=Stub.
+    # 새 에이전트(예: codex)는 구현체 추가 + 여기 분기 한 줄이 전부.
+    if settings.hypothesis_agent == "claude":
         from app.services.real.claude_agent import ClaudeCliHypothesisAgent  # lazy: subprocess
         return ClaudeCliHypothesisAgent(settings)
     return stubs.StubHypothesisAgent()

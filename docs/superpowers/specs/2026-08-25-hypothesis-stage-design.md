@@ -32,7 +32,7 @@ stub)으로만 있던 후보 화면이 실데이터로 동작하는 것까지가
 | 직접 입력 | **이번 슬라이스 포함** — 자유 텍스트 + 동일 페이로드로 `concretize` 호출, 후보 1개(`source="user_input"`) 카드 합류. 선택 시 동일 detailing |
 | 저장 | `HypothesisRun` + `ExperimentCandidate` 신설, `Experiment.candidate_id` FK — 가설↔결과 추적(Slice 5 대비) |
 | 신뢰성 | 생성: 검증(아래) + 전멸 시 교정 재시도 1회. detailing: `validate_params` 불통과 시 교정 재시도 1회, 재실패면 후보 `failed`(다른 후보 선택·재시도 가능). 타임아웃 180초/호출 |
-| 설정 | 모델 미지정 기본(CLI 기본 모델). `use_claude_agent`·`claude_bin`·`hypothesis_model` 키. 후보 수 기본 5(1~10 클램프) |
+| 설정 | 모델 미지정 기본(CLI 기본 모델). `hypothesis_agent`("stub"|"claude", 선택형)·`claude_bin`·`hypothesis_model` 키. 후보 수 기본 5(1~10 클램프) |
 
 기각한 대안: 도구형 탐색(kubectl 읽기 — 재현성·속도·자격증명 부담), 후보 미저장
 (이력·추적 포기), 무한 재시도(실패는 유저가 보고 다시 누르는 게 Human-in-the-loop와
@@ -151,7 +151,7 @@ class HypothesisAgentService(Protocol):
   전멸 시 검증 에러 요약 덧붙여 **1회만** 재호출, 재실패면 예외.
 - **detailing 검증**: pydantic 파싱 → `chaos_specs.validate_params`. 불통과 시
   에러 요약 덧붙여 1회 재호출, 재실패면 후보 `failed`.
-- `deps.py`: `make_hypothesis_agent()` 팩토리 — **독립 게이트 `USE_CLAUDE_AGENT`**(`use_real_services`(AWS)와 무관, `local_kubeconfig` 선례와 동일 패턴 — 로컬에서 에이전트만 Real 테스트 가능).
+- `deps.py`: `make_hypothesis_agent()` 팩토리 — **독립 선택형 게이트 `HYPOTHESIS_AGENT`**("stub"|"claude" — 추후 "codex" 등 구현체 추가 대비)(`use_real_services`(AWS)와 무관, `local_kubeconfig` 선례와 동일 패턴 — 로컬에서 에이전트만 Real 테스트 가능).
 - `config.py` 신설: `claude_bin: str = "claude"` · `hypothesis_model: str = ""`
   (비면 CLI 기본 모델) · `hypothesis_timeout_seconds: int = 180`.
 

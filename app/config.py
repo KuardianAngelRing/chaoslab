@@ -51,8 +51,8 @@ class Settings(BaseSettings):
 
     # ── 가설 수립 에이전트 (claude 구독제 CLI — ADR-0010) ──
     # use_real_services(AWS/EKS)와 독립 게이트 — 로컬에서 에이전트만 Real로 테스트 가능
-    # (local_kubeconfig 선례와 동일 패턴). true면 ClaudeCliHypothesisAgent, false면 Stub.
-    use_claude_agent: bool = False
+    # (local_kubeconfig 선례와 동일 패턴). 선택형: "stub" | "claude" (추후 "codex" 등 추가).
+    hypothesis_agent: str = "stub"
     claude_bin: str = "claude"
     hypothesis_model: str = ""          # 비면 CLI 기본 모델
     hypothesis_timeout_seconds: int = 180
