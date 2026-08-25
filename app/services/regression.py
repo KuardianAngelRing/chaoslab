@@ -80,7 +80,6 @@ def run_regression(run_id: int) -> None:
         run.results = _run_suite(session, run, experiments, workload, "final")
         run.comparison = compare_runs(run.baseline_results or [], run.results or [],
                                       run.improvement_changes or [])
-        run.r_index = run.comparison["r"]
         run.report_content = write_report({
             "run_id": run.id,
             "app_name": run.app.name,
@@ -89,7 +88,6 @@ def run_regression(run_id: int) -> None:
             "scenario_title": (run.scenario or {}).get("title"),
             "comparison": run.comparison,
         })
-        run.report_generated_at = datetime.now(timezone.utc)
         run.status = "completed"
         run.error = ""
         _finish(session, run, "개선 전후 최종 회귀 검증이 완료됐습니다")

@@ -33,9 +33,7 @@ def _upgrade_scenario_runs() -> None:
         "baseline_results": "JSON",
         "improvement_changes": "JSON",
         "comparison": "JSON",
-        "r_index": "JSON",
         "report_content": "JSON",
-        "report_generated_at": "DATETIME",
     }
     with engine.begin() as connection:
         for name, ddl_type in columns.items():

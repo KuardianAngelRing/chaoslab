@@ -26,7 +26,6 @@ def scenario_run_payload(row) -> dict:
         "results": row.results or [],
         "improvement_changes": row.improvement_changes or [],
         "comparison": row.comparison or {},
-        "r_index": row.r_index or {},
         "error": row.error or "",
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
@@ -69,7 +68,6 @@ def create_scenario_run(
         results=[],
         improvement_changes=[],
         comparison={},
-        r_index={},
         report_content={},
     )
     background.add_task(run_regression, row.id)

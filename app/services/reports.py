@@ -16,7 +16,6 @@ def report_context(run) -> dict:
     results = run.results or []
     baseline_results = run.baseline_results or []
     comparison = run.comparison or {}
-    failures = [item for item in results if item.get("status") != "passed"]
     return {
         "run": run,
         "app": run.app,
@@ -31,8 +30,6 @@ def report_context(run) -> dict:
         "changes": comparison.get("changes") or [],
         "scenario_comparisons": comparison.get("scenarios") or [],
         "narrative": run.report_content or {},
-        "failures": failures,
-        "completed_count": sum(item.get("status") == "passed" for item in results),
         "cleanup_count": sum(item.get("cleanup_completed") is True for item in results),
         "total": len((run.scenario or {}).get("experiments") or []),
         "generated_at": run.finished_at or run.updated_at,

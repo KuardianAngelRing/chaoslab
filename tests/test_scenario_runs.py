@@ -74,7 +74,7 @@ def test_final_regression_runs_selected_experiments_in_order(monkeypatch):
     assert len(saved.baseline_results) == 2
     assert len(saved.improvement_changes) == 2
     assert saved.comparison["verdict"] == "passed"
-    assert saved.r_index["before"]["available"] is True
+    assert saved.comparison["r"]["before"]["available"] is True
 
 
 def test_final_regression_fails_and_cleans_up_on_injection_error(monkeypatch):
@@ -162,7 +162,6 @@ def test_report_uses_only_saved_execution_results():
         results=after_results,
         improvement_changes=changes,
         comparison=comparison,
-        r_index=comparison["r"],
         report_content={**deterministic_report(facts), "source": "deterministic", "model": ""},
     )
     session.add(run)
