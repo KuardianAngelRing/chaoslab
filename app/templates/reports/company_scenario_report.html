@@ -73,7 +73,7 @@
     </header>
 
     <section>
-      <div class="section-head"><b>1</b><h2>경영 요약</h2></div>
+      <div class="section-head"><b>1</b><h2>검증 결과 요약</h2></div>
       <div class="callout"><p><strong>종합 결론.</strong> {{ narrative.get('executive_summary', run.error or '비교 가능한 최종 회귀 결과가 없습니다.') }}</p></div>
       {% if comparison %}<div class="summary-grid"><article class="summary-card emphasis"><span class="label">최종 판정</span><strong>{{ '전체 통과' if comparison.verdict == 'passed' else ('기준 미충족' if comparison.verdict == 'failed' else '판정 불가 포함') }}</strong><p>{{ narrative.get('final_conclusion', '') }}</p></article><article class="summary-card"><span class="label">검증 시나리오</span><strong>{{ after.total }}건</strong><p>개선 전·후 동일 순서로 실행</p></article><article class="summary-card"><span class="label">적용 변경</span><strong>{{ changes|length }}건</strong><p>허용된 Deployment 설정만 적용</p></article><article class="summary-card"><span class="label">최종 검증</span><strong>{{ after.passed }} / {{ after.total }} 통과</strong><p>실패 {{ after.failed }}건 · 판정 불가 {{ after.inconclusive }}건</p></article></div>{% endif %}
     </section>
