@@ -174,3 +174,101 @@ def test_render_chaos_manifest_namespace_wide_selector():
     m = render_chaos_manifest("PodChaos", "chaoslab-msa-1", "msa",
                               {"action": "pod-kill"}, label_selector=False)
     assert m["spec"]["selector"] == {"namespaces": ["chaoslab-msa-1"]}  # ns 전체 (ADR-0009)
+
+
+def test_render_chaos_manifest_uses_scenario_target_selector():
+    from app.services.real.chaos import render_chaos_manifest
+
+    target = {"app.kubernetes.io/name": "checkout-api"}
+    m = render_chaos_manifest(
+        "PodChaos", "chaoslab-order-1", "order-resilience-lab",
+        {"action": "pod-kill"}, label_selector=False, target_selector=target,
+    )
+    assert m["spec"]["selector"] == {
+        "namespaces": ["chaoslab-order-1"], "labelSelectors": target,
+    }
+
+
+def test_real_chaos_phase_raises_latest_apply_failure():
+    from types import SimpleNamespace
+
+    import pytest
+
+    from app.services.real.chaos import RealChaos
+
+    class _Api:
+        def get_namespaced_custom_object(self, **_kwargs):
+            return {"status": {
+                "conditions": [
+                    {"type": "AllInjected", "status": "False"},
+                    {"type": "AllRecovered", "status": "False"},
+                ],
+                "experiment": {"containerRecords": [{
+                    "injectedCount": 0,
+                    "events": [{"type": "Failed", "message": "unable to set ip tables chains"}],
+                }]},
+            }}
+
+    chaos = RealChaos(SimpleNamespace(sut_namespace="sut"))
+    chaos._api = lambda: _Api()
+
+    with pytest.raises(RuntimeError, match="unable to set ip tables chains"):
+        chaos.phase("NetworkChaos", "network-delay")
+
+
+def test_k3s_manifest_upsert_patches_existing_resource_instead_of_conflict():
+    from types import SimpleNamespace
+
+    from app.services.real.k3s_workload import _upsert_manifest_resource
+
+    calls = []
+
+    class _Resource:
+        namespaced = True
+
+        def get(self, **kwargs):
+            calls.append(("get", kwargs))
+
+        def patch(self, **kwargs):
+            calls.append(("patch", kwargs))
+
+        def create(self, **kwargs):
+            calls.append(("create", kwargs))
+
+    resource = _Resource()
+    dynamic = SimpleNamespace(resources=SimpleNamespace(get=lambda **_kwargs: resource))
+    doc = {"apiVersion": "v1", "kind": "ConfigMap",
+           "metadata": {"name": "order-resilience-lab-runtime"}, "data": {"app.py": "..."}}
+
+    _upsert_manifest_resource(dynamic, doc, "chaoslab-session-order", LookupError)
+
+    assert [name for name, _kwargs in calls] == ["get", "patch"]
+    assert calls[1][1]["content_type"] == "application/merge-patch+json"
+    assert doc["metadata"]["namespace"] == "chaoslab-session-order"
+
+
+def test_k3s_manifest_upsert_creates_missing_resource():
+    from types import SimpleNamespace
+
+    from app.services.real.k3s_workload import _upsert_manifest_resource
+
+    calls = []
+
+    class _Missing(Exception):
+        pass
+
+    class _Resource:
+        namespaced = True
+
+        def get(self, **_kwargs):
+            raise _Missing()
+
+        def create(self, **kwargs):
+            calls.append(kwargs)
+
+    dynamic = SimpleNamespace(resources=SimpleNamespace(get=lambda **_kwargs: _Resource()))
+    doc = {"apiVersion": "v1", "kind": "Service", "metadata": {"name": "checkout-api"}}
+
+    _upsert_manifest_resource(dynamic, doc, "chaoslab-session-order", _Missing)
+
+    assert calls == [{"body": doc, "namespace": "chaoslab-session-order"}]

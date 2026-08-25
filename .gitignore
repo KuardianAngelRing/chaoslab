@@ -241,6 +241,7 @@ kubeconfig.yaml
 *.db
 *.sqlite
 *.sqlite3
+/.local-k3s.yaml
 
 # Claude Code — CLAUDE.md는 팀 공유(커밋), 로컬 세션 상태만 제외
 .omc/

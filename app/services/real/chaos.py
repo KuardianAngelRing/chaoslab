@@ -15,7 +15,8 @@ CHAOS_PLURALS = {
 
 
 def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params: dict,
-                          label_selector: bool = True) -> dict:
+                          label_selector: bool = True,
+                          target_selector: dict[str, str] | None = None) -> dict:
     """Chaos Mesh CRD 매니페스트.
 
     selector: EKS는 generic-app 차트의 `app:` 라벨(label_selector=True),
@@ -24,7 +25,9 @@ def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params
     params는 chaos_specs.validate_params로 사전 검증된 값이어야 한다.
     """
     selector: dict = {"namespaces": [namespace]}
-    if label_selector:
+    if target_selector:
+        selector["labelSelectors"] = target_selector
+    elif label_selector:
         selector["labelSelectors"] = {"app": app_name}
     spec: dict = {"selector": selector, "mode": "all"}
     if chaos_type == "NetworkChaos":
@@ -72,10 +75,12 @@ class RealChaos:
             config.load_kube_config()
         return client.CustomObjectsApi()
 
-    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
+    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict,
+               target_selector: dict[str, str] | None = None) -> str:
         assert namespace == self.namespace, "chaos CRD는 바인딩된 namespace에만 생성해야 함"
         manifest = render_chaos_manifest(chaos_type, namespace, app_name, params,
-                                         label_selector=self.label_selector)
+                                         label_selector=self.label_selector,
+                                         target_selector=target_selector)
         resp = self._api().create_namespaced_custom_object(
             group=_GROUP, version=_VERSION, namespace=namespace,
             plural=CHAOS_PLURALS[chaos_type], body=manifest,
@@ -83,16 +88,23 @@ class RealChaos:
         return resp["metadata"]["name"]
 
     def phase(self, chaos_type: str, crd_name: str) -> str:
-        """status.conditions 기반: AllRecovered=True → recovered, AllInjected=True → running, 그 외 injecting."""
+        """조건과 적용 기록 기반 상태. 주입 실패는 대기하지 않고 즉시 예외로 전달한다."""
         obj = self._api().get_namespaced_custom_object(
             group=_GROUP, version=_VERSION, namespace=self.namespace,
             plural=CHAOS_PLURALS[chaos_type], name=crd_name,
         )
-        conditions = {c.get("type"): c.get("status") for c in (obj.get("status") or {}).get("conditions", [])}
+        status = obj.get("status") or {}
+        conditions = {c.get("type"): c.get("status") for c in status.get("conditions", [])}
         if conditions.get("AllRecovered") == "True":
             return "recovered"
         if conditions.get("AllInjected") == "True":
             return "running"
+        for record in (status.get("experiment") or {}).get("containerRecords", []):
+            if record.get("injectedCount", 0) > 0:
+                continue
+            failed = [event for event in record.get("events", []) if event.get("type") == "Failed"]
+            if failed:
+                raise RuntimeError(failed[-1].get("message") or "Chaos 장애 주입에 실패했습니다")
         return "injecting"
 
     def delete(self, chaos_type: str, crd_name: str) -> None:

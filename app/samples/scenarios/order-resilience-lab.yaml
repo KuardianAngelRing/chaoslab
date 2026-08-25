@@ -1,0 +1,65 @@
+id: checkout-order-path-regression
+title: 주문 경로 장애 최종 회귀
+app: order-resilience-lab
+observation:
+  service: checkout-api
+  path: /orders
+  expected_status: 200
+improvements:
+  - id: checkout-upstream-timeout
+    type: deployment_env
+    deployment: checkout-api
+    container: app
+    key: UPSTREAM_TIMEOUT_SECONDS
+    value: "1.2"
+    reason: Order API가 지연된 의존성 응답을 완료할 수 있도록 상위 호출 제한 시간을 확장합니다.
+    applies_to: [catalog]
+  - id: order-upstream-timeout
+    type: deployment_env
+    deployment: order-api
+    container: app
+    key: UPSTREAM_TIMEOUT_SECONDS
+    value: "1.2"
+    reason: Catalog 800ms 지연을 즉시 실패로 처리하지 않도록 호출 제한 시간을 확장합니다.
+    applies_to: [catalog]
+experiments:
+  - id: frontend
+    title: Checkout API Pod 1개 손실
+    target_selector:
+      app.kubernetes.io/name: checkout-api
+    chaos_type: PodChaos
+    params:
+      action: pod-kill
+    criteria:
+      max_error_rate_pct: 20
+      max_p95_latency_ms: 1500
+      max_recovery_seconds: 30
+      min_ready_pods: 9
+  - id: catalog
+    title: Catalog API 800ms 지연
+    target_selector:
+      app.kubernetes.io/name: catalog-api
+    chaos_type: NetworkChaos
+    params:
+      action: delay
+      latency_ms: 800
+      duration_s: 30
+    criteria:
+      max_error_rate_pct: 5
+      max_p95_latency_ms: 1500
+      max_recovery_seconds: 30
+      min_ready_pods: 10
+  - id: cpu
+    title: Checkout API CPU 압박
+    target_selector:
+      app.kubernetes.io/name: checkout-api
+    chaos_type: StressChaos
+    params:
+      action: cpu
+      cpu_load: 80
+      duration_s: 30
+    criteria:
+      max_error_rate_pct: 5
+      max_p95_latency_ms: 1500
+      max_recovery_seconds: 30
+      min_ready_pods: 9
