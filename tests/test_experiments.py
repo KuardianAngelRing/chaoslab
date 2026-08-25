@@ -51,7 +51,7 @@ def test_experiments_page_is_disconnected_workflow_demo(client):
 def test_create_experiment_success(client):
     # seed의 online-boutique(1)에는 running 실험이 이미 있어(409 대상) → 실험 없는 앱(2)으로 검증
     resp = client.post("/experiments", data={
-        "app_id": "2", "chaos_type": "NetworkChaos",
+        "app_id": "2", "chaos_type": "network-delay",
         "latency_ms": "200", "duration_s": "30",
     })
     assert resp.status_code == 200
@@ -60,7 +60,7 @@ def test_create_experiment_success(client):
 
 def test_create_experiment_validation_error_422(client):
     resp = client.post("/experiments", data={
-        "app_id": "1", "chaos_type": "NetworkChaos",
+        "app_id": "1", "chaos_type": "network-delay",
         "latency_ms": "5", "duration_s": "30",  # latency min 10 미만
     })
     assert resp.status_code == 422
@@ -69,13 +69,13 @@ def test_create_experiment_validation_error_422(client):
 def test_create_experiment_conflict_409_when_app_busy(client):
     # seed의 online-boutique(1)에는 running 실험이 이미 있음
     resp = client.post("/experiments", data={
-        "app_id": "1", "chaos_type": "PodChaos",
+        "app_id": "1", "chaos_type": "pod-kill",
     })
     assert resp.status_code == 409
 
 
 def test_create_experiment_unknown_app_404(client):
-    resp = client.post("/experiments", data={"app_id": "99999", "chaos_type": "PodChaos"})
+    resp = client.post("/experiments", data={"app_id": "99999", "chaos_type": "pod-kill"})
     assert resp.status_code == 404
 
 
@@ -105,7 +105,7 @@ def test_watch_experiment_completes_and_cleans(monkeypatch):
     s = Session()
     app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
     exp = ExperimentRepository(s).create(
-        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        app_id=app.id, chaos_type="pod-kill", params={"action": "pod-kill"},
         status="running", crd_name="exp-demo-abc")
     exp_id = exp.id
     s.close()
@@ -129,7 +129,7 @@ def test_watch_experiment_completes_and_cleans(monkeypatch):
     assert exp.status == "completed"
     assert exp.finished_at is not None
     s.close()
-    assert deleted == [("PodChaos", "exp-demo-abc")]
+    assert deleted == [("pod-kill", "exp-demo-abc")]
 
 
 def test_watch_experiment_failure_marks_failed(monkeypatch, caplog):
@@ -139,7 +139,7 @@ def test_watch_experiment_failure_marks_failed(monkeypatch, caplog):
     s = Session()
     app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
     exp = ExperimentRepository(s).create(
-        app_id=app.id, chaos_type="NetworkChaos",
+        app_id=app.id, chaos_type="network-delay",
         params={"action": "delay", "latency_ms": 200, "duration_s": 30},
         status="running", crd_name="exp-demo-abc")
     exp_id = exp.id
@@ -172,7 +172,7 @@ def test_watch_skips_when_already_stopped(monkeypatch):
     s = Session()
     app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
     exp = ExperimentRepository(s).create(
-        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        app_id=app.id, chaos_type="pod-kill", params={"action": "pod-kill"},
         status="stopped", crd_name="exp-demo-abc")
     exp_id = exp.id
     s.close()
@@ -211,7 +211,7 @@ def test_watch_early_exits_when_stopped_midway(monkeypatch):
     s = Session()
     app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
     exp = ExperimentRepository(s).create(
-        app_id=app.id, chaos_type="NetworkChaos",
+        app_id=app.id, chaos_type="network-delay",
         params={"action": "delay", "latency_ms": 200, "duration_s": 30},
         status="running", crd_name="exp-demo-abc")
     exp_id = exp.id
@@ -271,7 +271,7 @@ def _engine_with_experiment(status: str):
     app = App(name="demo", repo_url="https://github.com/x/demo", framework="docker")
     s.add(app)
     s.commit()
-    s.add(Experiment(app_id=app.id, chaos_type="PodChaos", status=status))
+    s.add(Experiment(app_id=app.id, chaos_type="pod-kill", status=status))
     s.commit()
     s.close()
     return Session
@@ -297,7 +297,7 @@ def test_watch_k3s_experiment_deploys_injects_and_tears_down(monkeypatch):
         name="msa", repo_url="k3s://manifest-upload", framework="manifest",
         env="k3s", manifest="kind: Deployment")
     exp = ExperimentRepository(s).create(
-        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        app_id=app.id, chaos_type="pod-kill", params={"action": "pod-kill"},
         status="deploying", namespace="chaoslab-msa-1")
     exp_id = exp.id
     s.close()
@@ -348,7 +348,7 @@ def test_watch_k3s_deploy_failure_marks_failed_and_tears_down(monkeypatch, caplo
         name="msa", repo_url="k3s://manifest-upload", framework="manifest",
         env="k3s", manifest="")
     exp = ExperimentRepository(s).create(
-        app_id=app.id, chaos_type="PodChaos", params={"action": "pod-kill"},
+        app_id=app.id, chaos_type="pod-kill", params={"action": "pod-kill"},
         status="deploying", namespace="chaoslab-msa-1")
     exp_id = exp.id
     s.close()
@@ -385,7 +385,7 @@ def test_watch_marks_failed_when_never_recovered(monkeypatch):
     s = Session()
     app = AppRepository(s).create(name="demo", repo_url="", framework="docker")
     exp = ExperimentRepository(s).create(
-        app_id=app.id, chaos_type="NetworkChaos",
+        app_id=app.id, chaos_type="network-delay",
         params={"action": "delay", "latency_ms": 100, "duration_s": 30},
         status="running", crd_name="exp-demo-stuck")
     exp_id = exp.id

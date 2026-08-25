@@ -15,6 +15,8 @@ from app.deps import make_handoff_source
 from app.services.agent.assembler import assemble_handoff
 
 
+
+
 def seed_data(session: Session) -> None:
     apps = AppRepository(session)
     builds = BuildRepository(session)
@@ -45,8 +47,8 @@ def seed_data(session: Session) -> None:
                   workflow_name="build-boutique-a1b2c3d4")
 
     exp = exps.create(
-        app_id=boutique.id, chaos_type="NetworkChaos",
-        params={"action": "delay", "delay": "200ms", "duration": "5m"},
+        app_id=boutique.id, chaos_type="network-delay",
+        params={"action": "delay", "latency_ms": 200, "duration_s": 300},
         status="running", baseline_r=0.42, r_index=0.65, target_r=0.7,
         baseline_metrics={"error": 0.3, "p99": 89},
         fault_metrics={"error": 2.1, "p99": 412},
@@ -62,8 +64,8 @@ def seed_data(session: Session) -> None:
     # 실환경 smoke 완주(2026-07-28) 스토리 재현 — 실패 판정→자동 개선→재검증 통과.
     # started_at을 과거로 둬서 대시보드 '최신 실험'은 계속 running인 boutique 실험이 잡히게 한다
     exps.create(
-        app_id=order_msa.id, chaos_type="PodChaos",
-        params={"action": "pod-kill", "mode": "one", "duration": "30s"},
+        app_id=order_msa.id, chaos_type="pod-kill",
+        params={"action": "pod-kill"},
         status="completed",
         started_at=datetime(2026, 7, 28, 12, 53, tzinfo=timezone.utc),
         finished_at=datetime(2026, 7, 28, 12, 55, tzinfo=timezone.utc),

@@ -9,7 +9,7 @@ from app.db.seed import seed_data
 def _fresh_experiment(db_session):
     seed_data(db_session)
     return ExperimentRepository(db_session).create(
-        app_id=1, chaos_type="PodChaos", params={"action": "pod-kill"}, status="completed",
+        app_id=1, chaos_type="pod-kill", params={"action": "pod-kill"}, status="completed",
     )
 
 

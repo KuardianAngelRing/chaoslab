@@ -46,6 +46,10 @@ def create_experiment(
     latency_ms: str = Form(""),
     duration_s: str = Form(""),
     cpu_load: str = Form(""),
+    loss_percent: str = Form(""),
+    rate_mbps: str = Form(""),
+    memory_mb: str = Form(""),
+    container_name: str = Form(""),
     session: Session = Depends(get_session),
 ):
     app = AppRepository(session).get(app_id)
@@ -54,6 +58,8 @@ def create_experiment(
 
     params, errors = validate_params(chaos_type, {
         "latency_ms": latency_ms, "duration_s": duration_s, "cpu_load": cpu_load,
+        "loss_percent": loss_percent, "rate_mbps": rate_mbps,
+        "memory_mb": memory_mb, "container_name": container_name,
     })
     if errors:
         raise HTTPException(status_code=422, detail=" / ".join(errors))

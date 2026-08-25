@@ -25,7 +25,7 @@ def test_experiment_has_crd_name_default_empty(db_session):
     app = App(name="test-app", repo_url="https://github.com/x/test", framework="docker")
     db_session.add(app)
     db_session.commit()
-    exp = Experiment(app_id=app.id, chaos_type="PodChaos")
+    exp = Experiment(app_id=app.id, chaos_type="pod-kill")
     db_session.add(exp)
     db_session.commit()
     assert exp.crd_name == ""

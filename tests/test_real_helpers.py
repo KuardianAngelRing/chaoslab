@@ -87,7 +87,7 @@ def test_build_workflow_manifest():
 def test_render_chaos_manifest_network_delay():
     from app.services.real.chaos import render_chaos_manifest
 
-    m = render_chaos_manifest("NetworkChaos", "sut", "demo",
+    m = render_chaos_manifest("network-delay", "sut", "demo",
                               {"action": "delay", "latency_ms": 200, "duration_s": 300})
     assert m["kind"] == "NetworkChaos"
     assert m["metadata"]["generateName"] == "exp-demo-"
@@ -102,7 +102,7 @@ def test_render_chaos_manifest_network_delay():
 def test_render_chaos_manifest_pod_kill_has_no_duration():
     from app.services.real.chaos import render_chaos_manifest
 
-    m = render_chaos_manifest("PodChaos", "sut", "demo", {"action": "pod-kill"})
+    m = render_chaos_manifest("pod-kill", "sut", "demo", {"action": "pod-kill"})
     assert m["kind"] == "PodChaos"
     assert m["spec"]["action"] == "pod-kill"
     assert "duration" not in m["spec"]
@@ -111,7 +111,7 @@ def test_render_chaos_manifest_pod_kill_has_no_duration():
 def test_render_chaos_manifest_stress_cpu():
     from app.services.real.chaos import render_chaos_manifest
 
-    m = render_chaos_manifest("StressChaos", "sut", "demo",
+    m = render_chaos_manifest("cpu-stress", "sut", "demo",
                               {"action": "cpu", "cpu_load": 80, "duration_s": 60})
     assert m["kind"] == "StressChaos"
     assert m["spec"]["stressors"] == {"cpu": {"workers": 1, "load": 80}}
@@ -171,6 +171,43 @@ def test_build_ssh_command_defaults_omit_key_and_user():
 def test_render_chaos_manifest_namespace_wide_selector():
     from app.services.real.chaos import render_chaos_manifest
 
-    m = render_chaos_manifest("PodChaos", "chaoslab-msa-1", "msa",
+    m = render_chaos_manifest("pod-kill", "chaoslab-msa-1", "msa",
                               {"action": "pod-kill"}, label_selector=False)
     assert m["spec"]["selector"] == {"namespaces": ["chaoslab-msa-1"]}  # ns 전체 (ADR-0009)
+
+
+def test_render_chaos_manifest_new_actions():
+    from app.services.real.chaos import render_chaos_manifest
+
+    m = render_chaos_manifest("network-loss", "sut", "demo",
+                              {"action": "loss", "loss_percent": 25, "duration_s": 60})
+    assert m["kind"] == "NetworkChaos"
+    assert m["spec"]["action"] == "loss"
+    assert m["spec"]["loss"] == {"loss": "25"}
+
+    m = render_chaos_manifest("network-partition", "sut", "demo",
+                              {"action": "partition", "duration_s": 120})
+    assert m["spec"]["action"] == "partition"
+    assert m["spec"]["direction"] == "both"
+
+    m = render_chaos_manifest("network-bandwidth", "sut", "demo",
+                              {"action": "bandwidth", "rate_mbps": 10, "duration_s": 60})
+    assert m["spec"]["bandwidth"]["rate"] == "10mbps"
+    assert {"limit", "buffer"} <= set(m["spec"]["bandwidth"])
+
+    m = render_chaos_manifest("pod-failure", "sut", "demo",
+                              {"action": "pod-failure", "duration_s": 90})
+    assert m["kind"] == "PodChaos"
+    assert m["spec"]["action"] == "pod-failure"
+    assert m["spec"]["duration"] == "90s"
+
+    m = render_chaos_manifest("container-kill", "sut", "demo",
+                              {"action": "container-kill", "container_name": "server"})
+    assert m["spec"]["action"] == "container-kill"
+    assert m["spec"]["containerNames"] == ["server"]
+    assert "duration" not in m["spec"]
+
+    m = render_chaos_manifest("memory-stress", "sut", "demo",
+                              {"action": "memory", "memory_mb": 256, "duration_s": 60})
+    assert m["kind"] == "StressChaos"
+    assert m["spec"]["stressors"] == {"memory": {"workers": 1, "size": "256MiB"}}
