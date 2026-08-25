@@ -195,12 +195,12 @@
       position: relative;
       background: var(--card);
       border-radius: 1.5rem;
-      max-width: 32rem; width: 100%; margin: 1rem;
+      max-width: 44rem; width: 100%; margin: 1rem;
       border: 1px solid var(--border);
       max-height: 90vh; display: flex; flex-direction: column;
     }
     /* 우측 하단 모서리 드래그 리사이즈 그립 (위저드 모달) */
-    .dialog-card[data-wizard] { height: 30rem; }  /* 스텝 전환 시 높이 고정(점프 방지) */
+    .dialog-card[data-wizard] { height: min(40rem, 90vh); }  /* 스텝 전환 시 높이 고정(점프 방지) — 작은 뷰포트는 90vh 상한 */
     /* 코너 곡선 그립 — 폭 24px(=footer 우측 패딩)이라 버튼과 안 겹침 */
     .dialog-resize-handle {
       position: absolute; bottom: 0; right: 0; width: 24px; height: 34px;
