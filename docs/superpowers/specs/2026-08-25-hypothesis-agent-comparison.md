@@ -6,7 +6,7 @@
 
 1. **grill 세션 완료** — 가설 수립 단계 설계 확정: `2026-08-25-hypothesis-stage-design.md`(같은 폴더) + ADR-0010(LangGraph 폐기, 퓨어 Python + claude 구독제 `claude -p`) + GLOSSARY("가설 수립"·"가설 수립 요청" 등재).
 2. **ChaosPilot(구 agent 레포) upstream/main과 비교 완료** — 아래 결과.
-3. **⏳ 미결 결정: 하이브리드안(이식 항목 1~5) 채택 여부** — 시웅 확인 대기. 승인 시 스펙 문서에 반영 후 구현 착수.
+3. **✅ 결정 완료 (2026-08-25, 시웅)**: 하이브리드안 **1~5 전부 채택**. 단, 본 문서의 "미이식 권고"와 달리 **선택 후 detailing 2차 호출 구조도 채택**(후보=서사만, params는 선택 후 `detail` 호출로 구체화). 장애 유형도 9종으로 확장(선행 작업 완료 — network-delay·loss·partition·bandwidth / pod-kill·pod-failure·container-kill / cpu-stress·memory-stress). 스펙 문서 2차 개정 반영 완료 → 구현 단계.
 
 ## 비교 기준
 

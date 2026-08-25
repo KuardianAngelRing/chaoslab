@@ -54,7 +54,7 @@ tests/    hermetic — in-memory SQLite(StaticPool) + seed fixture, conftest aut
 ```bash
 source .venv/bin/activate && pip install -r requirements.txt
 uvicorn app.main:app --reload    # localhost:8000 (lifespan이 seed 자동)
-pytest -q                        # 89 통과
+pytest -q                        # 171 통과
 ```
 `.env`는 `cp .env.example .env`면 충분(기본 `USE_REAL_SERVICES=false`=전부 Stub → 클러스터·AWS 없이 개발/테스트). 라이브 연동 값(ECR_REGISTRY·GITHUB_TOKEN 등)은 팀 내 개인 전달. `chaoslab.db`는 런타임 생성·gitignore.
 
@@ -65,7 +65,8 @@ pytest -q                        # 89 통과
 - [x] **Slice 3 — 카오스** (k3s 라이브 검증 완료 08/19 · EKS는 미검증): 실험 폼→Chaos Mesh CRD 3종(network-delay·pod-kill·cpu-stress), `chaos_specs` 범위검증(latency 10–10000ms·cpu 1–100%·duration 30–1800s), 앱당 1개(409), `_watch_experiment`(duration→회복 확인→CRD 삭제→completed, 회복 미확인이면 failed)·중지·SSE.
 - [x] **로컬(k3s) 연결 — SSH 터널 + 현장 배포 실험** (08/18–19, ADR-0009): `App.env`("eks"/"k3s", ADR-0002 백로그 해소)·`App.manifest`·`Experiment.namespace` 컬럼 추가 · k3s 등록=manifest 저장만(`registered`) · 실험 시 전용 ns(`chaoslab-{app}-{exp_id}`) 배포→ready→주입(ns 전체 selector)→관측→CRD·ns 삭제(`K3sWorkloadService`) · SSH 터널은 앱이 자동 관리(`TunnelService`, `LOCAL_SSH_*` 설정 시 기동에서 열고 끊기면 재접속) · 로컬 인프라 탭 실데이터(`LocalK8sService`, `LOCAL_KUBECONFIG` 게이트). ⚠️ 라즈베리파이 클러스터에서 **NetworkChaos는 chaos-daemon iptables 적용 실패**로 주입 안 됨(PodChaos는 정상) — 클러스터 측 조치 필요.
 - [x] **AI 전달 데이터 인터페이스** (08/04 회의): 노션 §2 계약(`services/agent/handoff_schema.py`, `schema_version` 1.0) · `agent_handoffs` 스냅샷 테이블 · 조립기(저장 metrics 우선, 외부산은 `HandoffSourceService` Stub — Real은 Slice 4·5) · REST CRUD(`routers/handoffs.py`, AI 루프 소비 지점은 `GET /experiments/{id}/handoffs/latest`, 계약 열람은 `/docs`)
-- [ ] **가설 수립 단계 (진행 중, 08/25)**: grill 세션으로 설계 확정 — ADR-0010(LangGraph 폐기 → 퓨어 Python + claude 구독제 `claude -p`) · GLOSSARY("가설 수립"·"가설 수립 요청") · 스펙 `docs/superpowers/specs/2026-08-25-hypothesis-stage-design.md`. **이어서 작업하는 세션은 `docs/superpowers/specs/2026-08-25-hypothesis-agent-comparison.md`(ChaosPilot 비교·인계 문서)부터 읽을 것** — 하이브리드안(품질 장치 이식 1~5) 승인 대기 → 스펙 반영 → 구현 순.
+- [x] **장애 유형 9종 확장** (08/25, 가설 수립 선행 작업): `chaos_specs`를 슬러그 키로 전환(`chaos_type`가 이제 "network-delay"류 슬러그 — kind·action은 스펙에서 해석) · NetworkChaos delay/loss/partition/bandwidth · PodChaos pod-kill/pod-failure/container-kill(`container_name` str 필드) · StressChaos cpu/memory. `render_chaos_manifest` action 분기·라우터 폼 필드·시드 갱신. ⚠️ 구 DB의 chaos_type("NetworkChaos"류)은 무효 — 재기동 전 DB 삭제.
+- [x] **가설 수립 단계 — 구현 (08/25, 라이브 미검증)**: 스펙 2차 개정(detailing 2단 + 하이브리드 1~5, `docs/superpowers/specs/2026-08-25-hypothesis-stage-design.md`)대로 배선 완료 — 계약(`hypothesis_schema.py`) · 조립기(manifest 원문+정적 분석 findings+과거 이력) · `HypothesisRun`/`ExperimentCandidate`(+`Experiment.candidate_id`) · `HypothesisAgentService`(Stub + `ClaudeCliHypothesisAgent`) · 공통 검증+교정 재시도 1회(`hypothesis_validation.py`) · `routers/hypothesis.py`(생성→SSE→선택→detailing→`start_experiment` 이어달리기) · 위저드 제출 실배선 · seed·테스트. ⚠️ 남은 것: **`claude -p` 라이브 검증**(CLI 플래그·JSON 출력 형식은 버전에 따라 조정 여지 — `services/real/claude_agent.py`) · 재기동 전 구 DB 삭제 필수(컬럼·chaos_type 슬러그 변경).
 - [ ] **Slice 4 — 모니터링**: `RealPrometheus`(RED)·`RealLoki`(로그)·`RealK8s`(노드/Pod/컴포넌트) 실조회 + 차트 실데이터·SSE 갱신
 - [ ] **Slice 5 — 결과/R지수**: baseline/fault/recovery 계산 + 추이·iteration 히스토리 (AI 루프 자체는 Phase 3)
 - [ ] **DB Supabase 전환** (보고서 확정): up/down 시 EC2 로컬 SQLite 이력 유실 → 관리형 PostgreSQL로. 스키마 초안 `docs/supabase_schema.sql`
