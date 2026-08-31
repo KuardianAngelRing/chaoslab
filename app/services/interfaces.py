@@ -1,5 +1,6 @@
 """외부 시스템 계약. 라우터는 이 Protocol에만 의존(DIP). Slice 1=Stub, 이후=Real로 교체."""
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, TypedDict
 
 
@@ -79,6 +80,14 @@ class ChaosService(Protocol):
 
 
 class PrometheusService(Protocol):
+    def phase_summary(self, namespace: str, app_name: str, phase: str,
+                      start: datetime, end: datetime) -> dict:
+        """[start, end] 구간 소급 집계 — PhaseSummary 계약과 동일 키.
+
+        recovery_seconds는 항상 None으로 반환(구간 경계를 아는 호출자가 채움).
+        """
+        ...
+
     def red_metrics(self, namespace: str) -> dict:
         """rate/error/duration(p99) 반환."""
         ...

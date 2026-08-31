@@ -90,15 +90,14 @@ class RealChaos:
     def _api(self):
         from kubernetes import client, config  # lazy
 
-        if self.kubeconfig:
+        if self.kubeconfig:  # k3s: SSH 터널 경유 로컬 kubeconfig 바인딩 (ADR-0009)
             import os
             api_client = config.new_client_from_config(
                 config_file=os.path.expanduser(self.kubeconfig))
             return client.CustomObjectsApi(api_client)
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
-            config.load_kube_config()
+        from app.services.real.kube import load_kube
+
+        load_kube(self.s)
         return client.CustomObjectsApi()
 
     def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:

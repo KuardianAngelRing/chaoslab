@@ -51,6 +51,19 @@ def test_make_tunnel_returns_stub_singleton_without_ssh_host():
     assert deps.make_tunnel() is t1  # 생명주기 싱글턴
 
 
+def test_stub_prometheus_phase_summary_matches_contract():
+    from datetime import datetime, timezone
+
+    from app.services.agent.handoff_schema import PhaseSummary
+
+    p = stubs.StubPrometheus()
+    t = datetime(2026, 8, 13, tzinfo=timezone.utc)
+    for phase in ("baseline", "fault", "recovery"):
+        s = PhaseSummary(**p.phase_summary("sut", "demo", phase, t, t))
+        if phase == "recovery":
+            assert s.recovery_seconds is not None
+
+
 def test_stub_loki_returns_lines():
     lines = stubs.StubLoki().tail("ns", limit=5)
     assert isinstance(lines, list) and len(lines) == 5
