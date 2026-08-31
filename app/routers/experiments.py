@@ -158,8 +158,14 @@ def _watch_experiment(exp_id: int) -> None:
             for _ in range(_RECOVER_CAP):     # 회복 대기 (최대 5분)
                 if not _still_active():
                     return
-                if chaos.phase(chaos_type, crd_name) == "recovered":
+                phase = chaos.phase(chaos_type, crd_name)
+                if phase == "recovered":
                     recovered = True
+                    break
+                if chaos_type in ("pod-kill", "container-kill") and phase == "running":
+                    # 원샷 액션은 AllRecovered로 전환되지 않음(라이브 08/31 확인) —
+                    # 주입 확인 후 파드 ready 재확인으로 회복 판정 (pr-8 regression과 동일 규칙)
+                    recovered = (not is_k3s) or make_k3s_workload().wait_ready(namespace)
                     break
                 time.sleep(_POLL_S)
             chaos.delete(chaos_type, crd_name)
