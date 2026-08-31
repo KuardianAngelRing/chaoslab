@@ -7,6 +7,7 @@ from app.db.repositories import (
     AppRepository,
     BuildRepository,
     ExperimentRepository,
+    ScenarioRunRepository,
 )
 from app.deps import get_app_count, get_k8s, get_local_k8s, get_tunnel
 from app.rendering import render_page
@@ -80,11 +81,25 @@ def experiments_page(
 def experiment_detail(
     request: Request,
     exp_id: int,
+    app_id: int | None = None,
+    objective: str = "",
+    scenario_run_id: int | None = None,
+    session: Session = Depends(get_session),
     app_count: int = Depends(get_app_count),
 ):
     if exp_id not in (1, 2, 3):
         raise HTTPException(status_code=404, detail="experiment not found")
-    ctx = {"active_nav": "experiments", "app_count": app_count}
+    scenario_run = ScenarioRunRepository(session).get(scenario_run_id) if scenario_run_id is not None else None
+    if scenario_run_id is not None and scenario_run is None:
+        raise HTTPException(status_code=404, detail="scenario run not found")
+    workflow_app = scenario_run.app if scenario_run else (
+        AppRepository(session).get(app_id) if app_id is not None else None
+    )
+    if app_id is not None and workflow_app is None:
+        raise HTTPException(status_code=404, detail="app not found")
+    ctx = {"active_nav": "experiments", "app_count": app_count,
+           "workflow_app": workflow_app, "workflow_objective": objective,
+           "scenario_run": scenario_run}
     return render_page(request, "pages/experiment_detail.html", ctx)
 
 

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # AI (Phase 3)
     anthropic_api_key: str = ""
     llm_model: str = "claude-sonnet-4-6"
+    openai_api_key: str = ""
+    report_llm_model: str = "gpt-5.6-luna"
+    report_llm_reasoning_effort: str = "low"
     target_r: float = 0.7
     llm_budget_usd: float = 5.0        # 실험당 LLM 예산 상한 (Budget.remaining 계산)
     max_agent_iterations: int = 2      # 실험당 최대 개선 반복 (08/04 시안과 동일)
@@ -45,8 +48,20 @@ class Settings(BaseSettings):
     local_tunnel_port: int = 6443              # 로컬 포워딩 포트
     local_tunnel_target: str = "localhost:6443"  # 원격 측 대상
     local_cluster_name: str = "chaospilot-k3s"
+
     local_obs_namespace: str = "chaospilot-observability"
     local_chaos_namespace: str = "chaos-mesh"
+
+    # ── 가설 수립 에이전트 (claude 구독제 CLI — ADR-0010) ──
+    # use_real_services(AWS/EKS)와 독립 게이트 — 로컬에서 에이전트만 Real로 테스트 가능
+    # (local_kubeconfig 선례와 동일 패턴). 선택형: "stub" | "claude" (추후 "codex" 등 추가).
+    hypothesis_agent: str = "stub"
+    claude_bin: str = "claude"
+    hypothesis_model: str = ""          # 비면 CLI 기본 모델
+    hypothesis_timeout_seconds: int = 180
+
+    # 최종 보고서 PDF 렌더러. 비면 PATH와 macOS 기본 Chrome 경로에서 찾는다.
+    chromium_path: str = ""
 
 
 settings = Settings()

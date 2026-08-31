@@ -15,9 +15,10 @@ from app.config import settings
 from app.db.database import SessionLocal, get_session
 from app.db.models import Experiment
 from app.db.repositories import AppRepository, ExperimentRepository
-from app.deps import make_chaos, make_k3s_workload
+from app.deps import make_chaos, make_k3s_workload, make_prometheus
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
+from app.services.metrics_collector import collect_experiment_metrics
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ def create_experiment(
     latency_ms: str = Form(""),
     duration_s: str = Form(""),
     cpu_load: str = Form(""),
+    loss_percent: str = Form(""),
+    rate_mbps: str = Form(""),
+    memory_mb: str = Form(""),
+    container_name: str = Form(""),
     session: Session = Depends(get_session),
 ):
     app = AppRepository(session).get(app_id)
@@ -54,6 +59,8 @@ def create_experiment(
 
     params, errors = validate_params(chaos_type, {
         "latency_ms": latency_ms, "duration_s": duration_s, "cpu_load": cpu_load,
+        "loss_percent": loss_percent, "rate_mbps": rate_mbps,
+        "memory_mb": memory_mb, "container_name": container_name,
     })
     if errors:
         raise HTTPException(status_code=422, detail=" / ".join(errors))
@@ -62,16 +69,30 @@ def create_experiment(
     if busy:
         raise HTTPException(status_code=409, detail="이 앱에 진행 중인 실험이 있어요")
 
+    exp = start_experiment(session, app, chaos_type, params)
+    if exp.status in ("deploying", "running"):
+        background.add_task(_watch_experiment, exp.id)
+    return _experiments_response(request, session)
+
+
+def start_experiment(session: Session, app, chaos_type: str, params: dict,
+                     candidate_id: int | None = None) -> Experiment:
+    """실험 생성 + 환경 분기 — 폼 라우트와 가설 detailing 워처가 공유.
+
+    k3s(ADR-0009): 전용 ns 예약 + deploying (배포→주입은 워처).
+    eks: 즉시 주입 — 실패 시 inject-failed. 반환 exp.status가
+    deploying/running이면 호출자가 _watch_experiment를 스케줄해야 한다.
+    """
     exp = ExperimentRepository(session).create(
-        app_id=app.id, chaos_type=chaos_type, params=params, status="pending")
+        app_id=app.id, chaos_type=chaos_type, params=params, status="pending",
+        candidate_id=candidate_id)
 
     if app.env == "k3s":
         # ADR-0009: 현장 배포 — 전용 ns에 배포→ready→주입까지 전부 워처(백그라운드)가 수행
         exp.namespace = f"chaoslab-{app.name}-{exp.id}"[:63].rstrip("-")
         exp.status = "deploying"
         session.commit()
-        background.add_task(_watch_experiment, exp.id)
-        return _experiments_response(request, session)
+        return exp
 
     try:
         crd = make_chaos(app.env, settings.sut_namespace).inject(
@@ -83,10 +104,7 @@ def create_experiment(
         logger.exception("chaos inject failed (app %s, type %s)", app.name, chaos_type)
         exp.status = "inject-failed"
         session.commit()
-        return _experiments_response(request, session)
-
-    background.add_task(_watch_experiment, exp.id)
-    return _experiments_response(request, session)
+    return exp
 
 
 def _watch_experiment(exp_id: int) -> None:
@@ -140,8 +158,14 @@ def _watch_experiment(exp_id: int) -> None:
             for _ in range(_RECOVER_CAP):     # 회복 대기 (최대 5분)
                 if not _still_active():
                     return
-                if chaos.phase(chaos_type, crd_name) == "recovered":
+                phase = chaos.phase(chaos_type, crd_name)
+                if phase == "recovered":
                     recovered = True
+                    break
+                if chaos_type in ("pod-kill", "container-kill") and phase == "running":
+                    # 원샷 액션은 AllRecovered로 전환되지 않음(라이브 08/31 확인) —
+                    # 주입 확인 후 파드 ready 재확인으로 회복 판정 (pr-8 regression과 동일 규칙)
+                    recovered = (not is_k3s) or make_k3s_workload().wait_ready(namespace)
                     break
                 time.sleep(_POLL_S)
             chaos.delete(chaos_type, crd_name)
@@ -167,6 +191,9 @@ def _watch_experiment(exp_id: int) -> None:
             exp.status = status
             exp.finished_at = datetime.now(timezone.utc)
             s.commit()
+            if status == "completed":
+                # 실측 3구간 소급 집계 + R지수 (실패해도 실험 상태 불변)
+                collect_experiment_metrics(s, exp, make_prometheus())
     finally:
         s.close()
 

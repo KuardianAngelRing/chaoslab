@@ -10,7 +10,7 @@ def test_stubs_satisfy_protocols():
     assert b.build_status("wf") in {"pending", "running", "succeeded", "failed"}
 
     c: interfaces.ChaosService = stubs.StubChaos()
-    assert isinstance(c.inject("ns", "app", "NetworkChaos", {"delay": "1s"}), str)
+    assert isinstance(c.inject("ns", "app", "network-delay", {"delay": "1s"}), str)
 
     p: interfaces.PrometheusService = stubs.StubPrometheus()
     red = p.red_metrics("ns")
@@ -51,6 +51,19 @@ def test_make_tunnel_returns_stub_singleton_without_ssh_host():
     assert deps.make_tunnel() is t1  # 생명주기 싱글턴
 
 
+def test_stub_prometheus_phase_summary_matches_contract():
+    from datetime import datetime, timezone
+
+    from app.services.agent.handoff_schema import PhaseSummary
+
+    p = stubs.StubPrometheus()
+    t = datetime(2026, 8, 13, tzinfo=timezone.utc)
+    for phase in ("baseline", "fault", "recovery"):
+        s = PhaseSummary(**p.phase_summary("sut", "demo", phase, t, t))
+        if phase == "recovery":
+            assert s.recovery_seconds is not None
+
+
 def test_stub_loki_returns_lines():
     lines = stubs.StubLoki().tail("ns", limit=5)
     assert isinstance(lines, list) and len(lines) == 5
@@ -60,10 +73,10 @@ def test_stub_chaos_matches_new_protocol():
     from app.services.stubs import StubChaos
 
     stub = StubChaos()
-    name = stub.inject("sut", "demo", "NetworkChaos", {"action": "delay"})
+    name = stub.inject("sut", "demo", "network-delay", {"action": "delay"})
     assert isinstance(name, str) and name
-    assert stub.phase("NetworkChaos", name) == "recovered"
-    assert stub.delete("NetworkChaos", name) is None
+    assert stub.phase("network-delay", name) == "recovered"
+    assert stub.delete("network-delay", name) is None
 
 
 def test_make_chaos_returns_stub_in_stub_mode():

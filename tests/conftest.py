@@ -17,6 +17,7 @@ def _force_stub_mode(monkeypatch):
     monkeypatch.setattr(settings, "use_real_services", False)
     monkeypatch.setattr(settings, "local_kubeconfig", "")  # 로컬 k3s도 항상 Stub
     monkeypatch.setattr(settings, "local_ssh_host", "")    # SSH 터널도 항상 미관리(Stub)
+    monkeypatch.setattr(settings, "hypothesis_agent", "stub")  # claude CLI 실호출도 항상 Stub
 
 
 @pytest.fixture

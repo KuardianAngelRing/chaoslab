@@ -36,6 +36,6 @@ def test_experiment_create_links_app(session):
     app_repo = AppRepository(session)
     app = app_repo.create(name="svc", repo_url="https://x/svc", framework="node")
     exp_repo = ExperimentRepository(session)
-    exp = exp_repo.create(app_id=app.id, chaos_type="NetworkChaos", params={"delay": "200ms"})
+    exp = exp_repo.create(app_id=app.id, chaos_type="network-delay", params={"delay": "200ms"})
     assert exp.id is not None
-    assert exp_repo.list_all()[0].chaos_type == "NetworkChaos"
+    assert exp_repo.list_all()[0].chaos_type == "network-delay"

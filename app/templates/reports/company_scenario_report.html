@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ app.name }} 시스템 분석 및 수정 결과 보고서</title>
+  <style>
+    :root { --ink:#172033; --muted:#647184; --line:#d8e0ea; --navy:#12355b; --blue:#2367a5; --blue-soft:#eef6fc; --green:#087657; --green-soft:#e8f7f0; --red:#b42318; --red-soft:#fff0ef; --amber:#a15c00; --amber-soft:#fff7e7; }
+    * { box-sizing:border-box; }
+    html { background:#e9eef5; color:var(--ink); font-family:Pretendard,"Apple SD Gothic Neo","Noto Sans KR",Arial,sans-serif; }
+    body { margin:0; }
+    .toolbar { align-items:center; background:var(--navy); color:#fff; display:flex; justify-content:space-between; padding:12px max(20px,calc((100vw - 1080px)/2)); }
+    .toolbar p { color:#c9d9e8; font-size:11px; margin:3px 0 0; }
+    .toolbar a { background:#fff; border-radius:6px; color:var(--navy); font-size:13px; font-weight:800; padding:9px 14px; text-decoration:none; }
+    .report { background:#fff; box-shadow:0 16px 46px rgba(31,49,78,.14); margin:28px auto 48px; max-width:1080px; padding:58px 64px 68px; }
+    h1,h2,h3,p { margin-top:0; } h1 { font-size:32px; letter-spacing:-.045em; margin:5px 0 12px; } h2 { font-size:20px; margin:0; } h3 { font-size:14px; margin-bottom:6px; }
+    .eyebrow { color:var(--blue); font-size:11px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+    .lead { color:var(--muted); font-size:14px; line-height:1.75; max-width:780px; }
+    .cover-meta { border-bottom:1px solid var(--line); border-top:3px solid var(--navy); display:grid; grid-template-columns:repeat(4,1fr); margin-top:30px; }
+    .cover-meta div { border-right:1px solid var(--line); padding:13px; } .cover-meta div:last-child { border-right:0; }
+    .label,.cover-meta span { color:var(--muted); display:block; font-size:10px; font-weight:800; margin-bottom:5px; } .cover-meta strong { font-size:12px; }
+    section { margin-top:36px; } .section-head { align-items:center; border-bottom:1px solid var(--line); display:flex; gap:9px; margin-bottom:15px; padding-bottom:9px; }
+    .section-head b { align-items:center; background:var(--navy); border-radius:50%; color:#fff; display:flex; font-size:10px; height:22px; justify-content:center; width:22px; }
+    .callout { background:var(--blue-soft); border-left:4px solid var(--blue); padding:16px 18px; } .callout p { font-size:13px; line-height:1.7; margin:0; }
+    .summary-grid { display:grid; gap:10px; grid-template-columns:1.4fr repeat(3,1fr); margin-top:12px; }
+    .summary-card { border:1px solid var(--line); border-radius:8px; min-height:104px; padding:14px; }
+    .summary-card.emphasis { background:var(--navy); color:#fff; } .summary-card strong { display:block; font-size:21px; margin:8px 0 5px; }
+    .summary-card p { color:var(--muted); font-size:11px; line-height:1.45; margin:0; } .summary-card.emphasis p,.summary-card.emphasis .label { color:#d7e6f2; }
+    .r-panel { border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+    .r-head { align-items:center; background:var(--navy); color:#fff; display:flex; justify-content:space-between; padding:14px 17px; }
+    .r-head p { color:#cfdfed; font-size:11px; line-height:1.5; margin:4px 0 0; }
+    .r-body { display:grid; grid-template-columns:1.1fr 1.5fr; }
+    .r-score { align-items:center; background:var(--blue-soft); display:flex; gap:18px; justify-content:center; padding:24px; }
+    .r-score div { text-align:center; } .r-score em { color:var(--muted); display:block; font-size:10px; font-style:normal; font-weight:800; }
+    .r-score strong { display:block; font-size:31px; margin-top:5px; } .r-score .after { color:var(--blue); }
+    .r-details { display:grid; grid-template-columns:repeat(2,1fr); padding:15px; } .r-details div { border-bottom:1px solid var(--line); padding:9px; }
+    .r-components { display:grid; gap:8px; grid-template-columns:repeat(4,1fr); padding:0 16px 16px; }
+    .r-components article { border:1px solid var(--line); border-radius:7px; padding:10px; } .r-components strong { display:block; font-size:15px; margin-top:4px; }
+    .formula { background:#f7f9fc; border-top:1px solid var(--line); color:var(--muted); font-size:11px; line-height:1.6; margin:0; padding:11px 16px; }
+    table { border-collapse:collapse; font-size:11px; line-height:1.5; width:100%; } th,td { border:1px solid var(--line); padding:9px; text-align:left; vertical-align:top; }
+    th { background:#edf3f9; color:#3d4b60; font-size:10px; } td strong { font-size:11px; } code,.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px; }
+    .status { border-radius:999px; display:inline-block; font-size:10px; font-weight:800; padding:4px 7px; white-space:nowrap; }
+    .passed { background:var(--green-soft); color:var(--green); } .failed { background:var(--red-soft); color:var(--red); } .inconclusive { background:var(--amber-soft); color:var(--amber); }
+    .metric-pair { display:grid; gap:8px; grid-template-columns:repeat(4,1fr); margin-top:12px; }
+    .metric-pair article { border:1px solid var(--line); border-radius:7px; padding:11px; } .metric-pair strong { display:block; font-size:15px; margin-top:5px; }
+    .change { border:1px solid var(--line); border-radius:8px; display:grid; grid-template-columns:1fr 1.1fr 1.8fr .7fr; margin-top:9px; }
+    .change > div { border-right:1px solid var(--line); padding:11px; } .change > div:last-child { border-right:0; }
+    .findings { display:grid; gap:10px; grid-template-columns:repeat(2,1fr); } .finding { border:1px solid var(--line); border-radius:8px; padding:14px; }
+    .finding ul { color:var(--muted); font-size:11px; line-height:1.7; margin:8px 0 0; padding-left:17px; }
+    .before-after { display:grid; gap:10px; grid-template-columns:1fr 34px 1fr; } .comparison { border:1px solid var(--line); border-radius:8px; padding:15px; }
+    .comparison.before { background:var(--red-soft); } .comparison.after { background:var(--green-soft); } .arrow { align-items:center; color:var(--blue); display:flex; font-size:23px; justify-content:center; }
+    .decision { align-items:center; background:var(--navy); border-radius:9px; color:#fff; display:flex; justify-content:space-between; padding:18px; }
+    .decision p { color:#d6e3ef; font-size:12px; line-height:1.65; margin:5px 0 0; max-width:760px; }
+    .decision-badge { background:#fff; border-radius:999px; color:var(--navy); font-size:11px; font-weight:900; padding:8px 11px; white-space:nowrap; }
+    .footnote { color:var(--muted); font-size:10px; line-height:1.6; margin-top:18px; }
+    @media print {
+      @page { margin:13mm 14mm; size:A4; }
+      html { background:#fff; } .toolbar { display:none; } .report { box-shadow:none; margin:0; max-width:none; padding:0; }
+      section { margin-top:25px; } h1 { font-size:27px; } .summary-card { min-height:88px; }
+      .section-head { break-after:avoid-page; }
+      .section-head,.callout,.summary-grid,.r-panel,.metric-pair,.change,.findings,.before-after,.decision { break-inside:avoid; }
+      thead { display:table-header-group; } tr { break-inside:avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="toolbar"><div><strong>ChaosLab 시스템 분석 및 수정 결과 보고서</strong><p>저장된 최종 회귀 데이터와 동일한 보고서입니다.</p></div><a href="/scenario-runs/{{ run.id }}/report.pdf">PDF 다운로드</a></header>
+  <main class="report">
+    <header>
+      <p class="eyebrow">ChaosLab · Service Reliability Assessment</p>
+      <h1>{{ app.name }} 시스템 분석 및 수정 결과 보고서</h1>
+      <p class="lead">동일한 카오스 시나리오를 개선 전과 개선 후에 수행하여 장애 상황의 요청 품질, 워크로드 가용성, 복구 능력과 최종 회귀 결과를 비교했습니다.</p>
+      <div class="cover-meta"><div><span>대상 서비스</span><strong>{{ app.name }}</strong></div><div><span>점검 환경</span><strong>{{ app.env|upper }} · {{ preparation.namespace }}</strong></div><div><span>검증 시나리오</span><strong>{{ scenario.title }}</strong></div><div><span>보고서 기준시각</span><strong>{{ generated_at.strftime('%Y. %m. %d. %H:%M') if generated_at else '-' }}</strong></div></div>
+    </header>
+
+    <section>
+      <div class="section-head"><b>1</b><h2>검증 결과 요약</h2></div>
+      <div class="callout"><p><strong>종합 결론.</strong> {{ narrative.get('executive_summary', run.error or '비교 가능한 최종 회귀 결과가 없습니다.') }}</p></div>
+      {% if comparison %}<div class="summary-grid"><article class="summary-card emphasis"><span class="label">최종 판정</span><strong>{{ '전체 통과' if comparison.verdict == 'passed' else ('기준 미충족' if comparison.verdict == 'failed' else '판정 불가 포함') }}</strong><p>{{ narrative.get('final_conclusion', '') }}</p></article><article class="summary-card"><span class="label">검증 시나리오</span><strong>{{ after.total }}건</strong><p>개선 전·후 동일 순서로 실행</p></article><article class="summary-card"><span class="label">적용 변경</span><strong>{{ changes|length }}건</strong><p>허용된 Deployment 설정만 적용</p></article><article class="summary-card"><span class="label">최종 검증</span><strong>{{ after.passed }} / {{ after.total }} 통과</strong><p>실패 {{ after.failed }}건 · 판정 불가 {{ after.inconclusive }}건</p></article></div>{% endif %}
+    </section>
+
+    {% if changes %}<section>
+      <div class="section-head"><b>2</b><h2>개선 조치 및 적용 현황</h2></div>
+      {% for item in changes %}<div class="change"><div><span class="label">변경 대상</span><strong>{{ item.deployment }}</strong><br><code>{{ item.container }}</code></div><div><span class="label">설정 변경</span><code>{{ item.key }}</code><br><strong>{{ item.before }} → {{ item.after }}</strong></div><div><span class="label">변경 목적</span><span>{{ item.reason }}</span></div><div><span class="label">적용 결과</span><span class="status {{ 'passed' if item.rollout_ready else 'failed' }}">{{ 'Rollout Ready' if item.rollout_ready else '적용 실패' }}</span></div></div>{% endfor %}
+      <p class="footnote">표시된 변경은 실제 Deployment에 적용되고 rollout Ready가 확인된 항목만 포함합니다. 변경 전 값은 실행 결과에 함께 보존됩니다.</p>
+    </section>{% endif %}
+
+    <section>
+      <div class="section-head"><b>3</b><h2>R 지수 (장애 대응 점수)</h2></div>
+      {% set before_r = r.get('before', {}) %}{% set after_r = r.get('after', {}) %}
+      <div class="r-panel"><div class="r-head"><div><h3>장애 대응 점수 비교</h3><p>동일 시나리오의 통과율, 필수 기준 충족도, 실제 요청 품질과 복구시간을 비교합니다.</p></div><strong>{{ after_r.get('version', 'R-1.0') }}</strong></div>
+        {% if before_r.get('available') and after_r.get('available') %}<div class="r-body"><div class="r-score"><div><em>개선 전</em><strong>{{ before_r.score }}점</strong></div><span>→</span><div><em>개선 후</em><strong class="after">{{ after_r.score }}점</strong></div></div><div class="r-details"><div><span class="label">증감</span><strong>{{ '+' if r.delta > 0 else '' }}{{ r.delta }}점</strong></div><div><span class="label">최종 등급</span><strong>{{ after_r.grade }} 등급</strong></div><div><span class="label">비교 대상</span><strong>동일 시나리오 {{ after.total }}건</strong></div><div><span class="label">데이터 출처</span><strong>HTTP probe · Kubernetes 상태</strong></div></div></div><div class="r-components">{% for key, label in [('P','검증 통과율'),('E','기준 충족도'),('H','요청 품질'),('T','복구시간')] %}<article><span class="label">{{ key }} · {{ label }}</span><strong>{{ (before_r.components[key] * 100)|round(1) }} → {{ (after_r.components[key] * 100)|round(1) }}</strong></article>{% endfor %}</div><p class="formula"><strong>산정 방식:</strong> {{ after_r.formula }}. 모든 구성값은 저장된 실제 관측 결과로 계산하며, 필수 관측이 누락된 회차는 산정하지 않습니다.</p>
+        {% else %}<div class="callout"><p><strong>산정 불가.</strong> {{ after_r.get('reason', before_r.get('reason', '개선 전후 비교 데이터가 없습니다.')) }}</p></div>{% endif %}
+      </div>
+    </section>
+
+    {% if comparison %}<section>
+      <div class="section-head"><b>4</b><h2>검증 범위 및 판정 기준</h2></div>
+      <table><thead><tr><th>시나리오</th><th>대상 / 장애</th><th>오류율 기준</th><th>p95 기준</th><th>Ready Pod</th><th>복구 기준</th></tr></thead><tbody>{% for spec in scenario.experiments %}<tr><td><strong>{{ spec.title }}</strong></td><td><code>{{ spec.target_selector['app.kubernetes.io/name'] }}</code><br>{{ spec.chaos_type }}</td><td>{{ spec.criteria.max_error_rate_pct }}% 이하</td><td>{{ spec.criteria.max_p95_latency_ms }}ms 이하</td><td>{{ spec.criteria.min_ready_pods }}개 이상</td><td>{{ spec.criteria.max_recovery_seconds }}초 이내</td></tr>{% endfor %}</tbody></table>
+      <p class="footnote">통과는 장애 주입, 장애 구간, 정리, 복구 후 관측이 모두 유효하고 모든 기준을 충족한 경우입니다. 관측 유효성이 부족하면 시스템 실패와 구분해 판정 불가로 기록합니다.</p>
+    </section>
+
+    <section>
+      <div class="section-head"><b>5</b><h2>시나리오별 검증 결과</h2></div>
+      <table><thead><tr><th>검증 시나리오</th><th>개선 전 관측</th><th>초기 판정</th><th>개선 후 관측</th><th>최종 판정</th></tr></thead><tbody>{% for item in scenario_comparisons %}<tr><td><strong>{{ item.title }}</strong><br><code>{{ item.id }}</code></td><td>오류율 {{ metric(item.before_metrics.error_rate_pct, '%') }}<br>p95 {{ metric(item.before_metrics.p95_latency_ms, 'ms') }}<br>Ready 최소 {{ metric(item.before_metrics.min_ready_pods, '개') }}<br>복구 {{ metric(item.before_metrics.recovery_seconds, '초') }}</td><td><span class="status {{ item.before_verdict }}">{{ verdict_ko(item.before_verdict) }}</span></td><td>오류율 {{ metric(item.after_metrics.error_rate_pct, '%') }}<br>p95 {{ metric(item.after_metrics.p95_latency_ms, 'ms') }}<br>Ready 최소 {{ metric(item.after_metrics.min_ready_pods, '개') }}<br>복구 {{ metric(item.after_metrics.recovery_seconds, '초') }}</td><td><span class="status {{ item.after_verdict }}">{{ verdict_ko(item.after_verdict) }}</span>{% if item.improved %}<br><small style="color:var(--green);">개선 확인</small>{% endif %}</td></tr>{% endfor %}</tbody></table>
+    </section>
+
+    {% set initial_issues = scenario_comparisons | rejectattr('before_verdict', 'equalto', 'passed') | list %}
+    {% if initial_issues %}<section>
+      <div class="section-head"><b>6</b><h2>확인된 이슈 및 판정 근거</h2></div>
+      <div class="findings"><article class="finding"><h3>초기 검증에서 확인된 항목</h3><ul>{% for item in initial_issues %}<li><strong>{{ item.title }}</strong>: {{ verdict_ko(item.before_verdict) }}{% if item.failed_checks_before %} · {{ item.failed_checks_before|join(', ') }}{% endif %}</li>{% endfor %}</ul></article><article class="finding"><h3>근거 범위</h3><ul><li>장애 전·장애 중·복구 후 HTTP 요청 상태와 응답시간</li><li>Pod Ready 최소값 및 컨테이너 재시작 변화</li><li>Chaos 리소스 주입 확인과 정리 완료 여부</li><li>각 실행 구간에 저장된 evidence ID</li></ul></article></div>
+    </section>{% endif %}
+
+    <section>
+      <div class="section-head"><b>7</b><h2>개선 전후 종합 비교</h2></div>
+      <div class="before-after"><article class="comparison before"><span class="label">개선 전</span><h3>{{ before.passed }} / {{ before.total }}개 시나리오 통과</h3><p>평균 오류율 {{ metric(before.error_rate_pct, '%') }}, 평균 p95 {{ metric(before.p95_latency_ms, 'ms') }}, 평균 복구시간 {{ metric(before.recovery_seconds, '초') }}로 관측됐습니다.</p></article><div class="arrow">→</div><article class="comparison after"><span class="label">개선 후</span><h3>{{ after.passed }} / {{ after.total }}개 시나리오 통과</h3><p>평균 오류율 {{ metric(after.error_rate_pct, '%') }}, 평균 p95 {{ metric(after.p95_latency_ms, 'ms') }}, 평균 복구시간 {{ metric(after.recovery_seconds, '초') }}로 관측됐습니다.</p></article></div>
+      <div class="metric-pair"><article><span class="label">통과율</span><strong>{{ before.pass_rate_pct }}% → {{ after.pass_rate_pct }}%</strong></article><article><span class="label">오류율</span><strong>{{ metric(before.error_rate_pct, '%') }} → {{ metric(after.error_rate_pct, '%') }}</strong></article><article><span class="label">p95</span><strong>{{ metric(before.p95_latency_ms, 'ms') }} → {{ metric(after.p95_latency_ms, 'ms') }}</strong></article><article><span class="label">복구시간</span><strong>{{ metric(before.recovery_seconds, '초') }} → {{ metric(after.recovery_seconds, '초') }}</strong></article></div>
+    </section>
+
+    <section>
+      <div class="section-head"><b>8</b><h2>최종 확인 결과</h2></div>
+      <table><thead><tr><th>검증 항목</th><th>개선 전</th><th>개선 후</th><th>결과</th></tr></thead><tbody><tr><td>전체 시나리오 통과율</td><td>{{ before.pass_rate_pct }}%</td><td>{{ after.pass_rate_pct }}%</td><td><span class="status {{ 'passed' if after.passed == after.total else 'failed' }}">{{ '기준 충족' if after.passed == after.total else '보완 필요' }}</span></td></tr><tr><td>장애 주입 및 정리</td><td>{{ baseline_results|selectattr('cleanup_completed','equalto',true)|list|length }} / {{ baseline_results|length }} 정리</td><td>{{ cleanup_count }} / {{ results|length }} 정리</td><td><span class="status {{ 'passed' if cleanup_count == results|length else 'failed' }}">{{ '완료' if cleanup_count == results|length else '미완료 포함' }}</span></td></tr><tr><td>R 지수</td><td>{{ metric(before_r.get('score'), '점') }}</td><td>{{ metric(after_r.get('score'), '점') }}</td><td><span class="status {{ 'passed' if r.get('delta') is not none and r.delta >= 0 else 'inconclusive' }}">{{ '향상 또는 유지' if r.get('delta') is not none and r.delta >= 0 else '산정 불가 또는 하락' }}</span></td></tr></tbody></table>
+      <div class="decision" style="margin-top:14px;"><div><span class="label">최종 처리 결과</span><h3>{{ '개선 적용 및 최종 회귀 통과' if comparison.verdict == 'passed' else ('최종 기준 보완 필요' if comparison.verdict == 'failed' else '추가 관측 필요') }}</h3><p>{{ narrative.get('final_conclusion', '') }}</p></div><span class="decision-badge">{{ '조치 완료' if comparison.verdict == 'passed' else '후속 확인 필요' }}</span></div>
+    </section>
+
+    {% if narrative.get('residual_risks') %}<section>
+      <div class="section-head"><b>9</b><h2>실패 및 잔여 사항</h2></div>
+      <div class="finding"><ul>{% for item in narrative.residual_risks %}<li>{{ item }}</li>{% endfor %}</ul></div>
+    </section>{% endif %}
+    {% endif %}
+
+    <footer class="footnote">본 보고서는 ScenarioRun {{ run.id }}에 저장된 개선 전·후 실행 결과, HTTP probe, Kubernetes 상태, 장애 주입 및 정리 기록을 기반으로 작성했습니다. PDF와 화면 보고서는 동일한 저장 스냅샷을 사용합니다.{% if narrative.get('source') == 'openai' %} 서술 문장은 {{ narrative.model }}이 확정 사실 범위에서 작성했습니다.{% endif %}</footer>
+  </main>
+</body>
+</html>

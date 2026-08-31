@@ -49,12 +49,11 @@ class RealBuilder:
         self.s = settings
 
     def _api(self):
-        from kubernetes import client, config  # lazy
+        from kubernetes import client  # lazy
 
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
-            config.load_kube_config()
+        from app.services.real.kube import load_kube
+
+        load_kube(self.s)
         return client.CustomObjectsApi()
 
     def trigger_build(self, req: BuildRequest) -> str:

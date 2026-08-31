@@ -151,7 +151,7 @@
         <label class="text-base font-bold mb-1 block">실험을 실행할 앱을 골라 주세요</label>
         {% for a in apps %}
         <label class="tds-card p-4 cursor-pointer app-pick-card flex items-center gap-3">
-          <input type="radio" name="app_id" value="{{ a.id }}" class="sr-only" {% if loop.first %}checked{% endif %} />
+          <input type="radio" name="app_id" value="{{ a.id }}" data-app-name="{{ a.name }}" class="sr-only" {% if loop.first %}checked{% endif %} />
           {{ framework_icon(a.framework, 24) }}
           <div class="flex-1 min-w-0">
             <div class="font-bold">{{ a.name }}</div>
@@ -199,10 +199,7 @@
           다음
           <iconify-icon icon="lucide:arrow-right" width="16"></iconify-icon>
         </button>
-        <button type="button" class="tds-btn-primary text-base hidden" data-wiz-submit
-                hx-get="/experiments/1?view=plan"
-                hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
-                onclick="closeDialog('newExperiment')">
+        <button type="button" class="tds-btn-primary text-base hidden" data-wiz-submit data-candidate-request>
           <iconify-icon icon="solar:magic-stick-3-bold" width="16"></iconify-icon>
           후보 생성 요청할게요
         </button>

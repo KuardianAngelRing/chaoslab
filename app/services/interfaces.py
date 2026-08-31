@@ -1,5 +1,6 @@
 """외부 시스템 계약. 라우터는 이 Protocol에만 의존(DIP). Slice 1=Stub, 이후=Real로 교체."""
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, TypedDict
 
 
@@ -60,13 +61,27 @@ class K3sWorkloadService(Protocol):
         """ns 안 Deployment 전부 ready될 때까지 대기. 타임아웃이면 False."""
         ...
 
+    def readiness(self, namespace: str) -> dict:
+        """2단계 UI가 보여줄 Deployment/Pod 준비 상태 스냅샷."""
+        ...
+
+    def probe_http(self, namespace: str, service: str, path: str) -> dict:
+        """API server의 Service proxy로 사용자 경로를 1회 호출한다."""
+        ...
+
+    def apply_deployment_env(self, namespace: str, deployment: str, container: str,
+                             key: str, value: str, timeout_s: int = 180) -> dict:
+        """허용된 Deployment 환경변수를 변경하고 rollout 완료까지 확인한다."""
+        ...
+
     def teardown(self, namespace: str) -> None:
         """ns 통째 삭제 (idempotent — 이미 없으면 성공)."""
         ...
 
 
 class ChaosService(Protocol):
-    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
+    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict,
+               target_selector: dict[str, str] | None = None) -> str:
         """Chaos CRD 생성 (selector = app 라벨). CRD 이름 반환."""
         ...
 
@@ -79,6 +94,14 @@ class ChaosService(Protocol):
 
 
 class PrometheusService(Protocol):
+    def phase_summary(self, namespace: str, app_name: str, phase: str,
+                      start: datetime, end: datetime) -> dict:
+        """[start, end] 구간 소급 집계 — PhaseSummary 계약과 동일 키.
+
+        recovery_seconds는 항상 None으로 반환(구간 경계를 아는 호출자가 채움).
+        """
+        ...
+
     def red_metrics(self, namespace: str) -> dict:
         """rate/error/duration(p99) 반환."""
         ...
@@ -167,4 +190,28 @@ class HandoffSourceService(Protocol):
 
     def error_logs(self, namespace: str, app_name: str, limit: int = 20) -> list[str]:
         """중복 제거된 에러 로그 샘플, 최대 limit개."""
+        ...
+
+
+class HypothesisAgentService(Protocol):
+    """가설 수립 에이전트 (ADR-0010) — 조립 페이로드 → 순수 추론, 도구 없음.
+
+    반환은 검증 전 원시 JSON 호환 데이터 — 검증·재시도는 hypothesis_validation
+    공통 함수가 담당(Stub·Real 동일 적용). feedback은 교정 재시도용 오류 요약.
+    """
+
+    def generate(self, payload, feedback: str = "") -> list:
+        """서사형 후보 N개(params 없음) — CandidateProposal 호환 dict 배열."""
+        ...
+
+    def concretize(self, payload, user_text: str, feedback: str = "") -> dict:
+        """직접 입력 텍스트 → 후보 1개 — CandidateProposal 호환 dict."""
+        ...
+
+    def detail(self, payload, candidate, feedback: str = "") -> dict:
+        """선택 후보의 params 구체화 — DetailingResult 호환 dict."""
+        ...
+
+    def snapshot(self) -> dict:
+        """{"model_name": str, "cli_version": str} — 재현성 기록(하이브리드 4)."""
         ...

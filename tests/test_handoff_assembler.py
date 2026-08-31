@@ -43,6 +43,23 @@ def test_stored_contract_metrics_win_over_stub(db_session):
     assert payload.phase_summaries.baseline.rps_avg == 999.0
 
 
+def test_r_breakdown_is_computed_not_placeholder(db_session):
+    """항목별 점수가 자리값이 아니라 페이로드의 phase_summaries로 계산된 값."""
+    from app.services import r_index
+
+    exp = _seeded_exp(db_session)
+    payload = assemble_handoff(db_session, StubHandoffSource(), exp)
+
+    expected = r_index.compute(
+        payload.phase_summaries.baseline.model_dump(),
+        payload.phase_summaries.fault.model_dump(),
+        payload.phase_summaries.recovery.model_dump(),
+    )
+    assert payload.r_index.availability == expected["availability"]
+    assert payload.r_index.latency_score == expected["latency_score"]
+    assert payload.r_index.recovery_score == expected["recovery_score"]
+
+
 def test_legacy_metrics_fall_back_to_stub(db_session):
     """seed의 구형 {"error","p99"} 형태는 계약 불일치 → Stub 샘플로 대체."""
     exp = _seeded_exp(db_session)

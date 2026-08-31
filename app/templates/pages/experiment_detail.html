@@ -8,18 +8,32 @@
   "verify": {"index": 3, "label": "최종 회귀 검증", "status": "검증 예시"},
   "result": {"index": 4, "label": "결과", "status": "완료 · 보완 필요"}
 } %}
+{% macro show_metric(value, suffix='') %}{{ '관측 없음' if value is none else value ~ suffix }}{% endmacro %}
 {% set run_id = request.path_params.get("exp_id", 1)|int %}
 {% set run_meta = {
   1: {"code":"CL-042", "current":1, "current_label":"후보 선택", "status":"선택 필요", "badge":"badge-warning", "default_view":"plan", "selected":[]},
   2: {"code":"CL-041", "current":2, "current_label":"순차 실행·개선", "status":"실행 예시", "badge":"badge-info", "default_view":"execute", "selected":["frontend", "catalog"]},
   3: {"code":"CL-040", "current":4, "current_label":"결과", "status":"완료 · 보완 필요", "badge":"badge-warning", "default_view":"result", "selected":["frontend", "catalog"]}
 } %}
-{% set run = run_meta.get(run_id) %}
+{% if scenario_run %}
+  {% set scenario_verdict = (scenario_run.comparison or {}).get('verdict', '') %}
+  {% set run = {
+    "code": "CL-R" ~ scenario_run.id,
+    "current": 4 if scenario_run.status in ["completed", "failed"] else 3,
+    "current_label": "결과" if scenario_run.status in ["completed", "failed"] else "최종 회귀 검증",
+    "status": ("전체 통과" if scenario_verdict == "passed" else ("기준 미충족" if scenario_verdict == "failed" else "판정 불가 포함")) if scenario_run.status == "completed" else ("실행 실패" if scenario_run.status == "failed" else "진행 중"),
+    "badge": ("badge-success" if scenario_verdict == "passed" else ("badge-danger" if scenario_verdict == "failed" else "badge-warning")) if scenario_run.status == "completed" else ("badge-danger" if scenario_run.status == "failed" else "badge-info"),
+    "default_view": "verify",
+    "selected": []
+  } %}
+{% else %}
+  {% set run = run_meta.get(run_id) %}
+{% endif %}
 {% set requested_view = request.query_params.get("view", run.default_view) %}
 {% if requested_view not in stage_meta or stage_meta[requested_view].index > run.current %}{% set view = run.default_view %}{% else %}{% set view = requested_view %}{% endif %}
 {% set active = stage_meta.get(view) %}
 
-<div class="max-w-7xl mx-auto px-8 py-8" data-workflow-shell data-initial-stage="{{ view }}" data-workflow-current-stage="{{ run.current }}" data-workflow-run-id="{{ run_id }}" data-workflow-max-selected="3">
+<div class="max-w-7xl mx-auto px-8 py-8" data-workflow-shell data-initial-stage="{{ view }}" data-workflow-current-stage="{{ run.current }}" data-workflow-run-id="{{ run_id }}" data-workflow-max-selected="3"{% if scenario_run %} data-scenario-run-id="{{ scenario_run.id }}"{% endif %}{% if workflow_app %} data-workflow-app-id="{{ workflow_app.id }}" data-workflow-app-env="{{ workflow_app.env }}" data-workflow-objective="{{ workflow_objective }}"{% endif %}>
   <div class="flex items-center gap-3 mb-3">
     <button type="button" class="p-2 rounded-xl hover:bg-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" style="color: var(--muted-foreground);" aria-label="카오스 테스트 목록으로">
       <iconify-icon icon="lucide:arrow-left" width="18"></iconify-icon>
@@ -191,6 +205,30 @@
         {"id":"custom", "title":"Checkout 메모리 압박과 OOM 회복", "target":"checkoutservice · memory-stress", "error_before":"3.6%", "error_after":"0.7%", "latency_before":"742ms", "latency_after":"326ms", "recovery_before":"81s", "recovery_after":"47s", "analysis":"메모리 압박 중 GC 지연 뒤 재시작이 발생하며 요청 실패가 집중됐습니다. 메모리 request와 회복 여유를 조정한 뒤 같은 memory stress 조건으로 재검증했습니다.", "change":"memory request 256Mi", "validation":"manifest · rollout 통과"}
       ] %}
       <section data-tab-content="execute" data-tab-group="workflow" class="{% if view == 'execute' %}active{% endif %} space-y-4">
+        {% if workflow_app and workflow_app.env == "k3s" %}
+        <details class="tds-card" data-preparation-panel>
+          <summary class="px-5 py-3.5 cursor-pointer flex items-center gap-3">
+            <iconify-icon icon="solar:rocket-2-bold" width="18" style="color: var(--primary);" data-prepare-spinner></iconify-icon>
+            <span class="text-sm font-extrabold flex-1" data-prepare-message>실험 환경 준비 대기</span>
+            <span class="tds-badge badge-info" data-prepare-status>순차 실행 시 시작</span>
+            <iconify-icon icon="solar:alt-arrow-down-linear" width="14" style="color: var(--muted-foreground);"></iconify-icon>
+          </summary>
+          <div class="px-5 pb-4 divide-y border-t" style="border-color: var(--border);">
+            <div class="py-3.5 flex items-center gap-3 text-xs">
+              <iconify-icon icon="solar:box-minimalistic-bold" width="17" style="color: var(--primary);"></iconify-icon>
+              <span class="flex-1">전용 namespace 생성 및 manifest 적용</span>
+              <span class="mono" style="color: var(--muted-foreground);" data-prepare-namespace></span>
+            </div>
+            <div class="py-3.5 flex items-center gap-3 text-xs">
+              <iconify-icon icon="solar:check-circle-bold" width="17" style="color: var(--primary);"></iconify-icon>
+              <span class="flex-1">Deployment와 Pod Ready 확인</span>
+              <span class="mono" style="color: var(--muted-foreground);" data-prepare-pods></span>
+            </div>
+            <div class="hidden py-3.5 text-xs" style="color: var(--warning);" data-prepare-blockers></div>
+            <div class="hidden py-3.5 text-xs" style="color: var(--danger);" data-prepare-error></div>
+          </div>
+        </details>
+        {% endif %}
         <div class="min-w-0">
             {% for sample in execution_samples %}
             <div class="tds-card p-5 hidden" data-candidate-execution="{{ sample.id }}" style="border-color: var(--primary);">
@@ -219,63 +257,80 @@
 
         <div class="flex justify-between">
           <button type="button" class="tds-btn-muted" data-workflow-go="plan"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>후보 다시 보기</button>
-          <button type="button" class="tds-btn-primary" data-workflow-go="verify" data-workflow-preview-unlock>최종 회귀 검증 시안 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
+          <button type="button" class="tds-btn-primary" data-workflow-go="verify" data-regression-start>최종 회귀 검증 시작<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
         </div>
       </section>
 
       <section data-tab-content="verify" data-tab-group="workflow" class="{% if view == 'verify' %}active{% endif %} space-y-4">
         <div class="tds-card p-6">
           <div class="flex items-start justify-between gap-5">
-            <div><div class="flex items-center gap-2"><span class="tds-badge badge-info">3단계</span><h2 class="text-xl font-extrabold">누적 개선 상태에서 전체 시나리오를 다시 확인해요</h2></div><p class="text-sm mt-2" style="color: var(--muted-foreground);">각 실험의 마지막 결과를 이어 붙이지 않고, 모든 변경이 누적된 최종 시스템에서 선택한 시나리오를 다시 순차 검증합니다.</p></div>
-            <div class="text-right shrink-0"><div class="text-2xl font-extrabold" style="color: var(--success);">2/2</div><div class="text-[11px]" style="color: var(--muted-foreground);">회귀 검증 완료 예시</div></div>
+            <div><div class="flex items-center gap-2"><span class="tds-badge badge-info">3단계</span><h2 class="text-xl font-extrabold">개선 전후 최종 회귀 실행</h2></div><p class="text-sm mt-2" style="color: var(--muted-foreground);" data-regression-message>{{ '개선 전후 최종 회귀 검증이 완료됐습니다' if scenario_run and scenario_run.status == 'completed' else ('최종 회귀 검증을 완료하지 못했습니다' if scenario_run and scenario_run.status == 'failed' else (scenario_run.progress.message if scenario_run else '최종 회귀 검증을 시작해 주세요')) }}</p></div>
+            <div class="text-right shrink-0"><div class="text-2xl font-extrabold" data-regression-count>{{ (scenario_run.results | selectattr('status', 'equalto', 'passed') | list | length) if scenario_run else 0 }}/{{ (scenario_run.scenario.experiments|length) if scenario_run else 0 }}</div><div class="text-[11px]" style="color: var(--muted-foreground);">최종 통과</div></div>
           </div>
-          <div class="progress-track mt-5"><div class="progress-fill" style="width: 100%;"></div></div>
+          <div class="progress-track mt-5"><div class="progress-fill" data-regression-progress style="width: {{ (((scenario_run.baseline_results|length + scenario_run.results|length) / (scenario_run.scenario.experiments|length * 2) * 100)) if scenario_run and scenario_run.scenario.experiments else 0 }}%;"></div></div>
         </div>
 
         <div class="tds-card overflow-hidden">
-          <div class="px-5 py-4 flex items-center justify-between border-b" style="border-color: var(--border);"><h3 class="font-extrabold">최종 검증 시나리오</h3><span class="text-xs" style="color: var(--muted-foreground);">기준 버전 a32f6c91 + 누적 변경 1건</span></div>
+          <div class="px-5 py-4 flex items-center justify-between border-b" style="border-color: var(--border);"><h3 class="font-extrabold">{{ scenario_run.scenario.title if scenario_run else "최종 회귀 시나리오" }}</h3><span class="tds-badge {{ run.badge if scenario_run else 'badge-info' }}" data-regression-status>{{ run.status if scenario_run else "실행 전" }}</span></div>
           <table class="w-full text-sm">
-            <thead style="background: var(--muted);"><tr class="text-xs text-left" style="color: var(--muted-foreground);"><th class="px-5 py-3">시나리오</th><th class="px-5 py-3 text-center">정리</th><th class="px-5 py-3 text-center">오류율</th><th class="px-5 py-3 text-center">p95</th><th class="px-5 py-3 text-center">회복</th><th class="px-5 py-3 text-center">최종 판정</th></tr></thead>
-            <tbody>
-              <tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4"><b>Frontend Pod 1개 손실</b><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">동일 강도 · 90초 관측</div></td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">확인</span></td><td class="px-5 py-4 text-center font-bold">0.7%</td><td class="px-5 py-4 text-center font-bold">292ms</td><td class="px-5 py-4 text-center font-bold">41s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">통과</span></td></tr>
-              <tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4"><b>Product Catalog 800ms 지연</b><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">관측 샘플 일부 누락</div></td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">확인</span></td><td class="px-5 py-4 text-center font-bold">0.8%</td><td class="px-5 py-4 text-center font-bold">—</td><td class="px-5 py-4 text-center font-bold">46s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-warning">검증 불충분</span></td></tr>
+            <thead style="background: var(--muted);"><tr class="text-xs text-left" style="color: var(--muted-foreground);"><th class="px-5 py-3">실험</th><th class="px-5 py-3">대상</th><th class="px-5 py-3">장애</th><th class="px-5 py-3 text-center">개선 전</th><th class="px-5 py-3 text-center">최종 회귀</th></tr></thead>
+            <tbody data-regression-results>
+              {% if scenario_run %}{% for spec in scenario_run.scenario.experiments %}
+              {% set before_item = (scenario_run.baseline_results | selectattr('scenario_experiment_id', 'equalto', spec.id) | list | first) %}
+              {% set final_item = (scenario_run.results | selectattr('scenario_experiment_id', 'equalto', spec.id) | list | first) %}
+              {% set current = scenario_run.progress.experiment_id == spec.id %}
+              {% set badge_map = {'passed':'badge-success', 'failed':'badge-danger', 'inconclusive':'badge-warning'} %}
+              {% set label_map = {'passed':'통과', 'failed':'실패', 'inconclusive':'판정 불가'} %}
+              {% set before_running = current and scenario_run.progress.round == 'baseline' %}
+              {% set final_running = current and scenario_run.progress.round == 'final' %}
+              <tr class="border-t" style="border-color: var(--border);" data-regression-scenario-id="{{ spec.id }}"><td class="px-5 py-4"><b>{{ spec.title }}</b>{% if final_item and final_item.crd_name %}<div class="text-[11px] mono mt-1" style="color: var(--muted-foreground);">{{ final_item.crd_name }}</div>{% endif %}</td><td class="px-5 py-4 text-xs mono">{{ spec.target_selector["app.kubernetes.io/name"] }}</td><td class="px-5 py-4 text-xs">{{ spec.chaos_type }}</td><td class="px-5 py-4 text-center"><span class="tds-badge {{ badge_map.get(before_item.status, 'badge-info' if before_running else 'badge-muted') if before_item else ('badge-info' if before_running else 'badge-muted') }}">{{ label_map.get(before_item.status, '판정 불가') if before_item else ('진행 중' if before_running else '대기') }}</span></td><td class="px-5 py-4 text-center"><span class="tds-badge {{ badge_map.get(final_item.status, 'badge-warning') if final_item else ('badge-info' if final_running or scenario_run.progress.round == 'improvement' else 'badge-muted') }}">{{ label_map.get(final_item.status, '판정 불가') if final_item else ('진행 중' if final_running else ('개선 적용 중' if scenario_run.progress.round == 'improvement' else '대기')) }}</span></td></tr>
+              {% endfor %}{% endif %}
             </tbody>
           </table>
+          <div class="px-5 py-8 text-center text-sm {% if scenario_run and scenario_run.scenario.experiments %}hidden{% endif %}" style="color: var(--muted-foreground);" data-regression-empty>{{ "첫 번째 실험을 준비하고 있습니다." if scenario_run else "실행 결과가 여기에 표시됩니다." }}</div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4">
-          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-3"><iconify-icon icon="solar:code-square-bold" width="20" style="color: var(--primary);"></iconify-icon><h3 class="font-extrabold">누적 변경</h3></div><div class="p-3 rounded-xl text-sm" style="background: var(--muted);"><b>frontend deployment</b><div class="text-xs mt-1" style="color: var(--muted-foreground);">preStop hook · terminationGracePeriod 30s</div></div></div>
-          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-3"><iconify-icon icon="solar:danger-triangle-bold" width="20" style="color: var(--warning);"></iconify-icon><h3 class="font-extrabold">판정 원칙</h3></div><p class="text-xs leading-5" style="color: var(--muted-foreground);">메트릭 누락은 시스템 실패로 단정하지 않고 <b style="color: var(--warning);">검증 불충분</b>으로 분리합니다. 이 경우 자동 개선을 만들지 않습니다.</p></div>
-        </div>
-
-        <div class="flex justify-end"><button type="button" class="tds-btn-primary" data-workflow-go="result" data-workflow-preview-unlock>결과 화면 시안 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button></div>
+        <div class="tds-card p-4 hidden" style="border-color: var(--danger);" data-regression-error></div>
+        <div class="flex justify-end"><button type="button" class="tds-btn-primary disabled:opacity-40 disabled:cursor-not-allowed" data-regression-result {% if not scenario_run or scenario_run.status not in ["completed", "failed"] %}disabled{% endif %}>결과 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button></div>
       </section>
 
       <section data-tab-content="result" data-tab-group="workflow" class="{% if view == 'result' %}active{% endif %} space-y-4">
+        {% if scenario_run and scenario_run.status in ["completed", "failed"] %}
+        {% set comparison = scenario_run.comparison or {} %}
+        {% set before = comparison.get('before', {}) %}
+        {% set after = comparison.get('after', {}) %}
+        {% set r = comparison.get('r', {}) %}
+        {% set before_r = r.get('before', {}) %}
+        {% set after_r = r.get('after', {}) %}
+        {% set narrative = scenario_run.report_content or {} %}
         <div class="tds-card p-6" style="background: var(--primary-soft); border-color: var(--primary);">
-          <div class="flex items-start justify-between gap-5"><div><div class="flex items-center gap-2"><span class="tds-badge badge-warning">4단계</span><h2 class="text-xl font-extrabold" style="color: var(--primary-soft-foreground);">완료했지만, 관측 보완이 1건 필요해요</h2></div><p class="text-sm mt-2" style="color: var(--primary-soft-foreground);">Pod 손실 시나리오는 목표를 충족했습니다. Catalog 지연은 p95 샘플 누락으로 통과·실패를 확정하지 않았습니다.</p></div><span class="tds-badge badge-warning">완료 · 보완 필요</span></div>
+          <div class="flex items-start justify-between gap-5"><div><div class="flex items-center gap-2"><span class="tds-badge {{ run.badge }}">4단계</span><h2 class="text-xl font-extrabold" style="color: var(--primary-soft-foreground);">{{ '복원력 개선 및 최종 회귀 통과' if comparison.get('verdict') == 'passed' else ('최종 회귀 기준 미충족' if comparison.get('verdict') == 'failed' else ('일부 시나리오 판정 불가' if comparison else '최종 회귀 실행 실패')) }}</h2></div><p class="text-sm mt-2 max-w-4xl leading-6" style="color: var(--primary-soft-foreground);">{{ narrative.get('executive_summary', scenario_run.error or '실행 결과를 바탕으로 최종 보고서를 구성했습니다.') }}</p></div><span class="tds-badge {{ run.badge }}">{{ run.status }}</span></div>
         </div>
 
-        <div class="grid grid-cols-4 gap-3">
-          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">최종 통과</div><div class="text-2xl font-extrabold mt-2" style="color: var(--success);">1</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">선택 시나리오 2개</div></div>
-          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">검증 불충분</div><div class="text-2xl font-extrabold mt-2" style="color: var(--warning);">1</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">p95 샘플 누락</div></div>
-          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">적용 변경</div><div class="text-2xl font-extrabold mt-2">1</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">rollback 0건</div></div>
-          <div class="tds-card p-5"><div class="text-xs font-bold" style="color: var(--muted-foreground);">예시 비용</div><div class="text-2xl font-extrabold mt-2">$0.84</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">실제 청구 없음</div></div>
+        {% if comparison %}
+        <div class="grid grid-cols-3 gap-4">
+          <div class="tds-card p-5 col-span-1"><span class="text-xs font-bold" style="color: var(--muted-foreground);">R 지수 · {{ after_r.get('version', 'R-1.0') }}</span><div class="flex items-end gap-3 mt-3"><span class="text-3xl font-extrabold">{{ before_r.score if before_r.get('available') else '산정 불가' }}</span><iconify-icon icon="solar:arrow-right-linear" width="22" style="color: var(--muted-foreground);"></iconify-icon><span class="text-4xl font-extrabold" style="color: var(--primary);">{{ after_r.score if after_r.get('available') else '산정 불가' }}</span></div>{% if r.get('delta') is not none %}<p class="text-sm font-bold mt-2" style="color: {{ 'var(--success)' if r.delta > 0 else ('var(--danger)' if r.delta < 0 else 'var(--muted-foreground)') }};">{{ '+' if r.delta > 0 else '' }}{{ r.delta }}점 · {{ after_r.grade }} 등급</p>{% else %}<p class="text-xs mt-2" style="color: var(--muted-foreground);">{{ after_r.get('reason', before_r.get('reason', '비교 데이터가 없습니다')) }}</p>{% endif %}</div>
+          <div class="tds-card p-5 col-span-2"><div class="grid grid-cols-4 gap-4 text-sm"><div><span class="block text-xs" style="color: var(--muted-foreground);">시나리오 통과율</span><b class="block mt-2 text-lg">{{ before.get('pass_rate_pct', 0) }}% → {{ after.get('pass_rate_pct', 0) }}%</b></div><div><span class="block text-xs" style="color: var(--muted-foreground);">평균 오류율</span><b class="block mt-2 text-lg">{{ show_metric(before.get('error_rate_pct'), '%') }} → {{ show_metric(after.get('error_rate_pct'), '%') }}</b></div><div><span class="block text-xs" style="color: var(--muted-foreground);">평균 p95</span><b class="block mt-2 text-lg">{{ show_metric(before.get('p95_latency_ms'), 'ms') }} → {{ show_metric(after.get('p95_latency_ms'), 'ms') }}</b></div><div><span class="block text-xs" style="color: var(--muted-foreground);">평균 복구시간</span><b class="block mt-2 text-lg">{{ show_metric(before.get('recovery_seconds'), '초') }} → {{ show_metric(after.get('recovery_seconds'), '초') }}</b></div></div></div>
         </div>
 
-        <div class="tds-card overflow-hidden">
-          <div class="px-5 py-4 border-b" style="border-color: var(--border);"><h3 class="font-extrabold">최초 관측과 최종 회귀 비교</h3></div>
-          <table class="w-full text-sm"><thead style="background: var(--muted);"><tr class="text-xs text-left" style="color: var(--muted-foreground);"><th class="px-5 py-3">시나리오</th><th class="px-5 py-3">최초 관측</th><th class="px-5 py-3">최종 회귀</th><th class="px-5 py-3 text-center">판정</th><th class="px-5 py-3">근거</th></tr></thead><tbody><tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4 font-bold">Frontend Pod 손실</td><td class="px-5 py-4 text-xs">오류 3.8% · p95 612ms · 74s</td><td class="px-5 py-4 text-xs">오류 0.7% · p95 292ms · 41s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-success">통과</span></td><td class="px-5 py-4 mono text-xs">EV-042-REG-01</td></tr><tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4 font-bold">Catalog 800ms 지연</td><td class="px-5 py-4 text-xs">오류 1.3% · p95 944ms · 52s</td><td class="px-5 py-4 text-xs">오류 0.8% · p95 — · 46s</td><td class="px-5 py-4 text-center"><span class="tds-badge badge-warning">검증 불충분</span></td><td class="px-5 py-4 mono text-xs">EV-042-REG-02</td></tr></tbody></table>
-        </div>
+        {% if before_r.get('available') and after_r.get('available') %}
+        <div class="tds-card p-5"><div class="flex items-center justify-between"><h3 class="font-extrabold">R 지수 구성점수</h3><span class="text-xs mono" style="color: var(--muted-foreground);">{{ after_r.formula }}</span></div><div class="grid grid-cols-4 gap-4 mt-4">{% for key, label in [('P','검증 통과율'),('E','판정 기준 충족도'),('H','요청 품질'),('T','복구시간')] %}<div class="rounded-xl border p-4" style="border-color: var(--border);"><span class="text-xs font-bold" style="color: var(--muted-foreground);">{{ key }} · {{ label }}</span><div class="mt-2 font-extrabold text-lg">{{ (before_r.components[key] * 100)|round(1) }} → <span style="color: var(--primary);">{{ (after_r.components[key] * 100)|round(1) }}</span></div></div>{% endfor %}</div></div>
+        {% endif %}
 
-        <div class="grid grid-cols-2 gap-4">
-          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-4"><iconify-icon icon="solar:branching-paths-up-bold" width="20" style="color: var(--primary);"></iconify-icon><h3 class="font-extrabold">변경 이력</h3></div><div class="relative pl-5 border-l-2" style="border-color: var(--border);"><div class="mb-4"><span class="absolute -left-2.5 w-4 h-4 rounded-full" style="background: var(--danger);"></span><b class="text-sm">초기 판정 실패</b><p class="text-xs mt-1" style="color: var(--muted-foreground);">Pod 손실 · error rate 3.8%</p></div><div class="mb-4"><span class="absolute -left-2.5 w-4 h-4 rounded-full" style="background: var(--primary);"></span><b class="text-sm">변경 #P-017 적용</b><p class="text-xs mt-1" style="color: var(--muted-foreground);">preStop + grace period</p></div><div><span class="absolute -left-2.5 w-4 h-4 rounded-full" style="background: var(--success);"></span><b class="text-sm">최종 회귀 통과</b><p class="text-xs mt-1" style="color: var(--muted-foreground);">동일 Pod 손실 조건</p></div></div></div>
-          <div class="tds-card p-5"><div class="flex items-center gap-2 mb-4"><iconify-icon icon="solar:clipboard-remove-bold" width="20" style="color: var(--warning);"></iconify-icon><h3 class="font-extrabold">남은 확인 사항</h3></div><div class="p-4 rounded-2xl" style="background: rgba(245,158,11,.10);"><div class="flex gap-3"><iconify-icon icon="solar:danger-triangle-bold" width="18" style="color: var(--warning);"></iconify-icon><div><b class="text-sm">Catalog p95 메트릭 재수집</b><p class="text-xs mt-1 leading-5" style="color: var(--muted-foreground);">최종 회귀 구간의 24초 샘플이 비었습니다. 관측 경로를 확인한 뒤 같은 조건으로 다시 검증해야 합니다.</p></div></div></div></div>
-        </div>
+        <div class="tds-card overflow-hidden"><div class="px-5 py-4 border-b" style="border-color: var(--border);"><h3 class="font-extrabold">시나리오별 개선 전후 비교</h3></div><table class="w-full text-sm"><thead style="background: var(--muted);"><tr class="text-xs text-left" style="color: var(--muted-foreground);"><th class="px-5 py-3">시나리오</th><th class="px-5 py-3 text-center">개선 전</th><th class="px-5 py-3">관측값 변화</th><th class="px-5 py-3 text-center">개선 후</th></tr></thead><tbody>{% for item in comparison.scenarios %}<tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4"><b>{{ item.title }}</b>{% if item.improved %}<div class="text-[11px] mt-1" style="color: var(--success);">동일 조건 개선 확인</div>{% endif %}</td><td class="px-5 py-4 text-center"><span class="tds-badge {{ 'badge-success' if item.before_verdict == 'passed' else ('badge-danger' if item.before_verdict == 'failed' else 'badge-warning') }}">{{ '통과' if item.before_verdict == 'passed' else ('실패' if item.before_verdict == 'failed' else '판정 불가') }}</span></td><td class="px-5 py-4 text-xs"><div>오류율 {{ show_metric(item.before_metrics.error_rate_pct, '%') }} → <b>{{ show_metric(item.after_metrics.error_rate_pct, '%') }}</b></div><div class="mt-1">p95 {{ show_metric(item.before_metrics.p95_latency_ms, 'ms') }} → <b>{{ show_metric(item.after_metrics.p95_latency_ms, 'ms') }}</b> · 복구 {{ show_metric(item.before_metrics.recovery_seconds, '초') }} → <b>{{ show_metric(item.after_metrics.recovery_seconds, '초') }}</b></div></td><td class="px-5 py-4 text-center"><span class="tds-badge {{ 'badge-success' if item.after_verdict == 'passed' else ('badge-danger' if item.after_verdict == 'failed' else 'badge-warning') }}">{{ '통과' if item.after_verdict == 'passed' else ('실패' if item.after_verdict == 'failed' else '판정 불가') }}</span></td></tr>{% endfor %}</tbody></table></div>
 
-        <details class="tds-card p-5"><summary class="cursor-pointer flex items-center gap-3"><iconify-icon icon="solar:document-text-bold" width="20" style="color: var(--primary);"></iconify-icon><span class="font-extrabold flex-1">보고서 미리보기</span><span class="text-xs" style="color: var(--muted-foreground);">화면 안에서만 펼쳐집니다</span><iconify-icon icon="solar:alt-arrow-down-linear" width="16"></iconify-icon></summary><div class="mt-4 pt-4 border-t text-sm leading-6" style="border-color: var(--border); color: var(--muted-foreground);"><b style="color: var(--foreground);">요약</b> — Checkout 복원력 목표 중 Pod 손실 시나리오는 누적 개선 후 충족했습니다. Catalog 지연 시나리오는 오류율과 회복 시간은 기준 안이지만 p95 관측 누락으로 검증 불충분입니다. 적용 변경 1건은 유지하며 재수집을 후속 작업으로 남깁니다.</div></details>
+        {% if comparison.changes %}
+        <div class="tds-card overflow-hidden"><div class="px-5 py-4 border-b" style="border-color: var(--border);"><h3 class="font-extrabold">실제 적용된 개선 조치</h3></div><table class="w-full text-sm"><thead style="background: var(--muted);"><tr class="text-xs text-left" style="color: var(--muted-foreground);"><th class="px-5 py-3">대상</th><th class="px-5 py-3">변경</th><th class="px-5 py-3">목적</th><th class="px-5 py-3 text-center">검증</th></tr></thead><tbody>{% for item in comparison.changes %}<tr class="border-t" style="border-color: var(--border);"><td class="px-5 py-4"><b>{{ item.deployment }}</b><div class="text-[11px] mono mt-1">{{ item.container }}</div></td><td class="px-5 py-4 mono text-xs">{{ item.key }}<br>{{ item.before }} → <b>{{ item.after }}</b></td><td class="px-5 py-4 text-xs">{{ item.reason }}</td><td class="px-5 py-4 text-center"><span class="tds-badge {{ 'badge-success' if item.rollout_ready else 'badge-danger' }}">{{ 'Rollout Ready' if item.rollout_ready else '적용 실패' }}</span></td></tr>{% endfor %}</tbody></table></div>
+        {% endif %}
 
-        <div class="flex justify-between"><button type="button" class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>실험 목록으로</button><span class="text-xs self-center" style="color: var(--muted-foreground);">다운로드·저장 기능은 연결하지 않았습니다.</span></div>
+        {% if narrative.get('key_findings') %}<div class="tds-card p-5"><h3 class="font-extrabold">핵심 결과</h3><ul class="mt-3 space-y-2 text-sm" style="color: var(--muted-foreground);">{% for item in narrative.key_findings %}<li class="flex gap-2"><span style="color: var(--primary);">•</span><span>{{ item }}</span></li>{% endfor %}</ul></div>{% endif %}
+        {% if narrative.get('residual_risks') %}<div class="tds-card p-5" style="border-color: var(--danger);"><h3 class="font-extrabold">실패·잔여 사항</h3><ul class="mt-3 space-y-2 text-sm" style="color: var(--danger);">{% for item in narrative.residual_risks %}<li>• {{ item }}</li>{% endfor %}</ul></div>{% endif %}
+        {% endif %}
+        {% if scenario_run.error %}<div class="tds-card p-5" style="border-color: var(--danger);"><h3 class="font-extrabold">실패 사유</h3><p class="text-sm mt-2" style="color: var(--danger);">{{ scenario_run.error }}</p></div>{% endif %}
+        <div class="flex justify-between"><button type="button" class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>실험 목록으로</button><div class="flex gap-2"><a class="tds-btn-muted" href="/scenario-runs/{{ scenario_run.id }}/report" target="_blank">보고서 보기</a><a class="tds-btn-primary" href="/scenario-runs/{{ scenario_run.id }}/report.pdf">PDF 다운로드<iconify-icon icon="solar:download-minimalistic-bold" width="16"></iconify-icon></a></div></div>
+        {% else %}
+        <div class="tds-card p-8 text-center"><h2 class="text-xl font-extrabold">최종 회귀 실행이 끝난 뒤 결과를 확인할 수 있습니다.</h2></div>
+        {% endif %}
       </section>
   </div>
 </div>

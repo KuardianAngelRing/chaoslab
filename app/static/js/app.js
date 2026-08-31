@@ -340,6 +340,101 @@ function newExperimentSync() {
 document.body.addEventListener('htmx:afterSwap', newExperimentSync);
 document.addEventListener('DOMContentLoaded', newExperimentSync);
 
+// ── k3s 2단계 환경 준비: 후보 선택을 마친 뒤에만 서버가 전용 namespace를 준비한다. ──
+let _preparationStream = null;
+let _scenarioRunStream = null;
+function closePreparationStream() {
+  if (_preparationStream) { _preparationStream.close(); _preparationStream = null; }
+}
+function closeScenarioRunStream() {
+  if (_scenarioRunStream) { _scenarioRunStream.close(); _scenarioRunStream = null; }
+}
+function renderPreparation(root, payload) {
+  const progress = payload.progress || {};
+  const message = root.querySelector('[data-prepare-message]');
+  const namespace = root.querySelector('[data-prepare-namespace]');
+  const pods = root.querySelector('[data-prepare-pods]');
+  const error = root.querySelector('[data-prepare-error]');
+  const blockers = root.querySelector('[data-prepare-blockers]');
+  const status = root.querySelector('[data-prepare-status]');
+  if (message) message.textContent = progress.message || '실험 환경 상태를 확인 중';
+  if (namespace) namespace.textContent = payload.namespace ? `namespace: ${payload.namespace}` : '';
+  if (pods && progress.pods_total != null) pods.textContent = `${progress.pods_ready || 0} / ${progress.pods_total} Pod Ready`;
+  if (error) { error.classList.toggle('hidden', !payload.error); error.textContent = payload.error || ''; }
+  const items = progress.blockers || [];
+  if (blockers) {
+    blockers.classList.toggle('hidden', !items.length);
+    blockers.textContent = items.map((item) => `${item.name}: ${item.reason}`).join(' · ');
+  }
+  const spinner = root.querySelector('[data-prepare-spinner]');
+  if (spinner) spinner.setAttribute('icon', payload.status === 'ready' ? 'solar:check-circle-bold' : payload.status === 'failed' ? 'solar:danger-circle-bold' : 'solar:refresh-circle-bold');
+  if (status) {
+    status.textContent = payload.status === 'ready' ? '준비 완료' : payload.status === 'failed' ? '준비 실패' : '준비 중';
+    status.className = `tds-badge ${payload.status === 'ready' ? 'badge-success' : payload.status === 'failed' ? 'badge-danger' : 'badge-info'}`;
+  }
+}
+async function startPreparation(root) {
+  if (root.dataset.preparing === 'true' || root.dataset.preparationSessionId) return true;
+  const appId = root.dataset.workflowAppId;
+  if (!appId) return true;
+  const panel = root.querySelector('[data-preparation-panel]');
+  if (panel) panel.open = true;
+  try {
+    const body = new URLSearchParams({app_id: appId, objective: root.dataset.workflowObjective || ''});
+    const response = await fetch('/experiment-sessions', {method: 'POST', body});
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || '환경 준비를 시작하지 못했습니다');
+    root.dataset.preparationSessionId = String(payload.id);
+    root.dataset.preparing = 'true';
+    renderPreparation(root, payload);
+    _preparationStream = new EventSource(`/experiment-sessions/${payload.id}/stream`);
+    _preparationStream.addEventListener('progress', (event) => renderPreparation(root, JSON.parse(event.data)));
+    _preparationStream.addEventListener('completed', (event) => {
+      const done = JSON.parse(event.data);
+      closePreparationStream();
+      root.dataset.preparing = 'false';
+      renderPreparation(root, done);
+      if (done.status === 'ready') maybePlayExecution(root);
+    });
+    _preparationStream.onerror = closePreparationStream;
+    fetch(`/experiment-sessions/${payload.id}/start`, {method: 'POST'}).catch(() => {
+      closePreparationStream();
+      root.dataset.preparing = 'false';
+      renderPreparation(root, {status: 'failed', error: '환경 준비를 시작하지 못했습니다'});
+    });
+    return true;
+  } catch (error) {
+    renderPreparation(root, {status: 'failed', error: error.message});
+    return false;
+  }
+}
+document.addEventListener('click', (e) => {
+  const request = e.target.closest('[data-candidate-request]');
+  if (!request || !window.htmx) return;
+  const form = request.closest('form');
+  const picked = form?.querySelector('input[name="app_id"]:checked');
+  if (!picked) return;
+  const appId = picked.value;
+  const objective = form.querySelector('textarea[name="objective"]')?.value.trim() || '';
+  closeDialog('newExperiment');
+  // 시나리오 회귀 워크플로우는 order-resilience-lab 전용(regression.scenario_snapshot 제약)
+  // — 그 외 앱은 가설 수립 흐름(POST /hypothesis)으로.
+  if (picked.dataset.appName === 'order-resilience-lab') {
+    htmx.ajax('GET', `/experiments/1?${new URLSearchParams({view: 'plan', app_id: appId, objective})}`, {
+      target: '#main-content', swap: 'innerHTML', pushUrl: true,
+    });
+    return;
+  }
+  htmx.ajax('POST', '/hypothesis', {
+    target: '#main-content', swap: 'innerHTML',
+    values: {
+      app_id: appId, objective,
+      max_candidates: form.querySelector('input[name="max_candidates"]')?.value || '5',
+      max_improvements: form.querySelector('input[name="max_improvements"]')?.value || '3',
+    },
+  });
+});
+
 // ── 새 앱 등록 위저드: 환경(k3s/EKS) 분기 — ADR-0003 ──
 function clusterEnvSync(root) {
   const checked = root.querySelector('input[name="cluster_env"]:checked');
@@ -359,11 +454,28 @@ function clusterEnvSync(root) {
   if (eks) eks.classList.toggle('hidden', checked.value !== 'eks');
   if (k3s) k3s.classList.toggle('hidden', checked.value !== 'k3s');
 }
+function k3sSampleSync(root) {
+  const selected = root.querySelector('input[name="sample_id"]:checked');
+  const name = root.querySelector('[data-k3s-app-name]');
+  const healthPath = root.querySelector('[data-k3s-health-path]');
+  if (!selected || !name || !healthPath) return;
+  if (selected.value === 'order-resilience-lab') {
+    name.value = 'order-resilience-lab';
+    healthPath.value = '/orders';
+  } else {
+    if (name.value === 'order-resilience-lab') name.value = '';
+    if (healthPath.value === '/orders') healthPath.value = '/healthz';
+  }
+}
 document.addEventListener('change', (e) => {
   if (e.target.name === 'cluster_env') clusterEnvSync(e.target.closest('form'));
+  if (e.target.name === 'sample_id') k3sSampleSync(e.target.closest('form'));
 });
 function newAppSync() {
-  document.querySelectorAll('#dialog-newApp form').forEach(clusterEnvSync);
+  document.querySelectorAll('#dialog-newApp form').forEach((form) => {
+    clusterEnvSync(form);
+    k3sSampleSync(form);
+  });
 }
 document.body.addEventListener('htmx:afterSwap', newAppSync);
 document.addEventListener('DOMContentLoaded', newAppSync);
@@ -448,18 +560,172 @@ function syncWorkflowCandidates(root) {
   const summary = root.querySelector('[data-workflow-selection-summary]');
   if (summary) summary.textContent = selected ? `${selected}개 후보를 선택했어요` : '아직 선택한 후보가 없어요';
   const help = root.querySelector('[data-workflow-selection-help]');
-  if (help) help.textContent = selected >= maxSelected ? `최대 ${maxSelected}개를 선택했어요. 하나를 해제하면 다른 후보를 고를 수 있습니다.` : `1개 이상, 최대 ${maxSelected}개까지 선택할 수 있습니다.`;
+  if (help) help.textContent = selected >= maxSelected ? `최대 ${maxSelected}개를 선택했어요. 하나를 해제하면 다른 후보를 고를 수 있습니다.` : `시나리오를 구성할 실험을 2개 이상 선택해 주세요.`;
   const next = root.querySelector('[data-workflow-selection-next]');
-  if (next) next.disabled = selected === 0;
+  if (next) next.disabled = selected < 2;
   const count = root.querySelector('[data-workflow-selected-count]');
   if (count) count.textContent = `${selected}개`;
   const executeStage = root.querySelector('[data-workflow-stage="execute"]');
   if (executeStage && Number(root.dataset.workflowCurrentStage) < 2) {
-    executeStage.disabled = selected === 0;
-    executeStage.setAttribute('aria-disabled', selected === 0 ? 'true' : 'false');
-    executeStage.title = selected === 0 ? '후보를 하나 이상 선택하면 열립니다' : '';
+    executeStage.disabled = selected < 2;
+    executeStage.setAttribute('aria-disabled', selected < 2 ? 'true' : 'false');
+    executeStage.title = selected < 2 ? '실험을 2개 이상 선택하면 열립니다' : '';
   }
+  root.dataset.selectedCandidateIds = selectedIds.join(',');
   syncWorkflowExecutionSelection(root, selectedIds);
+}
+
+function regressionStatusLabel(status, verdict) {
+  if (status === 'completed' && verdict === 'passed') return ['badge-success', '전체 통과'];
+  if (status === 'completed' && verdict === 'failed') return ['badge-danger', '기준 미충족'];
+  if (status === 'completed' && verdict === 'inconclusive') return ['badge-warning', '판정 불가 포함'];
+  if (status === 'completed') return ['badge-success', '실행 완료'];
+  if (status === 'failed') return ['badge-danger', '실패'];
+  return ['badge-info', '진행 중'];
+}
+
+function regressionStepState(spec, result, progress, roundName) {
+  if (result) {
+    if (result.status === 'passed') return ['badge-success', '통과'];
+    if (result.status === 'inconclusive') return ['badge-warning', '판정 불가'];
+    return ['badge-danger', '실패'];
+  }
+  if (progress.round === roundName && progress.experiment_id === spec.id) {
+    const running = {
+      observing: '관측 중',
+      running: '실행 중',
+      recovering: '복구 확인',
+      cleanup: '정리 중',
+    }[progress.stage] || '준비 중';
+    return ['badge-info', running];
+  }
+  if (roundName === 'final' && progress.round === 'improvement') return ['badge-info', '개선 적용 대기'];
+  return ['badge-muted', '대기'];
+}
+
+function appendRegressionRow(tbody, spec, baselineResult, finalResult, progress) {
+  if (!tbody) return;
+  const row = document.createElement('tr');
+  row.dataset.regressionScenarioId = spec.id;
+  row.className = 'border-t';
+  row.style.borderColor = 'var(--border)';
+  const values = [
+    [spec.title, finalResult?.crd_name || baselineResult?.crd_name || ''],
+    [spec.target_selector?.['app.kubernetes.io/name'] || '', ''],
+    [spec.chaos_type || '', ''],
+  ];
+  values.forEach(([primary, secondary], index) => {
+    const cell = document.createElement('td');
+    cell.className = index === 0 ? 'px-5 py-4' : 'px-5 py-4 text-xs';
+    const text = document.createElement(index === 0 ? 'b' : 'span');
+    text.textContent = primary;
+    cell.appendChild(text);
+    if (secondary) {
+      const sub = document.createElement('div');
+      sub.className = 'text-[11px] mono mt-1';
+      sub.style.color = 'var(--muted-foreground)';
+      sub.textContent = secondary;
+      cell.appendChild(sub);
+    }
+    row.appendChild(cell);
+  });
+  [
+    regressionStepState(spec, baselineResult, progress, 'baseline'),
+    regressionStepState(spec, finalResult, progress, 'final'),
+  ].forEach(([badgeClass, label]) => {
+    const cell = document.createElement('td');
+    cell.className = 'px-5 py-4 text-center';
+    const badge = document.createElement('span');
+    badge.className = `tds-badge ${badgeClass}`;
+    badge.textContent = label;
+    cell.appendChild(badge);
+    row.appendChild(cell);
+  });
+  tbody.appendChild(row);
+}
+
+function renderRegressionRows(tbody, scenario, baselineResults, results, progress) {
+  if (!tbody) return;
+  const baselineByScenarioId = new Map((baselineResults || []).map((item) => [item.scenario_experiment_id, item]));
+  const resultByScenarioId = new Map((results || []).map((item) => [item.scenario_experiment_id, item]));
+  tbody.replaceChildren();
+  (scenario?.experiments || []).forEach((spec) => {
+    appendRegressionRow(tbody, spec, baselineByScenarioId.get(spec.id), resultByScenarioId.get(spec.id), progress);
+  });
+}
+
+function renderScenarioRun(root, payload) {
+  const progress = payload.progress || {};
+  const total = payload.scenario?.experiments?.length || progress.total || 0;
+  const finished = (payload.baseline_results || []).length + (payload.results || []).length;
+  const succeeded = (payload.results || []).filter((item) => item.status === 'passed').length;
+  const count = root.querySelector('[data-regression-count]');
+  const message = root.querySelector('[data-regression-message]');
+  const bar = root.querySelector('[data-regression-progress]');
+  const status = root.querySelector('[data-regression-status]');
+  const tbody = root.querySelector('[data-regression-results]');
+  const empty = root.querySelector('[data-regression-empty]');
+  const error = root.querySelector('[data-regression-error]');
+  if (count) count.textContent = `${succeeded}/${total}`;
+  const verdict = payload.comparison?.verdict;
+  if (message) message.textContent = payload.status === 'completed' ? '개선 전후 최종 회귀 검증이 완료됐습니다' : (payload.status === 'failed' ? '최종 회귀 검증을 완료하지 못했습니다' : (progress.message || '최종 회귀 상태를 확인하고 있습니다'));
+  if (bar) bar.style.width = `${total ? Math.round(finished / (total * 2) * 100) : 0}%`;
+  const [badge, label] = regressionStatusLabel(payload.status, verdict);
+  if (status) { status.className = `tds-badge ${badge}`; status.textContent = label; }
+  renderRegressionRows(tbody, payload.scenario, payload.baseline_results, payload.results, progress);
+  if (empty) empty.classList.toggle('hidden', total > 0);
+  if (error) {
+    error.classList.toggle('hidden', !payload.error);
+    error.textContent = payload.error || '';
+  }
+  const terminal = payload.status === 'completed' || payload.status === 'failed';
+  const result = root.querySelector('[data-regression-result]');
+  if (result) result.disabled = !terminal;
+  const resultStage = root.querySelector('[data-workflow-stage="result"]');
+  if (resultStage && terminal) {
+    resultStage.disabled = false;
+    resultStage.setAttribute('aria-disabled', 'false');
+    resultStage.title = '';
+    root.dataset.workflowCurrentStage = '4';
+  }
+}
+
+function watchScenarioRun(root, runId) {
+  closeScenarioRunStream();
+  _scenarioRunStream = new EventSource(`/scenario-runs/${runId}/stream`);
+  _scenarioRunStream.addEventListener('progress', (event) => renderScenarioRun(root, JSON.parse(event.data)));
+  _scenarioRunStream.addEventListener('completed', (event) => {
+    renderScenarioRun(root, JSON.parse(event.data));
+    closeScenarioRunStream();
+  });
+  _scenarioRunStream.onerror = closeScenarioRunStream;
+}
+
+async function startScenarioRun(root) {
+  if (root.dataset.scenarioRunId) return true;
+  const sessionId = root.dataset.preparationSessionId;
+  const selectedIds = root.dataset.selectedCandidateIds || '';
+  if (!sessionId) return false;
+  try {
+    const response = await fetch('/scenario-runs', {
+      method: 'POST',
+      body: new URLSearchParams({session_id: sessionId, selected_ids: selectedIds}),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || '최종 회귀를 시작하지 못했습니다');
+    root.dataset.scenarioRunId = String(payload.id);
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', 'verify');
+    url.searchParams.set('scenario_run_id', payload.id);
+    history.replaceState({}, '', url);
+    renderScenarioRun(root, payload);
+    watchScenarioRun(root, payload.id);
+    return true;
+  } catch (error) {
+    const panel = root.querySelector('[data-regression-error]');
+    if (panel) { panel.classList.remove('hidden'); panel.textContent = error.message; }
+    return false;
+  }
 }
 
 function syncWorkflowExecutionSelection(root, selectedIds) {
@@ -533,6 +799,7 @@ function playExecutionDemo(card) {
 // 실행 탭이 보일 때 현재 표시 중인 실험 카드를 1회 재생 (카드별 1번만)
 function maybePlayExecution(root) {
   if (!root) return;
+  if (root.dataset.preparing === 'true') return;
   const section = root.querySelector('[data-tab-content="execute"]');
   if (!section || !section.classList.contains('active')) return;
   const card = section.querySelector('[data-candidate-execution]:not(.hidden)');
@@ -575,10 +842,11 @@ function initWorkflowDemo() {
     syncWorkflowStageState(root);
     syncWorkflowCandidates(root);
     syncCandidatePrompt(root);
+    if (root.dataset.scenarioRunId) watchScenarioRun(root, root.dataset.scenarioRunId);
   });
 }
 
-document.addEventListener('click', (e) => {
+document.addEventListener('click', async (e) => {
   const promptExample = e.target.closest && e.target.closest('[data-candidate-prompt-example]');
   if (promptExample) {
     const root = promptExample.closest('[data-workflow-shell]');
@@ -609,6 +877,16 @@ document.addEventListener('click', (e) => {
   const root = go.closest('[data-workflow-shell]');
   const target = root?.querySelector(`[data-workflow-stage="${go.dataset.workflowGo}"]`);
   if (target) {
+    if (go.dataset.workflowGo === 'execute' && root.dataset.workflowAppEnv === 'k3s') {
+      if (!await startPreparation(root)) return;
+    }
+    if (go.hasAttribute('data-regression-start')) {
+      if (!await startScenarioRun(root)) return;
+      target.disabled = false;
+      target.setAttribute('aria-disabled', 'false');
+      target.title = '';
+      root.dataset.workflowCurrentStage = '3';
+    }
     if (go.hasAttribute('data-workflow-preview-unlock')) {
       target.disabled = false;
       target.setAttribute('aria-disabled', 'false');
@@ -617,6 +895,17 @@ document.addEventListener('click', (e) => {
     target.click();
     root.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+});
+
+document.addEventListener('click', (e) => {
+  const result = e.target.closest && e.target.closest('[data-regression-result]');
+  if (!result || result.disabled || !window.htmx) return;
+  const root = result.closest('[data-workflow-shell]');
+  const runId = root?.dataset.scenarioRunId;
+  if (!runId) return;
+  htmx.ajax('GET', `/experiments/${root.dataset.workflowRunId}?view=result&scenario_run_id=${runId}`, {
+    target: '#main-content', swap: 'innerHTML', pushUrl: true,
+  });
 });
 
 document.addEventListener('change', (e) => {
@@ -633,3 +922,28 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('DOMContentLoaded', initWorkflowDemo);
 document.body.addEventListener('htmx:afterSwap', initWorkflowDemo);
+
+// ── 가설 수립 watch (생성·직접입력·구체화 진행 중일 때만 EventSource) ──
+const _hypStreams = new Set();
+function watchHypothesis() {
+  document.querySelectorAll('[data-hypothesis-active]').forEach((el) => {
+    const id = el.dataset.hypothesisRun;
+    if (_hypStreams.has(id)) return;
+    _hypStreams.add(id);
+    const es = new EventSource(`/hypothesis/${id}/stream`);
+    let first = true; // 최초 스냅샷은 방금 렌더된 화면과 같음 — 재요청 생략
+    es.addEventListener('status', () => {
+      if (first) { first = false; return; }
+      if (window.htmx) htmx.ajax('GET', `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+    });
+    es.addEventListener('completed', (e) => {
+      es.close(); _hypStreams.delete(id);
+      let redirect = '';
+      try { redirect = JSON.parse(e.data).redirect || ''; } catch (err) { /* noop */ }
+      if (window.htmx) htmx.ajax('GET', redirect || `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+    });
+    es.onerror = () => { es.close(); _hypStreams.delete(id); };
+  });
+}
+document.addEventListener('DOMContentLoaded', watchHypothesis);
+document.body.addEventListener('htmx:afterSwap', watchHypothesis);

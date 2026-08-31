@@ -78,8 +78,34 @@ def make_local_k8s() -> interfaces.LocalK8sService:
     return stubs.StubLocalK8s()
 
 
+def make_hypothesis_agent() -> interfaces.HypothesisAgentService:
+    # use_real_services(AWS)와 독립 — HYPOTHESIS_AGENT 선택형 게이트(ADR-0010).
+    # "claude"=구독제 CLI 실호출(호스트 로그인 전제) · 그 외/"stub"=Stub.
+    # 새 에이전트(예: codex)는 구현체 추가 + 여기 분기 한 줄이 전부.
+    if settings.hypothesis_agent == "claude":
+        from app.services.real.claude_agent import ClaudeCliHypothesisAgent  # lazy: subprocess
+        return ClaudeCliHypothesisAgent(settings)
+    return stubs.StubHypothesisAgent()
+
+
+def make_prometheus() -> interfaces.PrometheusService:
+    if settings.use_real_services:
+        from app.services.real.prometheus import RealPrometheus  # lazy: httpx
+        return RealPrometheus(settings)
+    return stubs.StubPrometheus()
+
+
+def make_loki() -> interfaces.LokiService:
+    if settings.use_real_services:
+        from app.services.real.loki import RealLoki  # lazy: httpx
+        return RealLoki(settings)
+    return stubs.StubLoki()
+
+
 def make_handoff_source() -> interfaces.HandoffSourceService:
-    # Real(Prometheus/Loki/K8s 실조회)은 Slice 4·5 — 그 전까지 항상 Stub.
+    if settings.use_real_services:
+        from app.services.real.handoff_source import RealHandoffSource  # lazy: k8s SDK
+        return RealHandoffSource(settings)
     return stubs.StubHandoffSource()
 
 
@@ -96,11 +122,11 @@ def get_chaos() -> interfaces.ChaosService:
 
 
 def get_prometheus() -> interfaces.PrometheusService:
-    return stubs.StubPrometheus()
+    return make_prometheus()
 
 
 def get_loki() -> interfaces.LokiService:
-    return stubs.StubLoki()
+    return make_loki()
 
 
 def get_k8s() -> interfaces.K8sService:
