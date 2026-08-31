@@ -1,0 +1,327 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-resilience-lab-runtime
+  labels:
+    app.kubernetes.io/part-of: order-resilience-lab
+data:
+  app.py: |
+    import json
+    import os
+    import time
+    import urllib.error
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    SERVICE = os.environ["SERVICE_NAME"]
+    UPSTREAMS = [item for item in os.getenv("UPSTREAMS", "").split(",") if item]
+    TIMEOUT = float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", "0.45"))
+    DEPENDENCY_HEALTHCHECKS = os.getenv("DEPENDENCY_HEALTHCHECKS", "0") == "1"
+    requests_total = 0
+
+    def call(url):
+        started = time.monotonic()
+        try:
+            with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
+                response.read()
+                return {"upstream": url, "ok": 200 <= response.status < 300,
+                        "latency_ms": round((time.monotonic() - started) * 1000, 1)}
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            return {"upstream": url, "ok": False,
+                    "latency_ms": round((time.monotonic() - started) * 1000, 1),
+                    "error": str(exc)}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def send_json(self, status, payload):
+            encoded = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def do_GET(self):
+            global requests_total
+            started = time.monotonic()
+            if self.path == "/live":
+                self.send_json(200, {"service": SERVICE, "status": "live"})
+                return
+            if self.path == "/metrics":
+                body = "# TYPE chaoslab_http_requests_total counter\\n"
+                body += f'chaoslab_http_requests_total{{service="{SERVICE}"}} {requests_total}\\n'
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; version=0.0.4")
+                self.end_headers()
+                self.wfile.write(body.encode())
+                return
+            if self.path == "/ready":
+                checks = [call(url + "/live") for url in UPSTREAMS] if DEPENDENCY_HEALTHCHECKS else []
+                self.send_json(200 if all(c["ok"] for c in checks) else 503,
+                               {"service": SERVICE, "status": "ready", "dependencies": checks})
+                return
+            if self.path not in ("/orders", "/work"):
+                self.send_json(404, {"service": SERVICE, "error": "not found"})
+                return
+            requests_total += 1
+            checks = [call(url + ("/orders" if SERVICE == "checkout-api" else "/work")) for url in UPSTREAMS]
+            ok = all(c["ok"] for c in checks)
+            payload = {"service": SERVICE, "path": self.path, "ok": ok, "attempts": 1,
+                       "dependencies": checks,
+                       "latency_ms": round((time.monotonic() - started) * 1000, 1)}
+            print(json.dumps(payload), flush=True)
+            self.send_json(200 if ok else 503, payload)
+
+    ThreadingHTTPServer(("", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-api
+  labels: &checkout_labels
+    app.kubernetes.io/name: checkout-api
+    app.kubernetes.io/part-of: order-resilience-lab
+    chaoslab.dev/component: checkout
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: checkout-api
+  template:
+    metadata:
+      labels: *checkout_labels
+    spec:
+      containers:
+        - &checkout_container
+          name: app
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/app.py"]
+          env:
+            - {name: SERVICE_NAME, value: checkout-api}
+            - {name: UPSTREAMS, value: http://order-api}
+            - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+            - {name: DEPENDENCY_HEALTHCHECKS, value: "1"}
+          ports: [{containerPort: 8080, name: http}]
+          resources:
+            requests: {cpu: 40m, memory: 48Mi}
+            limits: {cpu: 150m, memory: 128Mi}
+          livenessProbe:
+            httpGet: {path: /live, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 4
+          volumeMounts: [{name: runtime, mountPath: /app}]
+      volumes: [{name: runtime, configMap: {name: order-resilience-lab-runtime}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-api
+spec:
+  selector:
+    app.kubernetes.io/name: checkout-api
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-api
+  labels: &order_labels
+    app.kubernetes.io/name: order-api
+    app.kubernetes.io/part-of: order-resilience-lab
+    chaoslab.dev/component: order
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-api
+  template:
+    metadata:
+      labels: *order_labels
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/app.py"]
+          env:
+            - {name: SERVICE_NAME, value: order-api}
+            - {name: UPSTREAMS, value: http://catalog-api,http://inventory-api,http://payment-api}
+            - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+            - {name: DEPENDENCY_HEALTHCHECKS, value: "1"}
+          ports: [{containerPort: 8080, name: http}]
+          resources:
+            requests: {cpu: 40m, memory: 48Mi}
+            limits: {cpu: 150m, memory: 128Mi}
+          livenessProbe:
+            httpGet: {path: /live, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 4
+          volumeMounts: [{name: runtime, mountPath: /app}]
+      volumes: [{name: runtime, configMap: {name: order-resilience-lab-runtime}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-api
+spec:
+  selector:
+    app.kubernetes.io/name: order-api
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-api
+  labels: &catalog_labels
+    app.kubernetes.io/name: catalog-api
+    app.kubernetes.io/part-of: order-resilience-lab
+    chaoslab.dev/component: catalog
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: catalog-api
+  template:
+    metadata:
+      labels: *catalog_labels
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/app.py"]
+          env:
+            - {name: SERVICE_NAME, value: catalog-api}
+            - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+          ports: [{containerPort: 8080, name: http}]
+          resources:
+            requests: {cpu: 40m, memory: 48Mi}
+            limits: {cpu: 150m, memory: 128Mi}
+          livenessProbe:
+            httpGet: {path: /live, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 4
+          volumeMounts: [{name: runtime, mountPath: /app}]
+      volumes: [{name: runtime, configMap: {name: order-resilience-lab-runtime}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-api
+spec:
+  selector:
+    app.kubernetes.io/name: catalog-api
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-api
+  labels: &inventory_labels
+    app.kubernetes.io/name: inventory-api
+    app.kubernetes.io/part-of: order-resilience-lab
+    chaoslab.dev/component: inventory
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inventory-api
+  template:
+    metadata:
+      labels: *inventory_labels
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/app.py"]
+          env:
+            - {name: SERVICE_NAME, value: inventory-api}
+            - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+          ports: [{containerPort: 8080, name: http}]
+          resources:
+            requests: {cpu: 40m, memory: 48Mi}
+            limits: {cpu: 150m, memory: 128Mi}
+          livenessProbe:
+            httpGet: {path: /live, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 4
+          volumeMounts: [{name: runtime, mountPath: /app}]
+      volumes: [{name: runtime, configMap: {name: order-resilience-lab-runtime}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-api
+spec:
+  selector:
+    app.kubernetes.io/name: inventory-api
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-api
+  labels: &payment_labels
+    app.kubernetes.io/name: payment-api
+    app.kubernetes.io/part-of: order-resilience-lab
+    chaoslab.dev/component: payment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: payment-api
+  template:
+    metadata:
+      labels: *payment_labels
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/app.py"]
+          env:
+            - {name: SERVICE_NAME, value: payment-api}
+            - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+          ports: [{containerPort: 8080, name: http}]
+          resources:
+            requests: {cpu: 40m, memory: 48Mi}
+            limits: {cpu: 150m, memory: 128Mi}
+          livenessProbe:
+            httpGet: {path: /live, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 4
+          volumeMounts: [{name: runtime, mountPath: /app}]
+      volumes: [{name: runtime, configMap: {name: order-resilience-lab-runtime}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-api
+spec:
+  selector:
+    app.kubernetes.io/name: payment-api
+  ports: [{name: http, port: 80, targetPort: http}]

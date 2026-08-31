@@ -31,6 +31,8 @@ class App(Base):
 
     builds: Mapped[list["Build"]] = relationship(back_populates="app")
     experiments: Mapped[list["Experiment"]] = relationship(back_populates="app")
+    preparation_sessions: Mapped[list["ExperimentSession"]] = relationship(back_populates="app")
+    scenario_runs: Mapped[list["ScenarioRun"]] = relationship(back_populates="app")
 
 
 class Build(Base):
@@ -72,6 +74,48 @@ class Experiment(Base):
     app: Mapped["App"] = relationship(back_populates="experiments")
     iterations: Mapped[list["AgentIteration"]] = relationship(back_populates="experiment")
     handoffs: Mapped[list["AgentHandoff"]] = relationship(back_populates="experiment")
+
+
+class ExperimentSession(Base):
+    """2단계 실행에 필요한 k3s 환경의 수명주기. 단일 Chaos Experiment와 분리한다."""
+    __tablename__ = "experiment_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("apps.id"))
+    objective: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(30), default="queued")
+    namespace: Mapped[str] = mapped_column(String(120), default="")
+    progress: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    app: Mapped["App"] = relationship(back_populates="preparation_sessions")
+
+
+class ScenarioRun(Base):
+    """준비된 환경에서 수행하는 최종 회귀 1회."""
+    __tablename__ = "scenario_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("apps.id"))
+    preparation_session_id: Mapped[int] = mapped_column(ForeignKey("experiment_sessions.id"))
+    status: Mapped[str] = mapped_column(String(30), default="queued")
+    scenario: Mapped[dict] = mapped_column(JSON, default=dict)
+    progress: Mapped[dict] = mapped_column(JSON, default=dict)
+    baseline_results: Mapped[list] = mapped_column(JSON, default=list)
+    results: Mapped[list] = mapped_column(JSON, default=list)
+    improvement_changes: Mapped[list] = mapped_column(JSON, default=list)
+    comparison: Mapped[dict] = mapped_column(JSON, default=dict)
+    report_content: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    app: Mapped["App"] = relationship(back_populates="scenario_runs")
+    preparation_session: Mapped["ExperimentSession"] = relationship()
 
 
 class AgentIteration(Base):

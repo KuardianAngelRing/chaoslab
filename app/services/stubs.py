@@ -26,18 +26,47 @@ class StubGitOps:
 
 
 class StubK3sWorkload:
+    def __init__(self):
+        self.env_values = {
+            ("checkout-api", "app", "UPSTREAM_TIMEOUT_SECONDS"): "0.45",
+            ("order-api", "app", "UPSTREAM_TIMEOUT_SECONDS"): "0.45",
+        }
+
     def deploy(self, namespace: str, manifest_yaml: str) -> None:
         return None
 
     def wait_ready(self, namespace: str, timeout_s: int = 180) -> bool:
         return True
 
+    def readiness(self, namespace: str) -> dict:
+        return {"deployments_ready": 1, "deployments_total": 1,
+                "pods_ready": 10, "pods_total": 10, "restart_count": 0, "blockers": []}
+
+    def probe_http(self, namespace: str, service: str, path: str) -> dict:
+        return {"status_code": 200, "latency_ms": 48.0, "ok": True, "error": ""}
+
+    def apply_deployment_env(self, namespace: str, deployment: str, container: str,
+                             key: str, value: str, timeout_s: int = 180) -> dict:
+        identity = (deployment, container, key)
+        before = self.env_values.get(identity, "")
+        self.env_values[identity] = value
+        return {
+            "type": "deployment_env",
+            "deployment": deployment,
+            "container": container,
+            "key": key,
+            "before": before,
+            "after": value,
+            "rollout_ready": True,
+        }
+
     def teardown(self, namespace: str) -> None:
         return None
 
 
 class StubChaos:
-    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict) -> str:
+    def inject(self, namespace: str, app_name: str, chaos_type: str, params: dict,
+               target_selector: dict[str, str] | None = None) -> str:
         return f"exp-{app_name}-stub"
 
     def phase(self, chaos_type: str, crd_name: str) -> str:

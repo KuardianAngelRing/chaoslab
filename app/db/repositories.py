@@ -2,7 +2,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (AgentHandoff, AgentIteration, App, Build, Experiment,
-                           ExperimentCandidate, HypothesisRun, _now)
+                           ExperimentCandidate, ExperimentSession, HypothesisRun,
+                           ScenarioRun, _now)
 
 
 class AppRepository:
@@ -52,6 +53,61 @@ class ExperimentRepository:
 
     def list_all(self) -> list[Experiment]:
         return list(self.session.scalars(select(Experiment).order_by(Experiment.id.desc())))
+
+
+class ExperimentSessionRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, **kwargs) -> ExperimentSession:
+        obj = ExperimentSession(**kwargs)
+        self.session.add(obj)
+        self.session.commit()
+        return obj
+
+    def get(self, session_id: int) -> ExperimentSession | None:
+        return self.session.get(ExperimentSession, session_id)
+
+    def preparing_for_app(self, app_id: int) -> ExperimentSession | None:
+        stmt = (
+            select(ExperimentSession)
+            .where(ExperimentSession.app_id == app_id,
+                   ExperimentSession.status.in_(("queued", "preparing")))
+            .order_by(ExperimentSession.id.desc())
+        )
+        return self.session.scalars(stmt).first()
+
+    def ready_for_app(self, app_id: int) -> list[ExperimentSession]:
+        stmt = (
+            select(ExperimentSession)
+            .where(ExperimentSession.app_id == app_id,
+                   ExperimentSession.status == "ready")
+            .order_by(ExperimentSession.id.desc())
+        )
+        return list(self.session.scalars(stmt))
+
+
+class ScenarioRunRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, **kwargs) -> ScenarioRun:
+        obj = ScenarioRun(**kwargs)
+        self.session.add(obj)
+        self.session.commit()
+        return obj
+
+    def get(self, run_id: int) -> ScenarioRun | None:
+        return self.session.get(ScenarioRun, run_id)
+
+    def active_for_session(self, preparation_session_id: int) -> ScenarioRun | None:
+        stmt = (
+            select(ScenarioRun)
+            .where(ScenarioRun.preparation_session_id == preparation_session_id,
+                   ScenarioRun.status.in_(("queued", "running")))
+            .order_by(ScenarioRun.id.desc())
+        )
+        return self.session.scalars(stmt).first()
 
 
 class IterationRepository:

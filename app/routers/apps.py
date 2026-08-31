@@ -19,6 +19,7 @@ from app.deps import get_app_count, make_builder, make_gitops, make_k8s
 from app.rendering import render_page
 from app.services.interfaces import BuildRequest
 from app.services.real.gitops import derive_app_name, split_env  # 순수 함수 (IO 의존 없음)
+from app.services.sample_apps import get_sample_app
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -125,27 +126,40 @@ def register_k3s_app(
     name: str = Form(...),
     health_path: str = Form("/healthz"),
     namespace: str = Form(""),
+    sample_id: str = Form(""),
     manifest: UploadFile | None = File(None),
     session: Session = Depends(get_session),
 ):
-    ns = namespace.strip() or name  # 네임스페이스는 앱 이름 자동 파생 (실험 ns 이름의 재료)
-    manifest_text = ""
+    sample = get_sample_app(sample_id) if sample_id else None
+    if sample_id and sample is None:
+        raise HTTPException(status_code=422, detail="지원하지 않는 예제 앱입니다")
+
+    manifest_text = sample["manifest_text"] if sample else ""
     if manifest is not None:
-        manifest_text = manifest.file.read().decode("utf-8", errors="replace")
+        uploaded = manifest.file.read().decode("utf-8", errors="replace")
+        if not sample:
+            manifest_text = uploaded
+    if not manifest_text.strip():
+        raise HTTPException(status_code=422, detail="예제 앱을 선택하거나 manifest YAML을 업로드해 주세요")
+
+    app_name = sample["name"] if sample else name.strip()
+    if not app_name:
+        raise HTTPException(status_code=422, detail="앱 이름을 입력해 주세요")
+    ns = namespace.strip() or app_name
+    resolved_health_path = sample["health_path"] if sample else health_path.strip() or "/healthz"
     repo = AppRepository(session)
-    existing = next((a for a in repo.list_all() if a.name == name), None)
+    existing = next((a for a in repo.list_all() if a.name == app_name), None)
     if existing is None:
         repo.create(
-            name=name, repo_url=K3S_SOURCE, branch="", framework="manifest", env="k3s",
-            manifest=manifest_text, health_path=health_path.strip() or "/healthz",
+            name=app_name, repo_url=K3S_SOURCE, branch="", framework="manifest", env="k3s",
+            manifest=manifest_text, health_path=resolved_health_path,
             namespace=ns, status="registered",
         )
     else:
-        existing.health_path = health_path.strip() or "/healthz"
+        existing.health_path = resolved_health_path
         existing.namespace = ns
         existing.env = "k3s"
-        if manifest_text:  # 재등록 시 파일을 안 올리면 기존 manifest 유지
-            existing.manifest = manifest_text
+        existing.manifest = manifest_text
         existing.status = "registered"
         session.commit()
     return _apps_response(request, session)

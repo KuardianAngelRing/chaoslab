@@ -227,15 +227,24 @@
         <div data-env-panel="k3s" class="hidden space-y-6">
           <div>
             <label class="text-base font-bold mb-2 block">앱 이름</label>
-            <p class="text-sm mb-2" style="color: var(--muted-foreground);">목록과 네임스페이스에 쓰일 이름이에요</p>
-            <input name="name" class="tds-input mono text-base" placeholder="order-msa" data-wiz-required data-wiz-msg="앱 이름을 입력해 주세요" disabled />
+            <p class="text-sm mb-2" style="color: var(--muted-foreground);">권장 예제는 이름과 검증 경로가 자동으로 정해져요</p>
+            <input name="name" data-k3s-app-name class="tds-input mono text-base" value="order-resilience-lab" data-wiz-required data-wiz-msg="앱 이름을 입력해 주세요" disabled />
           </div>
           <div>
-            <label class="text-base font-bold mb-2 block">manifest 파일</label>
+            <label class="text-base font-bold mb-2 block">실험 대상</label>
+            <label class="tds-card p-4 flex items-start gap-3 cursor-pointer mb-3 hover-lift">
+              <input type="radio" name="sample_id" value="order-resilience-lab" checked class="mt-1" disabled />
+              <span class="tossface text-xl">🛒</span>
+              <span>
+                <span class="font-bold text-sm block">주문 복원력 실험실 · 권장 예제</span>
+                <span class="text-xs" style="color: var(--muted-foreground);">checkout → order → catalog · inventory · payment, 5개 서비스·10개 Pod</span>
+              </span>
+            </label>
+            <label class="text-base font-bold mb-2 block">직접 manifest 업로드</label>
             <label class="block rounded-2xl border-2 border-dashed p-6 text-center cursor-pointer" style="border-color: var(--border);">
-              <iconify-icon icon="solar:upload-bold" width="24" style="color: var(--muted-foreground);"></iconify-icon>
-              <div class="text-sm font-bold mt-1">Deployment·Service YAML 업로드</div>
-              <div class="text-xs mt-0.5" style="color: var(--muted-foreground);">등록 시엔 저장만 해요 — 배포는 실험을 시작할 때</div>
+              <input type="radio" name="sample_id" value="" class="mr-1" disabled />
+              <span class="text-sm font-bold">내 Deployment·Service YAML 사용</span>
+              <div class="text-xs mt-0.5" style="color: var(--muted-foreground);">선택 후 YAML을 올려 주세요. 등록 시엔 저장만 해요</div>
               <input type="file" name="manifest" accept=".yaml,.yml" class="sr-only" disabled />
             </label>
           </div>
@@ -260,8 +269,8 @@
           <div>
             <label class="text-base font-bold mb-2 block">부하 검증 경로</label>
             <p class="text-sm mb-2" style="color: var(--muted-foreground);">장애 주입 중에 k6가 이 경로로 요청을 보내 "아직 응답하나"를 측정해요</p>
-            <input name="health_path" class="tds-input mono text-base" value="/healthz" data-wiz-required data-wiz-msg="부하 검증 경로를 입력해 주세요" disabled />
-            <p class="text-xs mt-2" style="color: var(--warning);">⚠️ 생존 경로만으로는 네트워크 지연 장애를 못 잡아요 — 기능 경로 승격 논의 예정 (ADR-0005)</p>
+            <input name="health_path" data-k3s-health-path class="tds-input mono text-base" value="/orders" data-wiz-required data-wiz-msg="부하 검증 경로를 입력해 주세요" disabled />
+            <p class="text-xs mt-2" style="color: var(--warning);">권장 예제는 전체 주문 흐름을 호출하는 <span class="mono">/orders</span>를 사용해요</p>
           </div>
           <details class="rounded-2xl border px-4 py-3" style="border-color: var(--border);">
             <summary class="text-sm font-bold cursor-pointer">고급 <span class="font-normal" style="color: var(--muted-foreground);">네임스페이스는 앱 이름으로 자동 생성돼요</span></summary>

@@ -96,14 +96,14 @@ def test_candidate_prompt_adds_a_selectable_ui_only_sample(client):
     assert "hx-post" not in resp.text
 
 
-def test_execute_stage_can_open_final_verification_preview(client):
+def test_execute_stage_starts_final_regression(client):
     resp = client.get("/experiments/2?view=execute")
     assert resp.status_code == 200
     assert 'data-workflow-go="verify"' in resp.text
-    assert "data-workflow-preview-unlock" in resp.text
-    assert "최종 회귀 검증 시안 보기" in resp.text
-    assert 'data-workflow-go="result" data-workflow-preview-unlock' in resp.text
-    assert "결과 화면 시안 보기" in resp.text
+    assert "data-regression-start" in resp.text
+    assert "최종 회귀 검증 시작" in resp.text
+    assert "data-regression-result" in resp.text
+    assert "결과 보기" in resp.text
 
 
 def test_experiment_detail_404(client):
@@ -144,16 +144,43 @@ def test_apps_new_dialog_env_branch(client):
     assert "manifest YAML을 그대로 배포해요" in resp.text
     assert "부하 검증 경로" in resp.text          # ADR-0005 필드 (k3s 분기)
     assert "등록하고 배포할게요" in resp.text      # ADR-0004 정직 CTA
+    assert "주문 복원력 실험실 · 권장 예제" in resp.text
+    assert 'value="order-resilience-lab"' in resp.text
 
 
-def test_register_k3s_app_stub(client):
-    resp = client.post("/apps/k3s", data={"name": "demo-msa", "health_path": "/orders"})
+def test_register_k3s_sample_app(client):
+    resp = client.post("/apps/k3s", data={"name": "ignored", "sample_id": "order-resilience-lab"})
     assert resp.status_code == 200
-    assert "demo-msa" in resp.text               # 앱 목록에 즉시 등장
+    assert "order-resilience-lab" in resp.text    # 앱 목록에 즉시 등장
     # 새 실험 위저드에서 k3s 환경 배지로 표시 (seed order-msa + 신규 = 2개 이상)
     exp = client.get("/experiments")
-    assert "demo-msa" in exp.text
+    assert "order-resilience-lab" in exp.text
     assert exp.text.count("k3s · 온프레미스") >= 2
+
+
+def test_register_k3s_rejects_missing_or_unknown_source(client):
+    assert client.post("/apps/k3s", data={"name": "demo-msa"}).status_code == 422
+    assert client.post("/apps/k3s", data={"name": "demo-msa", "sample_id": "unknown"}).status_code == 422
+
+
+def test_register_k3s_direct_manifest_still_works(client):
+    manifest = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: demo\n"
+    resp = client.post(
+        "/apps/k3s", data={"name": "demo-msa", "health_path": "/orders"},
+        files={"manifest": ("demo.yaml", manifest, "application/yaml")},
+    )
+    assert resp.status_code == 200
+    assert "demo-msa" in resp.text
+
+
+def test_order_resilience_sample_is_a_five_service_manifest():
+    from app.services.sample_apps import get_sample_app
+    sample = get_sample_app("order-resilience-lab")
+    assert sample is not None
+    assert sample["name"] == "order-resilience-lab"
+    assert sample["health_path"] == "/orders"
+    assert sample["manifest_text"].count("kind: Deployment") == 5
+    assert sample["manifest_text"].count("kind: Service") == 5
 
 
 def test_experiments_new_dialog_wizard(client):
@@ -163,13 +190,16 @@ def test_experiments_new_dialog_wizard(client):
     assert 'data-wiz-steps="2"' in resp.text
     assert "대상 앱" in resp.text and "검증 목표" in resp.text
     assert "후보 생성 요청할게요" in resp.text
-    # 제출은 워크플로우 시안의 후보 선택 단계로 바로 진입 (준비 탭 제거)
-    assert 'hx-get="/experiments/1?view=plan"' in resp.text
+    assert "data-candidate-request" in resp.text
     # 환경 배지 — order-msa만 k3s, 나머지는 EKS
     assert "k3s · 온프레미스" in resp.text and "EKS · 클라우드" in resp.text
     # 직접 설계 폼 제거 (ADR-0006)
     assert 'name="latency_ms"' not in resp.text and "직접 설계" not in resp.text
 
+    detail = client.get("/experiments/1?app_id=4")
+    assert detail.status_code == 200
+    assert "실험 환경 준비 대기" in detail.text
+    assert "순차 실행 시 시작" in detail.text
 
 def test_settings_page(client):
     resp = client.get("/settings")
