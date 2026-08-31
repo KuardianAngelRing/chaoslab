@@ -107,13 +107,23 @@ class RealK3sWorkload:
         payload = None
         error = ""
         try:
-            raw = client.CoreV1Api(self._api_client()).connect_get_namespaced_service_proxy_with_path(
-                name=service,
+            core = client.CoreV1Api(self._api_client())
+            # k3s v1.35 apiserver는 포트 미지정 서비스 프록시를 "no endpoints"로 거부
+            # (라이브 08/31 확인) — 서비스 첫 포트를 조회해 name에 명시한다.
+            port = core.read_namespaced_service(
+                service, namespace, _request_timeout=_TIMEOUT).spec.ports[0].port
+            raw = core.connect_get_namespaced_service_proxy_with_path(
+                name=f"{service}:{port}",
                 namespace=namespace,
                 path=path.lstrip("/"),
                 _request_timeout=_TIMEOUT,
             )
-            payload = json.loads(raw) if isinstance(raw, str) and raw else raw
+            try:
+                # k8s client는 프록시 응답을 dict-repr 문자열로 줄 수 있음 —
+                # 파싱 실패를 HTTP 실패(status 0)로 오판하지 않는다.
+                payload = json.loads(raw) if isinstance(raw, str) and raw else raw
+            except (TypeError, json.JSONDecodeError):
+                payload = raw
         except ApiException as exc:
             status_code = int(exc.status or 0)
             error = str(exc.reason or exc)
