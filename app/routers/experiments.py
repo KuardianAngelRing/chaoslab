@@ -18,8 +18,9 @@ from app.db.repositories import AppRepository, ExperimentRepository
 from app.deps import make_chaos, make_k3s_workload, make_prometheus
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
+from app.services.live_traffic import TrafficGenerator
 from app.services.metrics_collector import collect_experiment_metrics
-from app.services.regression import workload_selector  # 순수 함수 — manifest matchLabels 파싱
+from app.services.regression import observation_for_app, workload_selector  # 순수 함수
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -136,6 +137,7 @@ def _watch_experiment(exp_id: int) -> None:
             return bool(cur and cur.status in ("deploying", "running"))
 
         status = "completed"
+        traffic: TrafficGenerator | None = None
         try:
             if is_k3s:                        # 현장 배포 단계
                 workload = make_k3s_workload()
@@ -144,6 +146,13 @@ def _watch_experiment(exp_id: int) -> None:
                     raise RuntimeError(f"워크로드가 준비되지 않음 ({namespace})")
                 if not _still_active():
                     return
+                # 관측 트래픽(≈2 rps) — 없으면 Prometheus rps·오류율·레이턴시가 빈 벡터라 2단계 차트가 비어 있다.
+                # Service를 알 수 없는 앱은 경고만 남기고 트래픽 없이 진행(실험은 막지 않는다).
+                observation = observation_for_app(app)
+                if observation is None:
+                    logger.warning("live traffic skipped (exp %s): 관측 Service를 알 수 없음", exp_id)
+                else:
+                    traffic = TrafficGenerator(workload, namespace, observation).start()
                 # 가설 후보의 대상 워크로드가 있으면 그 파드만 겨냥(ns 전체 mode:one이면 무관한 파드가 죽을 수 있음)
                 candidate = s.get(ExperimentCandidate, exp.candidate_id) if exp.candidate_id else None
                 target = candidate.target_workload if candidate else None
@@ -185,6 +194,8 @@ def _watch_experiment(exp_id: int) -> None:
                 logger.exception("chaos cleanup failed (exp %s)", exp_id)
             status = "failed"
         finally:
+            if traffic is not None:           # ns 삭제 전에 부하 중지 (idempotent)
+                traffic.stop()
             if is_k3s:                        # 성공·실패·중지 모두 ns 정리 (idempotent)
                 try:
                     make_k3s_workload().teardown(namespace)

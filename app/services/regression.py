@@ -92,6 +92,18 @@ def entry_service(manifest_yaml: str, app_name: str) -> str | None:
     return None
 
 
+def observation_for_app(app: App) -> dict | None:
+    """앱의 관측 요청 대상(회귀 `take_sample`·단독 실험 트래픽 공용) — 한 곳 원칙.
+
+    service=`App.observe_service`(등록 정보) 우선, 없으면 manifest에서 `entry_service` 추론.
+    path=`App.health_path or "/"`. Service를 알 수 없으면 None — 호출자가 422/스킵을 정한다.
+    """
+    service = app.observe_service or entry_service(app.manifest, app.name)
+    if not service:
+        return None
+    return {"service": service, "path": app.health_path or "/", "expected_status": 200}
+
+
 def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
     """가설 경로 — 승인(detailed)된 후보를 회귀 시나리오 스냅샷으로 조립한다.
 
@@ -117,8 +129,8 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
             "target_selector": workload_selector(app.manifest, candidate.target_workload),
             "criteria": dict(DEFAULT_CRITERIA),
         })
-    service = app.observe_service or entry_service(app.manifest, app.name)
-    if not service:
+    observation = observation_for_app(app)
+    if observation is None:
         raise ValueError(
             "검증 요청을 보낼 Service를 알 수 없습니다 — manifest에 앱명과 같은 Service가 없고 Service가 "
             "여러 개(또는 없음)입니다. 앱 등록 정보의 관측 Service를 지정해 주세요"
@@ -127,11 +139,7 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
         "id": f"hyp-{run.id}",
         "title": run.goal_text or f"{app.name} 복원력 검증",
         "app": app.name,
-        "observation": {
-            "service": service,
-            "path": app.health_path or "/",
-            "expected_status": 200,
-        },
+        "observation": observation,
         "improvements": [
             _improvement_spec(p, [e["id"] for e in experiments])
             for p in run.proposals if p.status == "approved"
