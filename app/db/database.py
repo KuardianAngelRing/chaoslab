@@ -34,6 +34,7 @@ def _upgrade_scenario_runs() -> None:
         "improvement_changes": "JSON",
         "comparison": "JSON",
         "report_content": "JSON",
+        "hypothesis_run_id": "INTEGER REFERENCES hypothesis_runs(id)",  # 09/05 가설↔회귀 통합
     }
     with engine.begin() as connection:
         for name, ddl_type in columns.items():

@@ -80,7 +80,7 @@ pytest -q                        # 171 통과
 - **RBAC** — 대시보드 K8s 신원에 추가 필요: `sut_namespace` `secrets` create/update · `apps/deployments` patch(재배포) · `chaos-mesh.org` CRD create/get/delete(카오스) · `argo_namespace` `workflows` patch(빌드 중지)
 - 라이브 기동 시 `argo/apply.sh`로 WorkflowTemplate 적용 필수
 - Chaos Mesh 파드 Running 확인(`kubectl get pods -n chaos-mesh`) + 주입 대상 파드 존재
-- 마이그레이션 없음: EC2 **비파괴** 재기동 시 구 `chaoslab.db`에 새 컬럼 없어 깨짐 → 재기동 전 DB 삭제(파괴 재생성이면 무해). 09/05 `scenario_runs.hypothesis_run_id` 컬럼 추가도 해당 — 구 DB는 삭제 후 재기동.
+- 마이그레이션 없음: EC2 **비파괴** 재기동 시 구 `chaoslab.db`에 새 컬럼 없어 깨짐 → 재기동 전 DB 삭제(파괴 재생성이면 무해). 09/05 `scenario_runs.hypothesis_run_id`는 `database._upgrade_scenario_runs`가 ALTER로 보완하므로 구 DB 삭제 불필요.
 - ⚠️ **`~/Documents/Iac-aws`의 git은 iCloud 오염**(HEAD.lock이 삭제해도 부활 → 커밋 불가). **terraform 상태·GitOps 클론의 단일 진실원천은 `~/dev/Iac-aws`** (2026-08-13 이후) — **up.sh/down.sh는 반드시 `~/dev/Iac-aws`에서 실행** (Documents 쪽 상태 파일은 리소스 0으로 낡음 → 거기서 down.sh 하면 아무것도 안 지워짐)
 - Prometheus/Loki 접근은 EC2 SSH 터널보다 **로컬 `kubectl port-forward`가 안정적** (svc/kube-prometheus-stack-prometheus 9090, svc/loki 3100 — monitoring ns)
 - 부띠끄 대상 검증 시 `.env`의 `SUT_NAMESPACE=online-boutique`는 **임시** — 정상 플로우(앱 등록·빌드)는 `sut`로 되돌릴 것. 부띠끄는 generic-app 배포가 아니라 VS/DR이 없어 핸드오프 `istio_config`가 빈 문자열(계약 허용)
