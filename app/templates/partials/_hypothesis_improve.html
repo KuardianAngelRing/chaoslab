@@ -1,0 +1,129 @@
+{# 워크플로우 셸 3단계 상단 — AI 개선안 제안·승인 패널 (설계 2026-09-05 §7, 휴먼인더루프).
+   ctx: hypothesis_run · experiment · improvement_cards[{proposal, type_label, rows, patch_json, errors}]
+        · improvement_undecided · improvement_approved · improvement_allowed.
+   상태(hypothesis_run.improvement_status)별 서버 렌더 — 배지·값은 서버가 단일 소스. #}
+{% set hrun = hypothesis_run %}
+{% set istatus = hrun.improvement_status %}
+{% set fm = (experiment.fault_metrics or {}) if experiment else {} %}
+{% set rm = (experiment.recovery_metrics or {}) if experiment else {} %}
+
+{% if istatus == "generating" %}
+<div class="tds-card p-8 text-center" data-improvement-panel>
+  <span class="tossface-lg">🤖</span>
+  <div class="font-extrabold text-lg mt-3">AI가 개선안을 만들고 있어요</div>
+  <p class="text-sm mt-2" style="color: var(--muted-foreground);">실험 #{{ experiment.id }}의 장애·회복 구간 관측과 manifest를 근거로 개선안을 최대 3개 제안해요 — 준비되면 화면이 갱신돼요</p>
+  <div class="progress-track mt-6 max-w-md mx-auto"><div class="progress-fill" style="width: 60%;"></div></div>
+</div>
+
+{% elif istatus == "" or istatus == "failed" %}
+<div class="tds-card p-5" data-improvement-panel style="border-style: dashed;">
+  <div class="flex items-start gap-4">
+    <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);"><iconify-icon icon="solar:magic-stick-3-bold" width="20"></iconify-icon></span>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 flex-wrap"><h3 class="font-extrabold">AI 개선안 제안</h3><span class="tds-badge badge-info">휴먼인더루프</span></div>
+      <p class="text-xs mt-1" style="color: var(--muted-foreground);">
+        실험 결과를 근거로 Deployment 설정(probe·preStop·resources·replicas·환경변수) 개선안을 제안받고, 승인한 항목만 최종 회귀의 baseline 뒤에 적용해요. 개선은 검증 전용 namespace에만 적용되고 앱의 저장 manifest는 바뀌지 않아요.
+      </p>
+      {% if experiment and (fm or rm) %}
+      <p class="text-xs mt-2 mono" style="color: var(--muted-foreground);">실험 #{{ experiment.id }} · 장애 구간 오류율 피크 {{ fm.get("error_rate_peak", "-") }}% · 최소 Ready {{ fm.get("min_ready_pods", "-") }} · 회복 {{ rm.get("recovery_seconds", "-") }}s</p>
+      {% endif %}
+      {% if istatus == "failed" %}
+      <p class="text-xs mt-2 mono" style="color: var(--danger);">개선안 생성 실패: {{ hrun.improvement_error }}</p>
+      {% endif %}
+    </div>
+    {% if improvement_allowed %}
+    <button type="button" class="tds-btn-primary shrink-0" hx-post="/hypothesis/{{ hrun.id }}/improvements" hx-target="#main-content" hx-swap="innerHTML">
+      <iconify-icon icon="{{ 'solar:refresh-bold' if istatus == 'failed' else 'solar:magic-stick-3-bold' }}" width="16"></iconify-icon>{{ "다시 생성" if istatus == "failed" else "개선안 생성" }}
+    </button>
+    {% endif %}
+  </div>
+</div>
+
+{% else %}
+{# ready — 카드(checkbox) + 승인/제외 결정. 결정 후에는 잠기고 "다시 결정"으로 재열람 #}
+{% set decided = not improvement_undecided %}
+{% set editable = improvement_allowed and not decided %}
+<div class="tds-card p-5 space-y-4" data-improvement-panel>
+  <div class="flex items-start justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <h3 class="font-extrabold">AI 개선안 {{ improvement_cards|length }}개</h3>
+        {% if hrun.model_name %}<span class="tds-badge badge-muted mono">{{ hrun.model_name }}</span>{% endif %}
+        {% if decided %}<span class="tds-badge badge-success">승인 {{ improvement_approved }}건 · 제외 {{ improvement_cards|length - improvement_approved }}건</span>
+        {% else %}<span class="tds-badge badge-warning">결정 필요</span>{% endif %}
+      </div>
+      <p class="text-xs mt-1" style="color: var(--muted-foreground);">승인한 항목만 최종 회귀의 baseline 라운드 뒤에 적용되고 rollout Ready를 확인한 뒤 final 라운드가 돌아요. 편집한 값도 허용 범위 안에서만 받아요.</p>
+    </div>
+    {% if improvement_allowed %}
+    <button type="button" class="tds-btn-muted text-sm shrink-0" hx-post="/hypothesis/{{ hrun.id }}/improvements" hx-target="#main-content" hx-swap="innerHTML" hx-confirm="기존 개선안을 버리고 다시 생성할까요?">
+      <iconify-icon icon="solar:refresh-bold" width="15"></iconify-icon>다시 생성
+    </button>
+    {% endif %}
+  </div>
+
+  <form class="space-y-3" data-improvement-form>
+    {% for card in improvement_cards %}
+    {% set p = card.proposal %}
+    <label class="block {% if editable %}cursor-pointer{% else %}cursor-default{% endif %}">
+      <input type="checkbox" name="proposal_ids" value="{{ p.id }}" class="sr-only" data-improvement-candidate
+             {% if p.status == "approved" %}checked{% endif %} {% if not editable %}disabled{% endif %} />
+      <div class="tds-card p-5 workflow-candidate-card {% if p.status == 'approved' %}is-selected{% endif %}" data-improvement-card>
+        <div class="flex items-start gap-4">
+          <span class="workflow-candidate-check"><iconify-icon icon="solar:check-read-bold" width="18"></iconify-icon></span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-extrabold text-base">{{ p.title }}</span>
+              <span class="tds-badge badge-info">{{ card.type_label }}</span>
+              {% if p.source == "user_edit" %}<span class="tds-badge badge-muted">편집됨</span>{% endif %}
+              {% if p.status == "approved" %}<span class="tds-badge badge-success">승인됨</span>
+              {% elif p.status == "rejected" %}<span class="tds-badge badge-muted">제외됨</span>{% endif %}
+            </div>
+            <p class="text-xs mt-1 mono" style="color: var(--muted-foreground);">{{ p.deployment }}{% if p.container %} / {{ p.container }}{% endif %}</p>
+            <p class="text-sm mt-2">{{ p.rationale }}</p>
+            <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">{{ p.expected_effect }}</p>
+            <div class="rounded-xl border overflow-hidden mt-3" style="border-color: var(--border);">
+              <table class="w-full text-xs">
+                <thead style="background: var(--muted);"><tr class="text-left" style="color: var(--muted-foreground);"><th class="px-3 py-2">변경 경로</th><th class="px-3 py-2">현재(manifest)</th><th class="px-3 py-2">제안</th></tr></thead>
+                <tbody class="mono">
+                  {% for row in card.rows %}
+                  <tr class="border-t" style="border-color: var(--border);"><td class="px-3 py-2">{{ row.path }}</td><td class="px-3 py-2" style="color: var(--muted-foreground);">{{ "없음" if row.before is none else row.before }}</td><td class="px-3 py-2 font-bold" style="color: var(--primary);">{{ row.after }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% if editable %}
+            <details class="mt-3">
+              <summary class="text-xs cursor-pointer" style="color: var(--muted-foreground);">편집 — 승인 시 허용 범위로 재검증돼요</summary>
+              {% if p.type == "manifest_patch" %}
+              <textarea name="patch_{{ p.id }}" class="tds-input mono text-xs mt-2 h-40 py-2 resize-y" spellcheck="false">{{ card.patch_json }}</textarea>
+              {% else %}
+              <input name="value_{{ p.id }}" value="{{ p.value }}" class="tds-input mono text-xs mt-2 h-10" />
+              {% endif %}
+            </details>
+            {% endif %}
+            {% if card.errors %}
+            <p class="text-xs mt-2 mono" style="color: var(--danger);">편집 값 검증 실패: {{ card.errors|join(" · ") }}</p>
+            {% endif %}
+          </div>
+          <span class="text-xs font-bold shrink-0" style="color: var(--primary);">제안 {{ loop.index }}</span>
+        </div>
+      </div>
+    </label>
+    {% endfor %}
+  </form>
+
+  {% if editable %}
+  <div class="flex items-center justify-end gap-2">
+    <button type="button" class="tds-btn-muted" hx-post="/hypothesis/{{ hrun.id }}/improvements/approve" hx-vals='{"none": "1"}' hx-target="#main-content" hx-swap="innerHTML">개선 없이 진행</button>
+    <button type="button" class="tds-btn-primary" hx-post="/hypothesis/{{ hrun.id }}/improvements/approve" hx-include="[data-improvement-form]" hx-target="#main-content" hx-swap="innerHTML">
+      <iconify-icon icon="solar:check-circle-bold" width="16"></iconify-icon>선택 항목 승인
+    </button>
+  </div>
+  {% elif improvement_allowed %}
+  <div class="flex items-center justify-between text-xs" style="color: var(--muted-foreground);">
+    <span>{{ "승인한 개선 " ~ improvement_approved ~ "건이 최종 회귀 baseline 뒤에 적용돼요." if improvement_approved else "개선 없이 진행 — baseline·final이 같은 조건으로 돌아요." }}</span>
+    <button type="button" class="tds-btn-muted text-sm" hx-post="/hypothesis/{{ hrun.id }}/improvements/reopen" hx-target="#main-content" hx-swap="innerHTML">다시 결정</button>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

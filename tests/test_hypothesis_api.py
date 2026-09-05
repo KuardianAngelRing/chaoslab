@@ -233,7 +233,8 @@ def test_run_with_experiment_lands_on_execute_stage(monkeypatch, client):
     assert 'data-initial-stage="execute"' in resp.text
     assert "파드 강제 종료 검증" in resp.text and "실험 완료" in resp.text
     assert "구체화된 파라미터" in resp.text
-    assert 'hx-post="/hypothesis/' not in resp.text   # 실험 이후 선택·직접 입력 CTA 없음
+    assert f'hx-post="/hypothesis/{run_id}/select"' not in resp.text   # 실험 이후 선택·직접 입력 CTA 없음
+    assert f'hx-post="/hypothesis/{run_id}/freeform"' not in resp.text
     assert 'data-workflow-go="verify"' in resp.text and "최종 회귀로" in resp.text
     assert 'data-workflow-current-stage="3"' in resp.text
     assert 'data-workflow-app-id=' in resp.text and 'data-workflow-app-env="k3s"' in resp.text

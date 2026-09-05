@@ -311,14 +311,20 @@
         </div>
 
         {% if hypothesis_run and not scenario_run %}
+        {# 개선 단계(휴먼인더루프) — AI 제안 → 승인/편집/제외. 결정 전에는 회귀 시작을 막는다 (설계 09/05 §6·§7) #}
+        {% include "partials/_hypothesis_improve.html" %}
         {# 가설 경로 회귀 시작 — 승인 후보(detailed) 목록·기본 판정 기준은 서버 렌더. 버튼은 준비 세션(ready) 후 POST /scenario-runs(hypothesis_run_id) #}
+        {% set regression_blocked = not regression_candidates or improvement_undecided or hypothesis_run.improvement_status == "generating" %}
         <div class="tds-card p-5 space-y-4" data-hypothesis-regression-setup>
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
               <h3 class="font-extrabold">승인 후보로 최종 회귀 조립</h3>
-              <p class="text-xs mt-1" style="color: var(--muted-foreground);">전용 namespace에 앱을 다시 준비한 뒤, 아래 실험을 개선 전·후 두 라운드 같은 조건으로 실행해요. 아직 개선 명세가 없어 보고서에는 "적용된 개선 없음"으로 정직하게 표시돼요.</p>
+              <p class="text-xs mt-1" style="color: var(--muted-foreground);">전용 namespace에 앱을 다시 준비한 뒤, 아래 실험을 개선 전·후 두 라운드로 실행해요.
+                {% if improvement_approved %}baseline 라운드 뒤에 승인한 개선 {{ improvement_approved }}건을 적용하고 rollout Ready를 확인한 다음 final 라운드가 돌아요.
+                {% else %}적용할 개선이 없으면 두 라운드가 같은 조건으로 돌고 보고서에는 "적용된 개선 없음"으로 정직하게 표시돼요.{% endif %}</p>
             </div>
-            <button type="button" class="tds-btn-primary shrink-0 disabled:opacity-40 disabled:cursor-not-allowed" data-hypothesis-regression-start {% if not regression_candidates %}disabled{% endif %}>최종 회귀 시작<iconify-icon icon="solar:play-circle-bold" width="16"></iconify-icon></button>
+            <button type="button" class="tds-btn-primary shrink-0 disabled:opacity-40 disabled:cursor-not-allowed" data-hypothesis-regression-start {% if regression_blocked %}disabled{% endif %}
+                    {% if improvement_undecided %}title="개선안을 승인하거나 제외해 주세요"{% elif hypothesis_run.improvement_status == "generating" %}title="개선안 생성이 끝난 뒤 시작할 수 있어요"{% endif %}>최종 회귀 시작<iconify-icon icon="solar:play-circle-bold" width="16"></iconify-icon></button>
           </div>
           <div class="rounded-2xl border overflow-hidden" style="border-color: var(--border);">
             <table class="w-full text-sm">

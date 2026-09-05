@@ -972,6 +972,11 @@ document.addEventListener('change', (e) => {
   if (e.target.matches && e.target.matches('[data-workflow-candidate]')) {
     syncWorkflowCandidates(e.target.closest('[data-workflow-shell]'));
   }
+  // 개선안 카드(checkbox, 다중) — 시각 상태만 동기화. 승인/제외 배지는 서버 렌더가 단일 소스
+  if (e.target.matches && e.target.matches('[data-improvement-candidate]')) {
+    const card = e.target.closest('label')?.querySelector('[data-improvement-card]');
+    if (card) card.classList.toggle('is-selected', e.target.checked);
+  }
 });
 
 document.addEventListener('input', (e) => {
