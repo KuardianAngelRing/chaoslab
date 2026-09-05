@@ -100,6 +100,19 @@ def test_render_chaos_manifest_network_delay():
     assert m["spec"]["duration"] == "300s"
 
 
+def test_render_chaos_manifest_pod_chaos_targets_one_pod():
+    """팀 결정 A1: PodChaos는 mode=one(레플리카 1개 손실 검증) — Network/Stress는 all 유지."""
+    from app.services.real.chaos import render_chaos_manifest
+
+    for chaos_type, params in (("pod-kill", {"action": "pod-kill"}),
+                               ("pod-failure", {"action": "pod-failure", "duration_s": 60}),
+                               ("container-kill", {"action": "container-kill", "container_name": "app"})):
+        m = render_chaos_manifest(chaos_type, "ns", "demo", params, label_selector=False)
+        assert m["kind"] == "PodChaos" and m["spec"]["mode"] == "one", chaos_type
+    m = render_chaos_manifest("cpu-stress", "ns", "demo", {"action": "cpu", "cpu_load": 80, "duration_s": 60})
+    assert m["spec"]["mode"] == "all"
+
+
 def test_render_chaos_manifest_pod_kill_has_no_duration():
     from app.services.real.chaos import render_chaos_manifest
 

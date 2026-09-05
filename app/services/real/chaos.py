@@ -43,7 +43,10 @@ def render_chaos_manifest(chaos_type: str, namespace: str, app_name: str, params
         selector["labelSelectors"] = target_selector
     elif label_selector:
         selector["labelSelectors"] = {"app": app_name}
-    spec: dict = {"selector": selector, "mode": "all"}
+    # PodChaos(pod-kill·pod-failure·container-kill)는 `one` — 레플리카 ≥2에서 "1개 손실에도 서비스 유지"를
+    # 검증한다(2026-09-05 팀 결정 A1). `all`이면 Ready 0·전 요청 실패가 필연이라 판정·개선 효과가 무의미했다.
+    # Network/StressChaos는 열화 조건이므로 대상 전체(all) 유지.
+    spec: dict = {"selector": selector, "mode": "one" if kind == "PodChaos" else "all"}
 
     if kind == "NetworkChaos":
         spec["action"] = action

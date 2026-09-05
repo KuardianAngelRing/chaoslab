@@ -81,6 +81,10 @@ def test_final_regression_runs_selected_experiments_in_order(monkeypatch):
     assert len(saved.baseline_results) == 2
     assert len(saved.improvement_changes) == 2
     assert saved.comparison["verdict"] == "passed"
+    # B1: 원샷 pod-kill도 주입 확인 즉시 끝내지 않고 grace 동안 최소 6샘플(×3요청) 관측
+    pod_kill = saved.results[0]
+    assert pod_kill["chaos_type"] == "pod-kill"
+    assert pod_kill["during"]["sample_count"] == 6 and pod_kill["during"]["request_count"] == 18
     assert saved.comparison["r"]["before"]["available"] is True
 
 

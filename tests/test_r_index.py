@@ -34,3 +34,20 @@ def test_boundaries():
     assert out2["latency_score"] == 1.0
     assert out2["recovery_score"] == 0.0
     assert out2["availability"] == 1.0
+
+
+def test_no_traffic_in_fault_window_yields_no_r():
+    """팀 결정 B3: 장애 구간 HTTP 트래픽 근거가 없으면 종합 r은 None — 항목 점수는 내역용으로 유지."""
+    fault = {"error_rate_avg": 0.0, "latency_p99_avg_ms": 0.0, "rps_max": 0.0, "rps_avg": 0.0,
+             "http_5xx_count": 0, "status_code_dist": {}}
+    out = compute(baseline={"latency_p99_avg_ms": 0.0}, fault=fault, recovery={"recovery_seconds": 6.2})
+    assert out["r"] is None and out["traffic_observed"] is False and out["reason"]
+    assert out["availability"] == 1.0 and out["recovery_score"] == round(1 - 6.2 / 300, 4)
+
+    with_traffic = {**fault, "rps_max": 7.2, "status_code_dist": {"200": 2156}}
+    out2 = compute(baseline={"latency_p99_avg_ms": 0.0}, fault=with_traffic, recovery={"recovery_seconds": 6.2})
+    assert out2["r"] is not None and out2["traffic_observed"] is True
+
+    # 트래픽 키가 아예 없는 요약(구형·부분)은 판단 보류 → 기존처럼 계산
+    out3 = compute(baseline={}, fault={"error_rate_avg": 10.0}, recovery={})
+    assert out3["r"] is not None and out3["traffic_observed"] is None

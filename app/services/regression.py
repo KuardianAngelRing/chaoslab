@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 _SCENARIOS = Path(__file__).parents[1] / "samples" / "scenarios"
 _POLL_S = 5
 _PODKILL_GRACE_S = 30
+_MIN_FAULT_SAMPLES = 6  # 장애 구간 최소 관측 샘플(팀 결정 B1) — 30s/5s
+_ONE_SHOT = ("pod-kill", "container-kill")
 _RECOVER_POLLS = 60
 _CRITERIA_KEYS = {
     "max_error_rate_pct", "max_p95_latency_ms", "max_recovery_seconds", "min_ready_pods",
@@ -238,22 +240,22 @@ def _run_one(session, run: ScenarioRun, spec: dict, workload, round_name: str) -
         _set_progress(session, run, spec, "running", "장애 구간의 요청과 워크로드 상태를 관측하고 있습니다",
                       round_name=round_name)
         duration = int(spec["params"].get("duration_s") or _PODKILL_GRACE_S)
-        poll_count = max(1, math.ceil(duration / _POLL_S))
+        poll_count = max(_MIN_FAULT_SAMPLES, math.ceil(duration / _POLL_S))
+        one_shot = spec["chaos_type"] in _ONE_SHOT
         recovered = False
         for poll_index in range(poll_count):
             phase = chaos.phase(spec["chaos_type"], crd_name)
             if phase in {"running", "recovered"}:
                 injection_confirmed = True
             during_samples.append(take_sample(workload, namespace, observation))
-            if phase == "recovered":
-                recovered = True
-                break
-            # 원샷 액션(pod-kill·container-kill)은 recovered 조건이 없어 주입 확인으로 종료
-            if spec["chaos_type"] in ("pod-kill", "container-kill") and injection_confirmed:
+            if phase == "recovered" and not one_shot:
                 recovered = True
                 break
             if poll_index + 1 < poll_count:
                 time.sleep(_POLL_S)
+        # 원샷 액션(pod-kill·container-kill)은 recovered 조건이 없다 — 주입 확인 + grace 동안 관측을 채운 뒤 종료
+        if one_shot and injection_confirmed:
+            recovered = True
         if not recovered:
             _set_progress(session, run, spec, "recovering", "장애 종료 상태를 확인하고 있습니다",
                           round_name=round_name)
