@@ -170,3 +170,37 @@ def test_stub_hypothesis_agent_proposals_pass_validation():
     # manifest에 없는 워크로드만 담긴 출력 → 전멸
     assert validate_proposals([{**raw[0], "deployment": "ghost"}], manifest) == ([], [
         "제안 1: manifest에 없는 Deployment 'ghost'"])
+
+
+def test_real_k3s_apply_deployment_env_treats_name_only_env_as_empty(monkeypatch):
+    """k8s는 value: ""를 value 필드 없이 저장한다 — 이름만 있는 env는 빈 값으로 보고 패치해야 한다(OPTIONAL_UPSTREAMS)."""
+    import types
+    import pytest
+
+    pytest.importorskip("kubernetes")
+    from kubernetes import client as k8s_client
+
+    from app.services.real import k3s_workload
+
+    container = k8s_client.V1Container(name="app", env=[
+        k8s_client.V1EnvVar(name="OPTIONAL_UPSTREAMS"),                         # value 없음
+        k8s_client.V1EnvVar(name="FROM_SECRET", value_from=k8s_client.V1EnvVarSource()),
+    ])
+    deployment = k8s_client.V1Deployment(spec=k8s_client.V1DeploymentSpec(
+        selector=k8s_client.V1LabelSelector(),
+        template=k8s_client.V1PodTemplateSpec(spec=k8s_client.V1PodSpec(containers=[container]))))
+    patches = []
+
+    class _Apps:
+        def __init__(self, *_a, **_k): pass
+        def read_namespaced_deployment(self, *_a, **_k): return deployment
+        def patch_namespaced_deployment(self, name, ns, body, **_k): patches.append(body)
+    monkeypatch.setattr(k8s_client, "AppsV1Api", _Apps)
+    monkeypatch.setattr(k3s_workload, "_wait_rollout", lambda *a, **k: None)
+    svc = k3s_workload.RealK3sWorkload(types.SimpleNamespace())
+    monkeypatch.setattr(svc, "_api_client", lambda: None)
+
+    change = svc.apply_deployment_env("ns", "order-api", "app", "OPTIONAL_UPSTREAMS", "payment-api")
+    assert change["before"] == "" and change["after"] == "payment-api" and len(patches) == 1
+    with pytest.raises(ValueError):
+        svc.apply_deployment_env("ns", "order-api", "app", "FROM_SECRET", "x")   # valueFrom은 거부

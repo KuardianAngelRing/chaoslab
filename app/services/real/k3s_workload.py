@@ -153,9 +153,9 @@ class RealK3sWorkload:
         if target is None:
             raise ValueError(f"Deployment {deployment}에서 container {container}를 찾을 수 없습니다")
         env = next((item for item in (target.env or []) if item.name == key), None)
-        if env is None or env.value is None:
+        if env is None or env.value_from is not None:
             raise ValueError(f"Deployment {deployment}에서 환경변수 {key}를 찾을 수 없습니다")
-        before = env.value
+        before = env.value or ""   # k8s는 value: ""를 필드 없이 저장한다(OPTIONAL_UPSTREAMS 같은 빈 기본값)
         if before != value:
             apps.patch_namespaced_deployment(
                 deployment,
