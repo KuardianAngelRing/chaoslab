@@ -1030,7 +1030,13 @@ function watchLiveMetrics() {
   const WINDOW = 60;  // rolling window — 최근 60틱(3s × 60 = 3분)
   const axis = (extra = {}) => ({ grid: { color: () => tdsBorderColor() }, ticks: { color: () => tdsTextColor(), font: { size: 10 }, ...extra } });
   const common = { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } } };
-  const line = (varName, yAxisID) => ({ data: [], borderColor: () => cssVar(varName), backgroundColor: () => cssVar(varName) + '22', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true, yAxisID });
+  const line = (varName, yAxisID, extra = {}) => ({ data: [], borderColor: () => cssVar(varName), backgroundColor: () => cssVar(varName) + '22', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true, yAxisID, ...extra });
+  // Ready 파드는 모든 앱에서 항상 값이 있는 유일한 시리즈(HTTP 메트릭 미노출 앱 포함) — 계단형·정수 눈금
+  const ready = new Chart(el.querySelector('[data-live-metrics-ready]'), {
+    type: 'line',
+    data: { labels: [], datasets: [line('--success', 'y', { stepped: true, fill: true })] },
+    options: { ...common, scales: { x: { display: false }, y: { ...axis({ precision: 0 }), min: 0, suggestedMax: 2 } } }
+  });
   const latency = new Chart(el.querySelector('[data-live-metrics-latency]'), {
     type: 'line',
     data: { labels: [], datasets: [line('--warning', 'y'), line('--danger', 'y')] },
@@ -1042,7 +1048,7 @@ function watchLiveMetrics() {
     options: { ...common, scales: { x: { display: false }, y: { ...axis(), min: 0 },
       y1: { position: 'right', min: 0, grid: { display: false }, ticks: { color: () => tdsTextColor(), font: { size: 10 }, callback: (v) => `${v}%` } } } }
   });
-  _liveCharts = [latency, traffic];
+  _liveCharts = [ready, latency, traffic];
   const note = el.querySelector('[data-live-metrics-note]');
   const push = (chart, values, label) => {
     chart.data.labels.push(label);
@@ -1058,6 +1064,7 @@ function watchLiveMetrics() {
     let m = {};
     try { m = JSON.parse(e.data); } catch (err) { return; }
     const label = (m.ts || '').slice(11, 19);
+    push(ready, [m.ready_pods], label);
     push(latency, [m.p95_ms, m.p99_ms], label);
     push(traffic, [m.rps, m.error_rate_pct], label);
     if (pods) pods.textContent = m.ready_pods == null ? '-' : m.ready_pods;

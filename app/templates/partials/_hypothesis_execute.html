@@ -51,7 +51,14 @@
         <span data-live-metrics-note hidden> · HTTP 메트릭 미노출 앱 — Ready 파드만 실측</span>
       </span>
     </div>
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <div class="flex items-center gap-3 text-[11px] mb-1" style="color: var(--muted-foreground);">
+          <span>Ready 파드</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--success);"></i>ready</span>
+        </div>
+        <div style="height: 140px;"><canvas data-live-metrics-ready></canvas></div>
+      </div>
       <div>
         <div class="flex items-center gap-3 text-[11px] mb-1" style="color: var(--muted-foreground);">
           <span>레이턴시(ms)</span>
