@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (AgentHandoff, AgentIteration, App, Build, Experiment,
                            ExperimentCandidate, ExperimentSession, HypothesisRun,
-                           ScenarioRun, _now)
+                           ImprovementProposal, ScenarioRun, _now)
 
 
 class AppRepository:
@@ -260,3 +260,58 @@ class HypothesisRepository:
         stmt = (select(Experiment).where(Experiment.candidate_id.in_(cand_ids))
                 .order_by(Experiment.id.desc()).limit(1))
         return self.session.scalars(stmt).first()
+
+    # ── Improvement (개선 단계) ──
+    def set_improvement(self, run: HypothesisRun, status: str, error: str = "") -> HypothesisRun:
+        run.improvement_status = status
+        run.improvement_error = error
+        self.session.commit()
+        return run
+
+    def list_proposals(self, run_id: int) -> list[ImprovementProposal]:
+        stmt = (select(ImprovementProposal)
+                .where(ImprovementProposal.run_id == run_id)
+                .order_by(ImprovementProposal.id))
+        return list(self.session.scalars(stmt))
+
+    def approved_proposals(self, run_id: int) -> list[ImprovementProposal]:
+        return [p for p in self.list_proposals(run_id) if p.status == "approved"]
+
+    def replace_proposals(self, run_id: int, experiment_id: int | None, proposals,
+                          ) -> list[ImprovementProposal]:
+        """재생성 = 기존 제안 전부 삭제 후 삽입 (승인 이력은 회귀 스냅샷에 남는다)."""
+        for old in self.list_proposals(run_id):
+            self.session.delete(old)
+        rows = [
+            ImprovementProposal(
+                run_id=run_id, experiment_id=experiment_id, type=p.type, title=p.title,
+                deployment=p.deployment, container=p.container, key=p.key, value=p.value,
+                patch=p.patch, rationale=p.rationale, expected_effect=p.expected_effect)
+            for p in proposals
+        ]
+        self.session.add_all(rows)
+        self.session.commit()
+        return rows
+
+    def reopen_proposals(self, run_id: int) -> list[ImprovementProposal]:
+        rows = self.list_proposals(run_id)
+        for row in rows:
+            row.status = "proposed"
+        self.session.commit()
+        return rows
+
+    def decide_proposals(self, run_id: int, approved_ids: set[int],
+                         edits: dict[int, dict] | None = None) -> list[ImprovementProposal]:
+        """선택 → approved(편집분은 값 교체 + source=user_edit), 나머지 → rejected."""
+        rows = self.list_proposals(run_id)
+        for row in rows:
+            edit = (edits or {}).get(row.id)
+            if row.id in approved_ids:
+                row.status = "approved"
+                if edit is not None:
+                    row.key, row.value, row.patch = edit["key"], edit["value"], edit["patch"]
+                    row.source = "user_edit"
+            else:
+                row.status = "rejected"
+        self.session.commit()
+        return rows

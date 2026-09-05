@@ -22,6 +22,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _upgrade_scenario_runs()
+    _upgrade_hypothesis_runs()
 
 
 def _upgrade_scenario_runs() -> None:
@@ -40,6 +41,21 @@ def _upgrade_scenario_runs() -> None:
         for name, ddl_type in columns.items():
             if name not in existing:
                 connection.execute(text(f"ALTER TABLE scenario_runs ADD COLUMN {name} {ddl_type}"))
+
+
+def _upgrade_hypothesis_runs() -> None:
+    """09/05 개선 단계 컬럼(improvement_status·improvement_error) — 구 DB 삭제 없이 ALTER 보완."""
+    if engine.dialect.name != "sqlite" or "hypothesis_runs" not in inspect(engine).get_table_names():
+        return
+    existing = {column["name"] for column in inspect(engine).get_columns("hypothesis_runs")}
+    columns = {
+        "improvement_status": "VARCHAR(30) DEFAULT ''",
+        "improvement_error": "TEXT DEFAULT ''",
+    }
+    with engine.begin() as connection:
+        for name, ddl_type in columns.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE hypothesis_runs ADD COLUMN {name} {ddl_type}"))
 
 
 def get_session() -> Iterator[Session]:

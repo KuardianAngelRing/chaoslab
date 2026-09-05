@@ -171,11 +171,14 @@ class HypothesisRun(Base):
     input_payload: Mapped[dict] = mapped_column(JSON, default=dict)  # 재현·디버깅용 스냅샷
     model_name: Mapped[str] = mapped_column(String(100), default="")
     cli_version: Mapped[str] = mapped_column(String(50), default="")
+    improvement_status: Mapped[str] = mapped_column(String(30), default="")  # "" | generating | ready | failed (개선 단계)
+    improvement_error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     app: Mapped["App"] = relationship()
     candidates: Mapped[list["ExperimentCandidate"]] = relationship(back_populates="run")
+    proposals: Mapped[list["ImprovementProposal"]] = relationship(back_populates="run")
 
 
 class ExperimentCandidate(Base):
@@ -198,3 +201,31 @@ class ExperimentCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     run: Mapped["HypothesisRun"] = relationship(back_populates="candidates")
+
+
+class ImprovementProposal(Base):
+    """AI 개선안 1건 (설계 2026-09-05 §1) — 사용자 승인분만 회귀 스냅샷 improvements로 흐른다.
+
+    type: deployment_env(key/value) | manifest_patch(patch — improvement_specs 화이트리스트).
+    개선은 회귀 전용 ns의 Deployment에만 적용되며 앱의 저장 manifest는 바뀌지 않는다.
+    """
+
+    __tablename__ = "improvement_proposals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("hypothesis_runs.id"))
+    experiment_id: Mapped[int | None] = mapped_column(ForeignKey("experiments.id"), nullable=True)
+    type: Mapped[str] = mapped_column(String(30))
+    title: Mapped[str] = mapped_column(String(200))
+    deployment: Mapped[str] = mapped_column(String(120))
+    container: Mapped[str] = mapped_column(String(120), default="")
+    key: Mapped[str] = mapped_column(String(120), default="")
+    value: Mapped[str] = mapped_column(String(200), default="")
+    patch: Mapped[dict] = mapped_column(JSON, default=dict)
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    expected_effect: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed | approved | rejected
+    source: Mapped[str] = mapped_column(String(20), default="agent")  # agent | user_edit
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    run: Mapped["HypothesisRun"] = relationship(back_populates="proposals")
