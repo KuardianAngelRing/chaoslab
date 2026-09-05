@@ -233,11 +233,19 @@
           <div>
             <label class="text-base font-bold mb-2 block">실험 대상</label>
             <label class="tds-card p-4 flex items-start gap-3 cursor-pointer mb-3 hover-lift">
-              <input type="radio" name="sample_id" value="order-resilience-lab" checked class="mt-1" disabled />
+              <input type="radio" name="sample_id" value="order-resilience-lab" data-sample-name="order-resilience-lab" data-sample-health="/orders" checked class="mt-1" disabled />
               <span class="tossface text-xl">🛒</span>
               <span>
                 <span class="font-bold text-sm block">주문 복원력 실험실 · 권장 예제</span>
                 <span class="text-xs" style="color: var(--muted-foreground);">checkout → order → catalog · inventory · payment, 5개 서비스·10개 Pod</span>
+              </span>
+            </label>
+            <label class="tds-card p-4 flex items-start gap-3 cursor-pointer mb-3 hover-lift">
+              <input type="radio" name="sample_id" value="nginx" data-sample-name="nginx" data-sample-health="/" class="mt-1" disabled />
+              <span class="tossface text-xl">🌐</span>
+              <span>
+                <span class="font-bold text-sm block">nginx · 단일 서비스 예제</span>
+                <span class="text-xs" style="color: var(--muted-foreground);">Deployment(replicas 2) + Service, HTTP 메트릭 없음 — pod-kill 회복 검증에 적합</span>
               </span>
             </label>
             <label class="text-base font-bold mb-2 block">직접 manifest 업로드</label>
