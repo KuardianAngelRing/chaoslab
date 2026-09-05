@@ -2,6 +2,7 @@
 from app.services.interfaces import BuildRequest
 from app.services.real.builder import build_workflow_manifest
 from app.services.real.local_k8s import parse_cpu, parse_mem, usage_pct
+from app.services.real.prometheus import live_queries
 from app.services.real.gitops import (
     derive_app_name,
     render_application_yaml,
@@ -97,6 +98,19 @@ def test_render_chaos_manifest_network_delay():
     assert m["spec"]["action"] == "delay"
     assert m["spec"]["delay"] == {"latency": "200ms"}
     assert m["spec"]["duration"] == "300s"
+
+
+def test_render_chaos_manifest_pod_chaos_targets_one_pod():
+    """팀 결정 A1: PodChaos는 mode=one(레플리카 1개 손실 검증) — Network/Stress는 all 유지."""
+    from app.services.real.chaos import render_chaos_manifest
+
+    for chaos_type, params in (("pod-kill", {"action": "pod-kill"}),
+                               ("pod-failure", {"action": "pod-failure", "duration_s": 60}),
+                               ("container-kill", {"action": "container-kill", "container_name": "app"})):
+        m = render_chaos_manifest(chaos_type, "ns", "demo", params, label_selector=False)
+        assert m["kind"] == "PodChaos" and m["spec"]["mode"] == "one", chaos_type
+    m = render_chaos_manifest("cpu-stress", "ns", "demo", {"action": "cpu", "cpu_load": 80, "duration_s": 60})
+    assert m["spec"]["mode"] == "all"
 
 
 def test_render_chaos_manifest_pod_kill_has_no_duration():
@@ -309,3 +323,16 @@ def test_k3s_manifest_upsert_creates_missing_resource():
     _upsert_manifest_resource(dynamic, doc, "chaoslab-session-order", _Missing)
 
     assert calls == [{"body": doc, "namespace": "chaoslab-session-order"}]
+
+
+def test_live_queries_use_istio_selector_and_pod_pattern():
+    qs = live_queries("sut", "demo")
+    assert set(qs) == {"rps", "error_rate_pct", "p95_ms", "p99_ms", "ready_pods"}
+    for key in ("rps", "error_rate_pct", "p95_ms", "p99_ms"):
+        assert 'destination_workload="demo"' in qs[key]
+        assert 'destination_workload_namespace="sut"' in qs[key]
+        assert "[1m]" in qs[key]
+    assert 'response_code=~"5.."' in qs["error_rate_pct"]
+    assert "histogram_quantile(0.95" in qs["p95_ms"] and "histogram_quantile(0.99" in qs["p99_ms"]
+    assert 'pod=~"demo-[a-z0-9]+-[a-z0-9]+"' in qs["ready_pods"]
+    assert 'namespace="sut"' in qs["ready_pods"]

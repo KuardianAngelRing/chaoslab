@@ -28,13 +28,15 @@ def test_experiments_page(client):
     resp = client.get("/experiments")
     assert resp.status_code == 200
     assert "카오스 테스트" in resp.text
-    assert "UI 디자인 시안" in resp.text
+    assert "UI 디자인 시안" not in resp.text     # 목록은 가설 Run 실데이터 — 시안 배너 제거
     assert "새 실험 시작" in resp.text
     assert "후보 선택" in resp.text and "최종 검증" in resp.text
     assert 'hx-post="/experiments"' not in resp.text
     assert "data-running-exp" not in resp.text
-    for run_id, stage in ((1, "plan"), (2, "execute"), (3, "result")):
-        assert f'/experiments/{run_id}?view={stage}' in resp.text
+    # seed Run 1(ready·후보 3) → 후보 선택 단계 행
+    assert "HYP-1" in resp.text and "/hypothesis/1?view=plan" in resp.text
+    assert "3개 후보" in resp.text and "선택 필요" in resp.text
+    assert "CL-042" not in resp.text            # 데모 셸 행은 목록에서 제거 (위저드 분기로만 도달)
 
 
 def test_experiment_detail(client):
@@ -146,12 +148,24 @@ def test_apps_new_dialog_env_branch(client):
     assert "등록하고 배포할게요" in resp.text      # ADR-0004 정직 CTA
     assert "주문 복원력 실험실 · 권장 예제" in resp.text
     assert 'value="order-resilience-lab"' in resp.text
+    assert "nginx · 단일 서비스 예제" in resp.text
+    assert 'value="nginx" data-sample-name="nginx" data-sample-health="/"' in resp.text
+
+
+def _test_db_session():
+    """client fixture가 주입한 in-memory DB 세션(dependency override)을 그대로 연다."""
+    from app.db.database import get_session
+    from app.main import app
+    return next(app.dependency_overrides[get_session]())
 
 
 def test_register_k3s_sample_app(client):
     resp = client.post("/apps/k3s", data={"name": "ignored", "sample_id": "order-resilience-lab"})
     assert resp.status_code == 200
     assert "order-resilience-lab" in resp.text    # 앱 목록에 즉시 등장
+    from app.db.models import App
+    registered = _test_db_session().query(App).filter_by(name="order-resilience-lab").one()
+    assert registered.observe_service == "checkout-api"   # registry 값 → 회귀 관측 대상
     # 새 실험 위저드에서 k3s 환경 배지로 표시 (seed order-msa + 신규 = 2개 이상)
     exp = client.get("/experiments")
     assert "order-resilience-lab" in exp.text
@@ -173,14 +187,48 @@ def test_register_k3s_direct_manifest_still_works(client):
     assert "demo-msa" in resp.text
 
 
+def test_register_k3s_infers_observe_service_from_manifest(client):
+    from app.db.models import App
+    single = "kind: Service\nmetadata:\n  name: web\n---\nkind: Deployment\nmetadata:\n  name: web\n"
+    multi = "kind: Service\nmetadata:\n  name: a\n---\nkind: Service\nmetadata:\n  name: b\n"
+    assert client.post("/apps/k3s", data={"name": "single-svc"},
+                       files={"manifest": ("m.yaml", single, "application/yaml")}).status_code == 200
+    assert client.post("/apps/k3s", data={"name": "multi-svc"},
+                       files={"manifest": ("m.yaml", multi, "application/yaml")}).status_code == 200
+    by_name = {a.name: a.observe_service for a in _test_db_session().query(App).all()}
+    assert by_name["single-svc"] == "web"          # 단일 Service → 추론
+    assert by_name["multi-svc"] == ""              # 다중·앱명 불일치 → 미지정(회귀 시 422)
+
+
 def test_order_resilience_sample_is_a_five_service_manifest():
     from app.services.sample_apps import get_sample_app
     sample = get_sample_app("order-resilience-lab")
     assert sample is not None
     assert sample["name"] == "order-resilience-lab"
     assert sample["health_path"] == "/orders"
+    assert sample["observe_service"] == "checkout-api"   # 5개 Service 중 진입점(구 YAML 시나리오와 동일)
     assert sample["manifest_text"].count("kind: Deployment") == 5
     assert sample["manifest_text"].count("kind: Service") == 5
+
+
+def test_nginx_sample_is_a_single_deployment_with_service():
+    from app.services.sample_apps import get_sample_app
+    sample = get_sample_app("nginx")
+    assert sample is not None
+    assert sample["name"] == "nginx"
+    assert sample["health_path"] == "/"
+    assert sample["observe_service"] == "nginx"
+    assert sample["manifest_text"].count("kind: Deployment") == 1
+    assert sample["manifest_text"].count("kind: Service") == 1
+    assert "matchLabels:\n      app: nginx" in sample["manifest_text"]   # 가설 경로 selector 파싱 대상
+
+
+def test_register_k3s_nginx_sample_app(client):
+    resp = client.post("/apps/k3s", data={"name": "ignored", "sample_id": "nginx"})
+    assert resp.status_code == 200
+    assert "nginx" in resp.text
+    exp = client.get("/experiments")
+    assert "nginx" in exp.text
 
 
 def test_experiments_new_dialog_wizard(client):
@@ -250,3 +298,41 @@ def test_sidebar_no_eks_status_box(client):
     resp = client.get("/")          # 풀페이지(사이드바 포함)
     assert resp.status_code == 200
     assert "EKS 정상" not in resp.text  # 박스를 유일하게 식별하는 라벨 ("5/5"는 Slice4 실 노드수와 충돌 가능해 제외)
+
+
+def _stub_proposals_for(sample_id: str, target: str) -> list[str]:
+    from app.services.agent.hypothesis_schema import ImprovementInputPayload
+    from app.services.agent.hypothesis_validation import validate_proposals
+    from app.services.improvement_specs import ALLOWED_IMPROVEMENTS
+    from app.services.sample_apps import get_sample_app
+    from app.services.stubs import StubHypothesisAgent
+    sample = get_sample_app(sample_id)
+    payload = ImprovementInputPayload(
+        app={"name": sample["name"], "env": "k3s", "port": 80, "health_path": sample["health_path"]},
+        manifest_yaml=sample["manifest_text"], manifest_findings=[], candidate={"target_workload": target},
+        experiment={"id": 1}, phase_summaries={}, allowed_improvements=ALLOWED_IMPROVEMENTS, max_proposals=3)
+    proposals, errors = validate_proposals(StubHypothesisAgent().propose_improvements(payload), sample["manifest_text"])
+    assert errors == []
+    return [p.title for p in proposals]
+
+
+def test_samples_carry_intentional_weaknesses_that_improvements_fix():
+    """샘플은 '약점 있는 기준선' — 개선 전 실패·개선 후 통과가 보고서에 드러나도록 설계(09/06)."""
+    import yaml
+    from app.services.sample_apps import get_sample_app
+
+    nginx = [d for d in yaml.safe_load_all(get_sample_app("nginx")["manifest_text"]) if d["kind"] == "Deployment"][0]
+    assert nginx["spec"]["replicas"] == 1
+    assert nginx["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["periodSeconds"] == 10
+
+    lab = {d["metadata"]["name"]: d for d in yaml.safe_load_all(get_sample_app("order-resilience-lab")["manifest_text"])
+           if d["kind"] == "Deployment"}
+    assert lab["payment-api"]["spec"]["replicas"] == 1                       # 단일 장애점
+    order_env = {e["name"]: e["value"] for e in lab["order-api"]["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert order_env["UPSTREAM_RETRIES"] == "0" and order_env["OPTIONAL_UPSTREAMS"] == ""   # 개선이 켤 수 있는 env
+    assert "payment-api" in order_env["UPSTREAMS"]
+
+    assert _stub_proposals_for("nginx", "nginx") == [
+        "nginx 파드 개수 1 → 3으로 증설", "readinessProbe 주기 단축", "종료 전 유예(preStop sleep)"]
+    assert _stub_proposals_for("order-resilience-lab", "payment-api") == [
+        "payment-api 파드 개수 1 → 3으로 증설", "readinessProbe 주기 단축", "order-api → payment-api 호출 재시도 0 → 2회"]

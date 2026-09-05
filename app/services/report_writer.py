@@ -7,6 +7,7 @@ import re
 import httpx
 
 from app.config import settings
+from app.services.improvement_specs import change_rows
 
 
 _SCHEMA = {
@@ -108,8 +109,10 @@ def deterministic_report(facts: dict) -> dict:
         if scenario["after_verdict"] != "passed":
             residual_risks.append(f"{scenario['title']}: {', '.join(scenario['failed_checks_after']) or '실험 유효성 확인 필요'}")
     changes = [
-        f"{item['deployment']}의 {item['key']} 값을 {item['before']}에서 {item['after']}로 변경하고 rollout Ready를 확인했습니다."
+        f"{item['deployment']}의 {row['path']} 값을 {_change_value(row['before'])}에서 "
+        f"{_change_value(row['after'])}로 변경하고 rollout Ready를 확인했습니다."
         for item in comparison["changes"]
+        for row in change_rows(item, only_changed=True)
     ]
     return {
         "executive_summary": (
@@ -171,3 +174,12 @@ def _delta_text(value: float | None) -> str:
 
 def _value(value, suffix: str) -> str:
     return "관측 없음" if value is None else f"{value}{suffix}"
+
+
+def _change_value(value) -> str:
+    """전후 값 표기 — 없던 필드는 '없음', 객체(핸들러 등)는 compact JSON."""
+    if value is None:
+        return "없음"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)

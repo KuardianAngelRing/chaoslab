@@ -8,6 +8,7 @@ data:
   app.py: |
     import json
     import os
+    import threading
     import time
     import urllib.error
     import urllib.request
@@ -17,9 +18,46 @@ data:
     UPSTREAMS = [item for item in os.getenv("UPSTREAMS", "").split(",") if item]
     TIMEOUT = float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", "0.45"))
     DEPENDENCY_HEALTHCHECKS = os.getenv("DEPENDENCY_HEALTHCHECKS", "0") == "1"
-    requests_total = 0
+    # 개선 단계가 env로 켤 수 있는 회복 로직 — 기본값은 전부 꺼져 있다(의도된 약점).
+    RETRIES = int(os.getenv("UPSTREAM_RETRIES", "0"))                 # 실패 시 재시도 횟수
+    OPTIONAL = {item.strip() for item in os.getenv("OPTIONAL_UPSTREAMS", "").split(",") if item.strip()}
+    PORT = int(os.getenv("PORT", "8080"))
 
-    def call(url):
+    # Prometheus 노출 — chaoslab LocalPrometheus 계약(chaospilot_http_requests_total{status} +
+    # chaospilot_http_request_duration_seconds 히스토그램). 비즈니스 경로(/orders·/work)만 계수한다:
+    # probe(/live·/ready) 트래픽이 rps를 지배하고 /ready 503이 오류율에 섞이는 것을 막기 위함.
+    BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+    METRICS_LOCK = threading.Lock()  # ThreadingHTTPServer — 요청마다 스레드
+    requests_by_status = {}
+    duration_buckets = [0] * len(BUCKETS)
+    duration_sum = 0.0
+    duration_count = 0
+
+    def observe(status, seconds):
+        global duration_sum, duration_count
+        with METRICS_LOCK:
+            key = str(status)
+            requests_by_status[key] = requests_by_status.get(key, 0) + 1
+            for i, bound in enumerate(BUCKETS):
+                if seconds <= bound:
+                    duration_buckets[i] += 1
+            duration_sum += seconds
+            duration_count += 1
+
+    def render_metrics():
+        with METRICS_LOCK:
+            lines = ["# TYPE chaospilot_http_requests_total counter"]
+            for status, count in sorted(requests_by_status.items()):
+                lines.append(f'chaospilot_http_requests_total{{service="{SERVICE}",status="{status}"}} {count}')
+            lines.append("# TYPE chaospilot_http_request_duration_seconds histogram")
+            for bound, count in zip(BUCKETS, duration_buckets):
+                lines.append(f'chaospilot_http_request_duration_seconds_bucket{{service="{SERVICE}",le="{bound}"}} {count}')
+            lines.append(f'chaospilot_http_request_duration_seconds_bucket{{service="{SERVICE}",le="+Inf"}} {duration_count}')
+            lines.append(f'chaospilot_http_request_duration_seconds_sum{{service="{SERVICE}"}} {duration_sum}')
+            lines.append(f'chaospilot_http_request_duration_seconds_count{{service="{SERVICE}"}} {duration_count}')
+        return "\n".join(lines) + "\n"
+
+    def call_once(url):
         started = time.monotonic()
         try:
             with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
@@ -30,6 +68,21 @@ data:
             return {"upstream": url, "ok": False,
                     "latency_ms": round((time.monotonic() - started) * 1000, 1),
                     "error": str(exc)}
+
+    def call(url):
+        result = call_once(url)
+        attempts = 1
+        while not result["ok"] and attempts <= RETRIES:
+            time.sleep(0.1)
+            result = call_once(url)
+            attempts += 1
+        result["attempts"] = attempts
+        host = url.split("//", 1)[-1].split("/", 1)[0]
+        if not result["ok"] and host in OPTIONAL:
+            # 선택적 의존성(예: 결제 지연 처리) — 실패해도 요청은 degraded 성공으로 마무리
+            result["ok"] = True
+            result["degraded"] = True
+        return result
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -44,18 +97,17 @@ data:
             self.wfile.write(encoded)
 
         def do_GET(self):
-            global requests_total
             started = time.monotonic()
             if self.path == "/live":
                 self.send_json(200, {"service": SERVICE, "status": "live"})
                 return
             if self.path == "/metrics":
-                body = "# TYPE chaoslab_http_requests_total counter\\n"
-                body += f'chaoslab_http_requests_total{{service="{SERVICE}"}} {requests_total}\\n'
+                body = render_metrics().encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; version=0.0.4")
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body.encode())
+                self.wfile.write(body)
                 return
             if self.path == "/ready":
                 checks = [call(url + "/live") for url in UPSTREAMS] if DEPENDENCY_HEALTHCHECKS else []
@@ -65,16 +117,19 @@ data:
             if self.path not in ("/orders", "/work"):
                 self.send_json(404, {"service": SERVICE, "error": "not found"})
                 return
-            requests_total += 1
             checks = [call(url + ("/orders" if SERVICE == "checkout-api" else "/work")) for url in UPSTREAMS]
             ok = all(c["ok"] for c in checks)
-            payload = {"service": SERVICE, "path": self.path, "ok": ok, "attempts": 1,
+            payload = {"service": SERVICE, "path": self.path, "ok": ok,
+                       "attempts": max([c.get("attempts", 1) for c in checks], default=1),
+                       "degraded": any(c.get("degraded") for c in checks),
                        "dependencies": checks,
                        "latency_ms": round((time.monotonic() - started) * 1000, 1)}
             print(json.dumps(payload), flush=True)
-            self.send_json(200 if ok else 503, payload)
+            status = 200 if ok else 503
+            observe(status, time.monotonic() - started)
+            self.send_json(status, payload)
 
-    ThreadingHTTPServer(("", 8080), Handler).serve_forever()
+    ThreadingHTTPServer(("", PORT), Handler).serve_forever()
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -91,6 +146,10 @@ spec:
       app.kubernetes.io/name: checkout-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *checkout_labels
     spec:
       containers:
@@ -103,6 +162,8 @@ spec:
             - {name: SERVICE_NAME, value: checkout-api}
             - {name: UPSTREAMS, value: http://order-api}
             - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+            - {name: UPSTREAM_RETRIES, value: "0"}
+            - {name: OPTIONAL_UPSTREAMS, value: ""}
             - {name: DEPENDENCY_HEALTHCHECKS, value: "1"}
           ports: [{containerPort: 8080, name: http}]
           resources:
@@ -143,6 +204,10 @@ spec:
       app.kubernetes.io/name: order-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *order_labels
     spec:
       containers:
@@ -152,8 +217,10 @@ spec:
           command: ["python", "/app/app.py"]
           env:
             - {name: SERVICE_NAME, value: order-api}
-            - {name: UPSTREAMS, value: http://catalog-api,http://inventory-api,http://payment-api}
+            - {name: UPSTREAMS, value: "http://catalog-api,http://inventory-api,http://payment-api"}
             - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+            - {name: UPSTREAM_RETRIES, value: "0"}
+            - {name: OPTIONAL_UPSTREAMS, value: ""}
             - {name: DEPENDENCY_HEALTHCHECKS, value: "1"}
           ports: [{containerPort: 8080, name: http}]
           resources:
@@ -194,6 +261,10 @@ spec:
       app.kubernetes.io/name: catalog-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *catalog_labels
     spec:
       containers:
@@ -243,6 +314,10 @@ spec:
       app.kubernetes.io/name: inventory-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *inventory_labels
     spec:
       containers:
@@ -286,12 +361,16 @@ metadata:
     app.kubernetes.io/part-of: order-resilience-lab
     chaoslab.dev/component: payment
 spec:
-  replicas: 2
+  replicas: 1          # 의도된 약점 — 결제 서비스가 단일 장애점(파드 1개)
   selector:
     matchLabels:
       app.kubernetes.io/name: payment-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *payment_labels
     spec:
       containers:

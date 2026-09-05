@@ -15,7 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.db.database import SessionLocal, get_session
 from app.db.models import HypothesisRun
-from app.db.repositories import AppRepository, HypothesisRepository
+from app.db.repositories import AppRepository, HypothesisRepository, ScenarioRunRepository
 from app.deps import make_hypothesis_agent
 from app.rendering import render_page
 from app.routers.experiments import _watch_experiment, start_experiment
@@ -25,13 +25,21 @@ from app.services.agent.hypothesis_validation import (
     run_concretize,
     run_detailing,
     run_generation,
+    run_proposing,
 )
+from app.services.agent.improvement_assembler import assemble_improvement_input
 from app.services.chaos_specs import CHAOS_SPECS
+from app.services.improvement_specs import preview_rows, validate_improvement
+from app.services.regression import DEFAULT_CRITERIA
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _MAX_FREEFORM_LEN = 200
+
+
+_TERMINAL_EXPERIMENT = ("completed", "failed", "stopped")
+_IMPROVEMENT_TYPE_LABELS = {"deployment_env": "환경변수", "manifest_patch": "매니페스트 패치"}
 
 
 def _is_active(run: HypothesisRun, candidates) -> bool:
@@ -40,17 +48,66 @@ def _is_active(run: HypothesisRun, candidates) -> bool:
             or any(c.detail_status == "detailing" for c in candidates))
 
 
-def _page(request: Request, session: Session, run: HypothesisRun):
+def _stream_active(run: HypothesisRun, candidates, experiment) -> bool:
+    """SSE 구독이 필요한 활동 — 후보/직접 입력/detailing(실험 전) 또는 개선안 생성(실험 후)."""
+    return ((_is_active(run, candidates) and experiment is None)
+            or run.improvement_status == "generating")
+
+
+def _improvement_cards(proposals, manifest_yaml: str, form_errors: dict | None = None) -> list[dict]:
+    """제안 카드 컨텍스트 — 전/후 미리보기 행은 서버가 manifest 원문에서 계산(배지·값 단일 소스)."""
+    cards = []
+    for p in proposals:
+        spec = {"type": p.type, "deployment": p.deployment, "container": p.container,
+                "key": p.key, "value": p.value, "patch": p.patch}
+        cards.append({
+            "proposal": p,
+            "type_label": _IMPROVEMENT_TYPE_LABELS.get(p.type, p.type),
+            "rows": preview_rows(spec, manifest_yaml),
+            "patch_json": json.dumps(p.patch, ensure_ascii=False, indent=2) if p.type == "manifest_patch" else "",
+            "errors": (form_errors or {}).get(p.id, []),
+        })
+    return cards
+
+
+def _page(request: Request, session: Session, run: HypothesisRun,
+          improvement_form_errors: dict | None = None):
+    """워크플로우 셸(experiment_detail.html)을 가설 Run 앵커로 렌더.
+
+    1단계(후보 선택)·2단계(실험 카드)는 partials/_hypothesis_*.html — view 결정·클램프는
+    템플릿의 기존 stage_meta 규칙(run.current 초과 view는 기본 view로 강등)을 그대로 쓴다.
+    3·4단계는 승인 후보로 조립한 ScenarioRun(hypothesis_run_id) 기준 — 셸의 verify/result 섹션 재사용.
+    """
     repo = HypothesisRepository(session)
     candidates = repo.list_candidates(run.id)
     experiment = repo.experiment_for_run(run.id)
+    experiment_candidate = (repo.get_candidate(experiment.candidate_id)
+                            if experiment and experiment.candidate_id else None)
+    scenario_run = ScenarioRunRepository(session).latest_for_hypothesis(run.id)
+    proposals = repo.list_proposals(run.id)
     return render_page(
-        request, "pages/hypothesis.html",
+        request, "pages/experiment_detail.html",
         {"active_nav": "experiments",
          "app_count": len(AppRepository(session).list_all()),
-         "run": run, "candidates": candidates, "experiment": experiment,
-         "hypothesis_active": _is_active(run, candidates),
-         "chaos_labels": {k: v["label"] for k, v in CHAOS_SPECS.items()}},
+         "hypothesis_run": run, "candidates": candidates,
+         "experiment": experiment, "experiment_candidate": experiment_candidate,
+         "hypothesis_active": _stream_active(run, candidates, experiment),
+         # 개선 단계(설계 09/05 §7) — 3단계 상단 패널
+         "improvement_cards": _improvement_cards(proposals, run.app.manifest or "",
+                                                  improvement_form_errors),
+         "improvement_undecided": any(p.status == "proposed" for p in proposals),
+         "improvement_approved": sum(p.status == "approved" for p in proposals),
+         "improvement_allowed": experiment is not None
+                                and experiment.status in _TERMINAL_EXPERIMENT
+                                and scenario_run is None,
+         # 3단계 준비 세션(startPreparation)은 셸의 data-workflow-app-* 속성을 읽는다
+         "workflow_app": run.app, "workflow_objective": run.goal_text,
+         "scenario_run": scenario_run,
+         "regression_candidates": [c for c in candidates
+                                   if c.detail_status == "detailed" and c.params],
+         "default_criteria": DEFAULT_CRITERIA,
+         "chaos_labels": {k: v["label"] for k, v in CHAOS_SPECS.items()},
+         "chaos_specs": CHAOS_SPECS},
     )
 
 
@@ -81,7 +138,7 @@ def create_run(
         input_payload=payload.model_dump(), status="generating")
     background.add_task(_watch_generation, run.id)
     resp = _page(request, session, run)
-    resp.headers["HX-Push-Url"] = f"/hypothesis/{run.id}"
+    resp.headers["HX-Push-Url"] = f"/hypothesis/{run.id}?view=plan"
     return resp
 
 
@@ -148,7 +205,127 @@ def select_candidate(
     return _page(request, session, run)
 
 
+@router.post("/hypothesis/{run_id}/improvements")
+def propose_improvements(
+    run_id: int,
+    request: Request,
+    background: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
+    """2단계 실험 종료 후 AI 개선안 생성 트리거 (재생성 = 기존 제안 교체)."""
+    repo = HypothesisRepository(session)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="hypothesis run not found")
+    experiment = repo.experiment_for_run(run.id)
+    if experiment is None or experiment.status not in _TERMINAL_EXPERIMENT:
+        raise HTTPException(status_code=409, detail="실험이 끝난 뒤에 개선안을 만들 수 있어요")
+    if run.improvement_status == "generating":
+        raise HTTPException(status_code=409, detail="개선안을 이미 만들고 있어요")
+    if ScenarioRunRepository(session).latest_for_hypothesis(run.id) is not None:
+        raise HTTPException(status_code=409, detail="최종 회귀가 시작된 뒤에는 개선안을 바꿀 수 없어요")
+    repo.set_improvement(run, "generating")
+    background.add_task(_watch_improvements, run.id)
+    return _page(request, session, run)
+
+
+@router.post("/hypothesis/{run_id}/improvements/approve")
+async def approve_improvements(
+    run_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """체크한 제안 → approved(편집분은 화이트리스트 재검증 후 교체), 나머지 → rejected.
+    폼: proposal_ids(복수) · none=1(전부 제외) · patch_{id}(JSON) · value_{id}."""
+    repo = HypothesisRepository(session)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="hypothesis run not found")
+    if run.improvement_status != "ready":
+        raise HTTPException(status_code=409, detail="개선안이 준비된 뒤에 결정할 수 있어요")
+    if ScenarioRunRepository(session).latest_for_hypothesis(run.id) is not None:
+        raise HTTPException(status_code=409, detail="최종 회귀가 시작된 뒤에는 결정을 바꿀 수 없어요")
+    form = await request.form()
+    proposals = {p.id: p for p in repo.list_proposals(run.id)}
+    approved: set[int] = set()
+    if form.get("none") != "1":
+        for raw in form.getlist("proposal_ids"):
+            try:
+                pid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if pid in proposals:
+                approved.add(pid)
+    edits: dict[int, dict] = {}
+    errors: dict[int, list[str]] = {}
+    for pid in approved:
+        p = proposals[pid]
+        if p.type == "manifest_patch":
+            text = (form.get(f"patch_{pid}") or "").strip()
+            if not text:
+                continue
+            try:
+                patch = json.loads(text)
+            except json.JSONDecodeError as e:
+                errors[pid] = [f"patch JSON 파싱 실패: {e.msg}"]
+                continue
+            if patch == p.patch:
+                continue
+            spec = {"type": p.type, "deployment": p.deployment, "container": p.container, "patch": patch}
+        else:
+            value = form.get(f"value_{pid}")
+            if value is None or value == p.value:
+                continue
+            spec = {"type": p.type, "deployment": p.deployment, "container": p.container,
+                    "key": p.key, "value": value}
+        normalized, spec_errors = validate_improvement(spec)
+        if spec_errors:
+            errors[pid] = spec_errors
+        else:
+            edits[pid] = normalized
+    if errors:
+        return _page(request, session, run, improvement_form_errors=errors)
+    repo.decide_proposals(run.id, approved, edits)
+    return _page(request, session, run)
+
+
+@router.post("/hypothesis/{run_id}/improvements/reopen")
+def reopen_improvements(run_id: int, request: Request, session: Session = Depends(get_session)):
+    """결정 취소 — 회귀 시작 전이면 전부 proposed로 되돌려 다시 고를 수 있게 (편집값은 유지)."""
+    repo = HypothesisRepository(session)
+    run = repo.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="hypothesis run not found")
+    if ScenarioRunRepository(session).latest_for_hypothesis(run.id) is not None:
+        raise HTTPException(status_code=409, detail="최종 회귀가 시작된 뒤에는 결정을 바꿀 수 없어요")
+    repo.reopen_proposals(run.id)
+    return _page(request, session, run)
+
+
 # ── 백그라운드 워처 (builds·experiments 패턴 — SessionLocal 직접) ──
+
+def _watch_improvements(run_id: int) -> None:
+    s = SessionLocal()
+    try:
+        repo = HypothesisRepository(s)
+        run = repo.get_run(run_id)
+        if run is None or run.improvement_status != "generating":
+            return
+        try:
+            experiment = repo.experiment_for_run(run.id)
+            if experiment is None:
+                raise RuntimeError("개선안 근거가 될 실험이 없어요")
+            candidate = repo.get_candidate(experiment.candidate_id) if experiment.candidate_id else None
+            payload = assemble_improvement_input(run, experiment, candidate)
+            proposals = run_proposing(make_hypothesis_agent(), payload)
+            repo.replace_proposals(run.id, experiment.id, proposals)
+            repo.set_improvement(run, "ready")
+        except Exception as e:
+            logger.exception("improvement proposing failed (run %s)", run_id)
+            repo.set_improvement(run, "failed", error=str(e))
+    finally:
+        s.close()
+
 
 def _watch_generation(run_id: int) -> None:
     s = SessionLocal()
@@ -239,8 +416,9 @@ def _watch_detailing(candidate_id: int) -> None:
 async def hypothesis_stream(run_id: int, request: Request):
     """상태 전용 SSE(DB 폴링) — 활동이 없으면 종료 (experiments/stream 미러).
 
-    활동 = generating · freeform 생성 · 후보 detailing. 실험이 만들어지면
-    completed(redirect=/experiments)로 종료 — 배지·값은 항상 서버 렌더가 단일 소스.
+    활동 = generating · freeform 생성 · 후보 detailing · (실험 후) 개선안 생성. 실험이 만들어지면
+    completed(redirect=/hypothesis/{id}?view=execute)로 종료 — 셸 2단계(실험 카드)로 착지.
+    개선안 생성이 끝나면 redirect=?view=verify(3단계 개선 패널). 배지·값은 항상 서버 렌더가 단일 소스.
     """
     async def gen():
         last = None
@@ -261,9 +439,13 @@ async def hypothesis_stream(run_id: int, request: Request):
                         "freeform": run.freeform_status,
                         "details": {str(c.id): c.detail_status for c in candidates},
                         "experiment_id": experiment.id if experiment else None,
+                        "improvements": run.improvement_status,
                     }
-                    active = _is_active(run, candidates) and experiment is None
-                    redirect = "/experiments" if experiment else ""
+                    active = _stream_active(run, candidates, experiment)
+                    if experiment and run.improvement_status in ("ready", "failed"):
+                        redirect = f"/hypothesis/{run_id}?view=verify"
+                    else:
+                        redirect = f"/hypothesis/{run_id}?view=execute" if experiment else ""
             finally:
                 s.close()
             if snapshot != last:

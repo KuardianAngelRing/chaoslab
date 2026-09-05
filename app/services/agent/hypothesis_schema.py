@@ -64,3 +64,34 @@ class DetailingResult(_Strict):
 
     params: dict                      # chaos_specs.validate_params 통과 필수
     rationale: str = ""               # 값 선정 근거 한 줄(카드 미노출, 이력용)
+
+
+# ── 3단 — 개선 제안 (설계 2026-09-05 §2) ──
+
+class ImprovementInputPayload(_Strict):
+    """propose_improvements 입력 — 핸드오프 계약 중 실측(phase_summaries)만 싣고
+    k3s Stub 소스산(istio·events·logs)은 싣지 않는다(규칙 1: 페이로드 사실만 인용)."""
+
+    schema_version: str = HYPOTHESIS_SCHEMA_VERSION
+    app: dict                         # name · env · port · health_path
+    manifest_yaml: str
+    manifest_findings: list[ManifestFinding]
+    candidate: dict                   # title · chaos_type · target_workload · hypothesis · params
+    experiment: dict                  # id · status · r_index · started_at · finished_at
+    phase_summaries: dict             # {baseline, fault, recovery} — 저장 *_metrics 그대로, 없으면 {}
+    allowed_improvements: dict        # improvement_specs.ALLOWED_IMPROVEMENTS
+    max_proposals: int                # 1~3
+
+
+class ImprovementProposalOut(_Strict):
+    """propose_improvements 출력 1건 — improvement_specs.validate_improvement 통과 필수."""
+
+    title: str
+    type: str                         # deployment_env | manifest_patch
+    deployment: str
+    container: str = ""
+    key: str = ""
+    value: str = ""
+    patch: dict = {}
+    rationale: str
+    expected_effect: str

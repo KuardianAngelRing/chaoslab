@@ -23,6 +23,8 @@ document.addEventListener('click', (e) => {
   const icon = document.getElementById('themeIcon');
   if (icon) icon.setAttribute('icon', next === 'dark' ? 'solar:sun-bold' : 'solar:moon-bold');
   Object.values(window._charts || {}).forEach(c => c && c.update());
+  // 라이브 메트릭 차트는 색 옵션이 스크립터블(CSS 변수 재조회)이라 update()만으로 새 테마 색을 입는다
+  _liveCharts.forEach(c => c && c.update());
 });
 
 // ============== 탭 전환 (이벤트 위임) ==============
@@ -393,6 +395,7 @@ async function startPreparation(root) {
       const done = JSON.parse(event.data);
       closePreparationStream();
       root.dataset.preparing = 'false';
+      root.dataset.preparationStatus = done.status;
       renderPreparation(root, done);
       if (done.status === 'ready') maybePlayExecution(root);
     });
@@ -400,6 +403,7 @@ async function startPreparation(root) {
     fetch(`/experiment-sessions/${payload.id}/start`, {method: 'POST'}).catch(() => {
       closePreparationStream();
       root.dataset.preparing = 'false';
+      root.dataset.preparationStatus = 'failed';
       renderPreparation(root, {status: 'failed', error: '환경 준비를 시작하지 못했습니다'});
     });
     return true;
@@ -417,14 +421,8 @@ document.addEventListener('click', (e) => {
   const appId = picked.value;
   const objective = form.querySelector('textarea[name="objective"]')?.value.trim() || '';
   closeDialog('newExperiment');
-  // 시나리오 회귀 워크플로우는 order-resilience-lab 전용(regression.scenario_snapshot 제약)
-  // — 그 외 앱은 가설 수립 흐름(POST /hypothesis)으로.
-  if (picked.dataset.appName === 'order-resilience-lab') {
-    htmx.ajax('GET', `/experiments/1?${new URLSearchParams({view: 'plan', app_id: appId, objective})}`, {
-      target: '#main-content', swap: 'innerHTML', pushUrl: true,
-    });
-    return;
-  }
+  // 모든 앱이 가설 수립 흐름(POST /hypothesis)으로 — order-resilience-lab 전용 YAML 셸 분기는
+  // 회귀가 가설 후보를 소비하게 되면서(09/05) 제거. 구 셸(/experiments/{1,2,3})은 데모 URL로만 남음.
   htmx.ajax('POST', '/hypothesis', {
     target: '#main-content', swap: 'innerHTML',
     values: {
@@ -459,12 +457,14 @@ function k3sSampleSync(root) {
   const name = root.querySelector('[data-k3s-app-name]');
   const healthPath = root.querySelector('[data-k3s-health-path]');
   if (!selected || !name || !healthPath) return;
-  if (selected.value === 'order-resilience-lab') {
-    name.value = 'order-resilience-lab';
-    healthPath.value = '/orders';
+  const samples = [...root.querySelectorAll('input[name="sample_id"][data-sample-name]')];
+  if (selected.dataset.sampleName) {
+    name.value = selected.dataset.sampleName;
+    healthPath.value = selected.dataset.sampleHealth || '/healthz';
   } else {
-    if (name.value === 'order-resilience-lab') name.value = '';
-    if (healthPath.value === '/orders') healthPath.value = '/healthz';
+    // 직접 업로드로 전환: 샘플이 채워 둔 자동값만 비우고 사용자가 친 값은 보존
+    if (samples.some((s) => s.dataset.sampleName === name.value)) name.value = '';
+    if (samples.some((s) => s.dataset.sampleHealth === healthPath.value)) healthPath.value = '/healthz';
   }
 }
 document.addEventListener('change', (e) => {
@@ -488,9 +488,17 @@ function watchExperiments() {
     if (_expStreams.has(id)) return;
     _expStreams.add(id);
     const es = new EventSource(`/experiments/${id}/stream`);
+    const refresh = el.dataset.runningExpRefresh || '/experiments';
+    // 중간 상태 전환(deploying→running)도 서버 렌더 배지가 단일 소스 — 첫 status(현재값)는 건너뛰고 바뀔 때만 재요청.
+    // 재요청 후 같은 id 요소가 다시 그려져도 _expStreams에 남아 있어 스트림은 그대로 이어진다.
+    let firstStatus = true;
+    es.addEventListener('status', () => {
+      if (firstStatus) { firstStatus = false; return; }
+      if (window.htmx) htmx.ajax('GET', refresh, { target: '#main-content', swap: 'innerHTML' });
+    });
     es.addEventListener('completed', () => {
       es.close(); _expStreams.delete(id);
-      if (window.htmx) htmx.ajax('GET', '/experiments', { target: '#main-content', swap: 'innerHTML' });
+      if (window.htmx) htmx.ajax('GET', refresh, { target: '#main-content', swap: 'innerHTML' });
     });
     es.onerror = () => { es.close(); _expStreams.delete(id); };
   });
@@ -547,6 +555,15 @@ function syncWorkflowCandidates(root) {
   const selectedCandidates = candidates.filter((candidate) => candidate.checked);
   const selectedIds = selectedCandidates.map((candidate) => candidate.dataset.candidateId);
   const selected = selectedIds.length;
+  if (root.dataset.workflowSelectMode === 'single') {
+    // 가설 셸: radio 1개 → CTA 활성. 요약·도움말 문구는 서버 렌더 유지 (선택 시에만 덮어씀)
+    const next = root.querySelector('[data-workflow-selection-next]');
+    if (!next) return; // CTA 없음 = 구체화 중·실험 시작됨 — 서버 렌더 문구 그대로 (checked+disabled radio가 있어도 덮어쓰지 않음)
+    next.disabled = selected < 1;
+    const summary = root.querySelector('[data-workflow-selection-summary]');
+    if (summary && selected) summary.textContent = `"${selectedCandidates[0].dataset.candidateTitle}" 후보를 선택했어요`;
+    return;
+  }
   const maxSelected = Number(root.dataset.workflowMaxSelected || 3);
   candidates.forEach((candidate) => {
     const card = candidate.closest('label')?.querySelector('[data-candidate-card]');
@@ -611,7 +628,7 @@ function appendRegressionRow(tbody, spec, baselineResult, finalResult, progress)
   row.style.borderColor = 'var(--border)';
   const values = [
     [spec.title, finalResult?.crd_name || baselineResult?.crd_name || ''],
-    [spec.target_selector?.['app.kubernetes.io/name'] || '', ''],
+    [Object.values(spec.target_selector || {}).join(', ') || 'namespace 전체', ''],
     [spec.chaos_type || '', ''],
   ];
   values.forEach(([primary, secondary], index) => {
@@ -704,20 +721,25 @@ function watchScenarioRun(root, runId) {
 async function startScenarioRun(root) {
   if (root.dataset.scenarioRunId) return true;
   const sessionId = root.dataset.preparationSessionId;
-  const selectedIds = root.dataset.selectedCandidateIds || '';
+  const hypothesisRun = root.dataset.hypothesisRun || '';
+  // 가설 경로는 승인 후보로 서버가 조립 — selected_ids 대신 hypothesis_run_id
+  const selectedIds = hypothesisRun ? '' : (root.dataset.selectedCandidateIds || '');
   if (!sessionId) return false;
   try {
-    const response = await fetch('/scenario-runs', {
-      method: 'POST',
-      body: new URLSearchParams({session_id: sessionId, selected_ids: selectedIds}),
-    });
+    const body = new URLSearchParams({session_id: sessionId, selected_ids: selectedIds});
+    if (hypothesisRun) body.set('hypothesis_run_id', hypothesisRun);
+    const response = await fetch('/scenario-runs', {method: 'POST', body});
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || '최종 회귀를 시작하지 못했습니다');
     root.dataset.scenarioRunId = String(payload.id);
-    const url = new URL(window.location.href);
+    const url = hypothesisRun
+      ? new URL(`/hypothesis/${hypothesisRun}`, window.location.origin)
+      : new URL(window.location.href);
     url.searchParams.set('view', 'verify');
     url.searchParams.set('scenario_run_id', payload.id);
     history.replaceState({}, '', url);
+    const setup = root.querySelector('[data-hypothesis-regression-setup]');
+    if (setup) setup.classList.add('hidden');
     renderScenarioRun(root, payload);
     watchScenarioRun(root, payload.id);
     return true;
@@ -726,6 +748,29 @@ async function startScenarioRun(root) {
     if (panel) { panel.classList.remove('hidden'); panel.textContent = error.message; }
     return false;
   }
+}
+
+// 가설 경로 3단계: 준비 세션(ready) → 승인 후보 회귀 시작. startPreparation은 스트림만 열고
+// 바로 돌아오므로 dataset(preparing·preparationStatus)으로 종료를 기다린다.
+function waitPreparation(root) {
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (root.dataset.preparing === 'true') { setTimeout(tick, 500); return; }
+      resolve(root.dataset.preparationStatus || (root.dataset.preparationSessionId ? 'ready' : 'failed'));
+    };
+    tick();
+  });
+}
+async function startHypothesisRegression(root) {
+  if (!await startPreparation(root)) return false;
+  const status = await waitPreparation(root);
+  if (status !== 'ready') {
+    // 실패한 세션은 버리고 다음 클릭에서 새 세션을 만들 수 있게
+    delete root.dataset.preparationSessionId;
+    delete root.dataset.preparationStatus;
+    return false;
+  }
+  return startScenarioRun(root);
 }
 
 function syncWorkflowExecutionSelection(root, selectedIds) {
@@ -872,12 +917,22 @@ document.addEventListener('click', async (e) => {
     maybePlayExecution(shell);
   }
 
+  const hypStart = e.target.closest && e.target.closest('[data-hypothesis-regression-start]');
+  if (hypStart) {
+    if (hypStart.disabled) return;
+    const root = hypStart.closest('[data-workflow-shell]');
+    hypStart.disabled = true;
+    if (!await startHypothesisRegression(root)) hypStart.disabled = false;
+    return;
+  }
+
   const go = e.target.closest && e.target.closest('[data-workflow-go]');
   if (!go || go.disabled) return;
   const root = go.closest('[data-workflow-shell]');
   const target = root?.querySelector(`[data-workflow-stage="${go.dataset.workflowGo}"]`);
   if (target) {
-    if (go.dataset.workflowGo === 'execute' && root.dataset.workflowAppEnv === 'k3s') {
+    // 가설 경로는 2단계 실험이 이미 끝난 상태 — 준비 세션은 3단계 회귀 시작 버튼이 만든다
+    if (go.dataset.workflowGo === 'execute' && root.dataset.workflowAppEnv === 'k3s' && !root.dataset.hypothesisRun) {
       if (!await startPreparation(root)) return;
     }
     if (go.hasAttribute('data-regression-start')) {
@@ -903,14 +958,20 @@ document.addEventListener('click', (e) => {
   const root = result.closest('[data-workflow-shell]');
   const runId = root?.dataset.scenarioRunId;
   if (!runId) return;
-  htmx.ajax('GET', `/experiments/${root.dataset.workflowRunId}?view=result&scenario_run_id=${runId}`, {
-    target: '#main-content', swap: 'innerHTML', pushUrl: true,
-  });
+  const resultUrl = root.dataset.hypothesisRun
+    ? `/hypothesis/${root.dataset.hypothesisRun}?view=result`
+    : `/experiments/${root.dataset.workflowRunId}?view=result&scenario_run_id=${runId}`;
+  htmx.ajax('GET', resultUrl, {target: '#main-content', swap: 'innerHTML', pushUrl: true});
 });
 
 document.addEventListener('change', (e) => {
   if (e.target.matches && e.target.matches('[data-workflow-candidate]')) {
     syncWorkflowCandidates(e.target.closest('[data-workflow-shell]'));
+  }
+  // 개선안 카드(checkbox, 다중) — 시각 상태만 동기화. 승인/제외 배지는 서버 렌더가 단일 소스
+  if (e.target.matches && e.target.matches('[data-improvement-candidate]')) {
+    const card = e.target.closest('label')?.querySelector('[data-improvement-card]');
+    if (card) card.classList.toggle('is-selected', e.target.checked);
   }
 });
 
@@ -930,20 +991,90 @@ function watchHypothesis() {
     const id = el.dataset.hypothesisRun;
     if (_hypStreams.has(id)) return;
     _hypStreams.add(id);
+    const refresh = el.dataset.hypothesisRefresh || `/hypothesis/${id}`;
     const es = new EventSource(`/hypothesis/${id}/stream`);
     let first = true; // 최초 스냅샷은 방금 렌더된 화면과 같음 — 재요청 생략
     es.addEventListener('status', () => {
       if (first) { first = false; return; }
-      if (window.htmx) htmx.ajax('GET', `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+      if (window.htmx) htmx.ajax('GET', refresh, { target: '#main-content', swap: 'innerHTML' });
     });
     es.addEventListener('completed', (e) => {
       es.close(); _hypStreams.delete(id);
       let redirect = '';
       try { redirect = JSON.parse(e.data).redirect || ''; } catch (err) { /* noop */ }
-      if (window.htmx) htmx.ajax('GET', redirect || `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+      // 실험이 만들어지면 2단계로 착지 (URL도 맞춰 둔다 — 새로고침 시 같은 탭)
+      if (redirect) history.replaceState({}, '', redirect);
+      if (window.htmx) htmx.ajax('GET', redirect || refresh, { target: '#main-content', swap: 'innerHTML' });
     });
     es.onerror = () => { es.close(); _hypStreams.delete(id); };
   });
 }
 document.addEventListener('DOMContentLoaded', watchHypothesis);
 document.body.addEventListener('htmx:afterSwap', watchHypothesis);
+
+// ── 실험 진행 중 실시간 메트릭 (data-live-metrics → /experiments/{id}/metrics/stream) ──
+// 화면에 실행 카드는 1개 — 전역 스트림 1개만 유지, 스왑으로 요소가 바뀌면 이전 스트림을 닫고 다시 구독.
+let _liveMetricsStream = null;
+let _liveCharts = [];  // 테마 토글 시 update() 대상 — window._charts(initCharts가 스왑마다 파기)와 분리
+function watchLiveMetrics() {
+  const el = document.querySelector('[data-live-metrics]');
+  if (_liveMetricsStream) {
+    if (_liveMetricsStream._el === el) return;   // 같은 요소 — 구독 유지
+    _liveMetricsStream.close(); _liveMetricsStream = null;
+  }
+  _liveCharts.forEach(c => c && c.destroy()); _liveCharts = [];
+  if (!el || el.dataset.liveMetricsFinal === 'true' || typeof Chart === 'undefined') return;
+
+  // 색은 스크립터블 옵션으로 매 렌더마다 CSS 변수를 다시 읽는다 → 다크 토글 시 update()만으로 반영
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const WINDOW = 60;  // rolling window — 최근 60틱(3s × 60 = 3분)
+  const axis = (extra = {}) => ({ grid: { color: () => tdsBorderColor() }, ticks: { color: () => tdsTextColor(), font: { size: 10 }, ...extra } });
+  const common = { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } } };
+  const line = (varName, yAxisID, extra = {}) => ({ data: [], borderColor: () => cssVar(varName), backgroundColor: () => cssVar(varName) + '22', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true, yAxisID, ...extra });
+  // Ready 파드는 모든 앱에서 항상 값이 있는 유일한 시리즈(HTTP 메트릭 미노출 앱 포함) — 계단형·정수 눈금
+  const ready = new Chart(el.querySelector('[data-live-metrics-ready]'), {
+    type: 'line',
+    data: { labels: [], datasets: [line('--success', 'y', { stepped: true, fill: true })] },
+    options: { ...common, scales: { x: { display: false }, y: { ...axis({ precision: 0 }), min: 0, suggestedMax: 2 } } }
+  });
+  const latency = new Chart(el.querySelector('[data-live-metrics-latency]'), {
+    type: 'line',
+    data: { labels: [], datasets: [line('--warning', 'y'), line('--danger', 'y')] },
+    options: { ...common, scales: { x: { display: false }, y: { ...axis(), min: 0 } } }
+  });
+  const traffic = new Chart(el.querySelector('[data-live-metrics-traffic]'), {
+    type: 'line',
+    data: { labels: [], datasets: [line('--primary', 'y'), line('--danger', 'y1')] },
+    options: { ...common, scales: { x: { display: false }, y: { ...axis(), min: 0 },
+      y1: { position: 'right', min: 0, grid: { display: false }, ticks: { color: () => tdsTextColor(), font: { size: 10 }, callback: (v) => `${v}%` } } } }
+  });
+  _liveCharts = [ready, latency, traffic];
+  const note = el.querySelector('[data-live-metrics-note]');
+  const push = (chart, values, label) => {
+    chart.data.labels.push(label);
+    values.forEach((v, i) => chart.data.datasets[i].data.push(v));
+    if (chart.data.labels.length > WINDOW) { chart.data.labels.shift(); chart.data.datasets.forEach((d) => d.data.shift()); }
+    chart.update();
+  };
+  const pods = el.querySelector('[data-live-metrics-pods]');
+
+  const es = new EventSource(`/experiments/${el.dataset.liveMetrics}/metrics/stream`);
+  es._el = el;
+  es.addEventListener('metric', (e) => {
+    let m = {};
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    const label = (m.ts || '').slice(11, 19);
+    push(ready, [m.ready_pods], label);
+    push(latency, [m.p95_ms, m.p99_ms], label);
+    push(traffic, [m.rps, m.error_rate_pct], label);
+    if (pods) pods.textContent = m.ready_pods == null ? '-' : m.ready_pods;
+    // Ready 파드는 오는데 HTTP 지표가 전부 null이면 앱이 메트릭을 노출하지 않는 것(k3s nginx 샘플 등) — 안내만 보여준다
+    if (note) note.hidden = !(m.ready_pods != null && m.rps == null && m.p95_ms == null);
+  });
+  // completed 이후 화면 재요청은 watchExperiments(status 스트림)가 담당 — 여기선 스트림만 닫고 차트를 남긴다.
+  es.addEventListener('completed', () => { es.close(); if (_liveMetricsStream === es) _liveMetricsStream = null; });
+  es.onerror = () => { es.close(); if (_liveMetricsStream === es) _liveMetricsStream = null; };
+  _liveMetricsStream = es;
+}
+document.addEventListener('DOMContentLoaded', watchLiveMetrics);
+document.body.addEventListener('htmx:afterSwap', watchLiveMetrics);

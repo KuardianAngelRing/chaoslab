@@ -88,7 +88,15 @@ def make_hypothesis_agent() -> interfaces.HypothesisAgentService:
     return stubs.StubHypothesisAgent()
 
 
-def make_prometheus() -> interfaces.PrometheusService:
+def make_prometheus(env: str = "eks") -> interfaces.PrometheusService:
+    """앱 환경 기반 라우팅(make_chaos와 동일 규칙): k3s는 local_kubeconfig 게이트로
+    LocalPrometheus(k8s API 서비스 프록시, Istio 없음 — kube-state-metrics + 어노테이션 파드 메트릭),
+    eks는 use_real_services 게이트로 RealPrometheus(Istio 표준 메트릭)."""
+    if env == "k3s":
+        if settings.local_kubeconfig:
+            from app.services.real.local_prometheus import LocalPrometheus  # lazy: k8s SDK
+            return LocalPrometheus(settings)
+        return stubs.StubPrometheus()
     if settings.use_real_services:
         from app.services.real.prometheus import RealPrometheus  # lazy: httpx
         return RealPrometheus(settings)

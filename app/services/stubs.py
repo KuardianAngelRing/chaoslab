@@ -1,4 +1,6 @@
 """Slice 1 스텁 — mock 데이터 반환. 외부 시스템 호출 없음. 운영은 services/real/ 사용."""
+from datetime import datetime, timezone
+
 from app.services.interfaces import BuildRequest
 
 
@@ -31,6 +33,7 @@ class StubK3sWorkload:
             ("checkout-api", "app", "UPSTREAM_TIMEOUT_SECONDS"): "0.45",
             ("order-api", "app", "UPSTREAM_TIMEOUT_SECONDS"): "0.45",
         }
+        self.patches: dict[tuple[str, str], dict] = {}  # (ns, deployment) → 누적 적용 patch
 
     def deploy(self, namespace: str, manifest_yaml: str) -> None:
         return None
@@ -60,8 +63,43 @@ class StubK3sWorkload:
             "rollout_ready": True,
         }
 
+    def patch_deployment(self, namespace: str, deployment: str, patch: dict,
+                         timeout_s: int = 180) -> dict:
+        from app.services.improvement_specs import project
+
+        identity = (namespace, deployment)
+        before = project(self.patches.get(identity, {}), patch)
+        merged = _deep_merge(self.patches.get(identity, {}), patch)
+        self.patches[identity] = merged
+        return {
+            "type": "manifest_patch",
+            "deployment": deployment,
+            "patch": patch,
+            "before": before,
+            "after": project(merged, patch),
+            "rollout_ready": True,
+        }
+
     def teardown(self, namespace: str) -> None:
         return None
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    """Stub용 strategic merge 근사 — dict 재귀 병합, containers는 name 매칭, None은 삭제."""
+    out = dict(base)
+    for key, value in patch.items():
+        if value is None:
+            out.pop(key, None)
+        elif isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        elif isinstance(value, list) and all(isinstance(i, dict) and "name" in i for i in value):
+            existing = {i["name"]: i for i in out.get(key) or [] if isinstance(i, dict) and "name" in i}
+            for item in value:
+                existing[item["name"]] = _deep_merge(existing.get(item["name"], {}), item)
+            out[key] = list(existing.values())
+        else:
+            out[key] = value
+    return out
 
 
 class StubChaos:
@@ -124,7 +162,36 @@ class StubLocalK8s:
         }
 
 
+LIVE_SNAPSHOT_KEYS = ("ts", "rps", "error_rate_pct", "p95_ms", "p99_ms", "ready_pods")
+
+
+def _stub_live_series(tick: int) -> dict:
+    """호출 횟수(tick, 0부터) 기반 결정적 즉시값 — 정상(0~4) → 악화(5~14) → 회복(15~).
+
+    ts는 호출자가 채운다(순수 함수). 값 키는 live_snapshot 계약에서 ts를 뺀 것.
+    """
+    if tick < 5:      # 정상
+        return {"rps": 42.0 + (tick % 3), "error_rate_pct": 0.3,
+                "p95_ms": 118.0 + 4 * (tick % 2), "p99_ms": 205.0 + 6 * (tick % 2),
+                "ready_pods": 3}
+    if tick < 15:     # 장애 주입 — 오류율·레이턴시 상승, ready 파드 감소
+        k = tick - 5  # 0~9
+        return {"rps": round(38.0 - 2.4 * k, 1),
+                "error_rate_pct": round(min(23.1, 3.0 + 2.3 * k), 1),
+                "p95_ms": round(460.0 + 43.0 * k, 1), "p99_ms": round(1120.0 + 118.0 * k, 1),
+                "ready_pods": 1 if k >= 3 else 2}
+    k = min(tick - 15, 8)  # 회복 — 8틱에 걸쳐 기준선 복귀 후 유지
+    return {"rps": round(14.0 + 3.5 * k, 1),
+            "error_rate_pct": round(max(0.3, 12.0 - 1.5 * k), 1),
+            "p95_ms": round(max(118.0, 850.0 - 92.0 * k), 1),
+            "p99_ms": round(max(205.0, 2100.0 - 237.0 * k), 1),
+            "ready_pods": 3 if k >= 2 else 2}
+
+
 class StubPrometheus:
+    def __init__(self) -> None:
+        self._tick = 0
+
     def red_metrics(self, namespace: str) -> dict:
         return {"rate": 42.0, "error": 1.8, "duration": 380.0}
 
@@ -132,6 +199,11 @@ class StubPrometheus:
                       start, end) -> dict:
         # 모듈 하단 _PHASE_SUMMARY_SAMPLES 재사용 (호출 시점 해석)
         return dict(_PHASE_SUMMARY_SAMPLES[phase])
+
+    def live_snapshot(self, namespace: str, app_name: str) -> dict:
+        snap = _stub_live_series(self._tick)
+        self._tick += 1
+        return {"ts": datetime.now(timezone.utc).isoformat(), **snap}
 
 
 class StubLoki:
@@ -333,6 +405,85 @@ class StubHypothesisAgent:
                 params[name] = min(max(rule["min"], _STUB_PARAM_PREFS.get(name, rule["min"])),
                                    rule["max"])
         return {"params": params, "rationale": "스텁 기본값 — 필드 범위 안의 대표값"}
+
+    def propose_improvements(self, payload, feedback: str = "") -> list:
+        """manifest 약점 기반 결정적 제안(최대 max_proposals) — 순서대로
+        ① 대상 replicas < 2 → 3 ② readinessProbe 주기 > 3s(또는 없음) → 2s/추가
+        ③ 대상을 UPSTREAMS로 부르는 워크로드에 UPSTREAM_RETRIES가 있으면 0 → 2
+        ④ 채움용 preStop sleep 5s. 검증은 바깥(validate_proposals)에서."""
+        from app.services.improvement_specs import container_names, manifest_workloads
+
+        workloads = manifest_workloads(payload.manifest_yaml)
+        target = payload.candidate.get("target_workload")
+        name = target if target in workloads else next(iter(workloads), None)
+        if name is None:
+            return []
+        doc = workloads[name]
+        containers = ((((doc.get("spec") or {}).get("template") or {}).get("spec") or {})
+                      .get("containers") or [])
+        container = containers[0] if containers else {}
+        cname = (container_names(doc) or ["app"])[0]
+        out = []
+
+        replicas = int((doc.get("spec") or {}).get("replicas") or 1)
+        if replicas < 2:
+            out.append({
+                "title": f"{name} 파드 개수 {replicas} → 3으로 증설", "type": "manifest_patch",
+                "deployment": name, "container": cname, "patch": {"spec": {"replicas": 3}},
+                "rationale": f"{name}는 파드가 {replicas}개뿐이라 파드 장애가 곧 서비스 중단이다 — "
+                             "여분 파드가 있어야 하나가 죽어도 나머지가 요청을 받는다",
+                "expected_effect": "장애 구간 오류율이 크게 줄고 Ready 파드가 0으로 떨어지지 않아요",
+            })
+
+        probe = container.get("readinessProbe")
+        if probe and int(probe.get("periodSeconds") or 10) > 3:
+            out.append({
+                "title": "readinessProbe 주기 단축", "type": "manifest_patch", "deployment": name,
+                "container": cname,
+                "patch": {"spec": {"template": {"spec": {"containers": [
+                    {"name": cname, "readinessProbe": {"initialDelaySeconds": 2, "periodSeconds": 2,
+                                                       "failureThreshold": 2}}]}}}},
+                "rationale": f"준비 확인 주기가 {probe.get('periodSeconds')}초라 교체 파드가 트래픽에 늦게 합류하고, "
+                             "죽은 파드도 늦게 빠진다 — 준비 상태를 더 자주 확인한다",
+                "expected_effect": "파드 교체 중 오류 응답 감소와 회복 시간 단축이 기대돼요",
+            })
+        elif not probe:
+            ports = container.get("ports") or []
+            port = (ports[0].get("containerPort") if ports else None) or payload.app.get("port") or 80
+            out.append({
+                "title": "readinessProbe 추가", "type": "manifest_patch", "deployment": name, "container": cname,
+                "patch": {"spec": {"template": {"spec": {"containers": [
+                    {"name": cname, "readinessProbe": {"tcpSocket": {"port": int(port)},
+                                                       "periodSeconds": 2, "failureThreshold": 2}}]}}}},
+                "rationale": "장애 구간에서 준비되지 않은 파드가 Ready로 남아 요청을 받으면 오류가 늘어난다 — "
+                             "준비 상태를 확인해 트래픽에서 빨리 뺀다",
+                "expected_effect": "파드 교체 중 오류 응답 감소와 회복 시간 단축이 기대돼요",
+            })
+
+        for caller_name, caller in workloads.items():
+            for c in ((((caller.get("spec") or {}).get("template") or {}).get("spec") or {})
+                      .get("containers") or []):
+                env = {e.get("name"): str(e.get("value", "")) for e in (c.get("env") or []) if isinstance(e, dict)}
+                if "UPSTREAM_RETRIES" in env and name in env.get("UPSTREAMS", "") and env["UPSTREAM_RETRIES"] == "0":
+                    out.append({
+                        "title": f"{caller_name} → {name} 호출 재시도 0 → 2회", "type": "deployment_env",
+                        "deployment": caller_name, "container": c.get("name") or "app",
+                        "key": "UPSTREAM_RETRIES", "value": "2",
+                        "rationale": f"{caller_name}는 {name} 호출이 한 번 실패하면 곧바로 오류로 응답한다 — "
+                                     "짧은 재시도로 파드 교체 순간의 일시적 실패를 흡수한다",
+                        "expected_effect": "장애 구간의 일시적 연결 실패가 오류 응답으로 번지지 않아요",
+                    })
+                    break
+
+        out.append({
+            "title": "종료 전 유예(preStop sleep)", "type": "manifest_patch", "deployment": name,
+            "container": cname,
+            "patch": {"spec": {"template": {"spec": {"containers": [{"name": cname, "lifecycle": {"preStop": {"sleep": {"seconds": 5}}}}]}}}},
+            "rationale": "파드 종료 신호와 서비스 엔드포인트 제거 사이의 시차 동안 들어온 요청이 끊긴다 — "
+                         "종료 전 잠시 기다려 진행 중 요청을 마무리한다",
+            "expected_effect": "파드 종료 순간의 연결 끊김(5xx) 감소가 기대돼요",
+        })
+        return out[:payload.max_proposals]
 
     def snapshot(self) -> dict:
         return {"model_name": "stub", "cli_version": "stub"}

@@ -2,11 +2,6 @@
 {% from "macros/components.html" import framework_icon, env_badge %}
 
 {% block content %}
-{% set demo_runs = [
-  {"id":1, "code":"CL-042", "view":"plan", "stage":"후보 선택", "step":"1/4", "selected":"0 / 3", "verdict":"판정 전", "updated":"방금 전", "status":"선택 필요", "badge":"badge-warning"},
-  {"id":2, "code":"CL-041", "view":"execute", "stage":"순차 실행", "step":"2/4", "selected":"1 / 2", "verdict":"통과 1", "updated":"어제 17:42", "status":"실행 중", "badge":"badge-info"},
-  {"id":3, "code":"CL-040", "view":"result", "stage":"결과", "step":"4/4", "selected":"2 / 2", "verdict":"통과 1 · 검증 불충분 1", "updated":"07/31 14:18", "status":"완료 · 보완 필요", "badge":"badge-warning"}
-] %}
 <div class="max-w-7xl mx-auto px-8 py-8">
 
   <div class="mb-8">
@@ -24,35 +19,26 @@
     <p class="text-base mt-4" style="color: var(--muted-foreground);">검증 목표를 정하고, AI가 제안한 후보를 선택해 순차 실험과 최종 회귀까지 한 흐름으로 확인합니다.</p>
   </div>
 
-  <div class="tds-card px-4 py-3 mb-5 flex items-center gap-3" style="background: var(--primary-soft); border-color: var(--primary);">
-    <iconify-icon icon="solar:palette-bold" width="20" style="color: var(--primary);"></iconify-icon>
-    <div class="text-sm flex-1" style="color: var(--primary-soft-foreground);">
-      <span class="font-extrabold">UI 디자인 시안</span>
-      <span class="ml-1">모든 실행·메트릭·결과는 예시이며 저장하거나 실제 장애를 주입하지 않습니다.</span>
-    </div>
-    <span class="tds-badge badge-info">SAMPLE DATA</span>
-  </div>
-
   <div class="grid grid-cols-4 gap-4 mb-5">
     <div class="tds-card p-5">
       <div class="text-xs font-bold" style="color: var(--muted-foreground);">전체 실행</div>
-      <div class="text-2xl font-extrabold mt-2">3</div>
-      <div class="text-xs mt-1" style="color: var(--muted-foreground);">최근 7일 예시</div>
+      <div class="text-2xl font-extrabold mt-2">{{ hypothesis_kpi.total }}</div>
+      <div class="text-xs mt-1" style="color: var(--muted-foreground);">가설 수립 기준</div>
     </div>
     <div class="tds-card p-5">
       <div class="text-xs font-bold" style="color: var(--muted-foreground);">내 선택 필요</div>
-      <div class="text-2xl font-extrabold mt-2" style="color: var(--warning);">1</div>
+      <div class="text-2xl font-extrabold mt-2" style="color: var(--warning);">{{ hypothesis_kpi.needs_choice }}</div>
       <div class="text-xs mt-1" style="color: var(--muted-foreground);">후보 선택 대기</div>
     </div>
     <div class="tds-card p-5">
       <div class="text-xs font-bold" style="color: var(--muted-foreground);">진행 중</div>
-      <div class="text-2xl font-extrabold mt-2" style="color: var(--primary);">1</div>
-      <div class="text-xs mt-1" style="color: var(--muted-foreground);">순차 실험 실행</div>
+      <div class="text-2xl font-extrabold mt-2" style="color: var(--primary);">{{ hypothesis_kpi.running }}</div>
+      <div class="text-xs mt-1" style="color: var(--muted-foreground);">생성·구체화·실험 진행</div>
     </div>
     <div class="tds-card p-5">
       <div class="text-xs font-bold" style="color: var(--muted-foreground);">완료</div>
-      <div class="text-2xl font-extrabold mt-2" style="color: var(--success);">1</div>
-      <div class="text-xs mt-1" style="color: var(--muted-foreground);">보완 필요 1건</div>
+      <div class="text-2xl font-extrabold mt-2" style="color: var(--success);">{{ hypothesis_kpi.completed }}</div>
+      <div class="text-xs mt-1" style="color: var(--muted-foreground);">실험 완료</div>
     </div>
   </div>
 
@@ -70,7 +56,7 @@
       <select class="tds-input text-sm h-10 w-40 cursor-not-allowed" disabled><option>모든 결과</option><option>통과</option><option>보완 필요</option><option>검증 불충분</option></select>
     </div>
     <div class="flex-1"></div>
-    <span class="text-xs" style="color: var(--muted-foreground);">필터 동작 없음 · 총 3건</span>
+    <span class="text-xs" style="color: var(--muted-foreground);">필터 동작 없음 · 총 {{ hypothesis_kpi.total }}건</span>
   </div>
 
   <div class="tds-card overflow-hidden">
@@ -87,26 +73,30 @@
         </tr>
       </thead>
       <tbody>
-        {% for run in demo_runs %}
+        {% for run in hypothesis_rows %}
         <tr class="border-t hover:bg-[var(--sidebar-accent)] cursor-pointer transition" style="border-color: var(--border);"
-            hx-get="/experiments/{{ run.id }}?view={{ run.view }}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+            hx-get="/hypothesis/{{ run.id }}?view={{ run.view }}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
           <td class="px-5 py-4">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);">
                 <iconify-icon icon="solar:shield-check-bold" width="20"></iconify-icon>
               </div>
               <div class="min-w-0">
-                <div class="flex items-center gap-2"><span class="font-extrabold">{{ run.code }}</span><span class="text-[11px] mono" style="color: var(--muted-foreground);">online-boutique</span></div>
-                <div class="text-xs mt-1 truncate max-w-[400px]" style="color: var(--muted-foreground);">Checkout이 Pod 손실과 Catalog 지연 중에도 오류율 1% 이하를 유지하는지 검증</div>
+                <div class="flex items-center gap-2"><span class="font-extrabold">{{ run.code }}</span><span class="text-[11px] mono" style="color: var(--muted-foreground);">{{ run.app_name }}</span></div>
+                <div class="text-xs mt-1 truncate max-w-[400px]" style="color: var(--muted-foreground);">{{ run.goal }}</div>
               </div>
             </div>
           </td>
           <td class="px-5 py-4 text-center"><div class="font-bold">{{ run.stage }}</div><div class="text-[11px] mt-1" style="color: var(--muted-foreground);">{{ run.step }}</div></td>
           <td class="px-5 py-4 text-center"><span class="font-bold">{{ run.selected }}</span></td>
-          <td class="px-5 py-4 text-center text-xs">{{ run.verdict }}</td>
+          <td class="px-5 py-4 text-center text-xs mono">{{ run.verdict }}</td>
           <td class="px-5 py-4 text-center text-xs mono" style="color: var(--muted-foreground);">{{ run.updated }}</td>
           <td class="px-5 py-4 text-center"><span class="tds-badge {{ run.badge }}">{{ run.status }}</span></td>
           <td class="px-3 py-4 text-center"><iconify-icon icon="lucide:chevron-right" width="18" style="color: var(--muted-foreground);"></iconify-icon></td>
+        </tr>
+        {% else %}
+        <tr class="border-t" style="border-color: var(--border);">
+          <td colspan="7" class="px-5 py-10 text-center text-sm" style="color: var(--muted-foreground);"><span class="tossface-lg">🧪</span><div class="mt-2">아직 실험이 없어요 — <b>새 실험 시작</b>으로 첫 가설을 만들어 보세요.</div></td>
         </tr>
         {% endfor %}
       </tbody>

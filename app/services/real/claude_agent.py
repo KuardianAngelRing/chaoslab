@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 import subprocess
 
-from app.services.agent.hypothesis_schema import CandidateProposal, HypothesisInputPayload
+from app.services.agent.hypothesis_schema import (
+    CandidateProposal,
+    HypothesisInputPayload,
+    ImprovementInputPayload,
+)
 
 # 하이브리드 1 — ChaosPilot에서 검증된 프롬프트 규칙 5종 + fault 중복 금지(하이브리드 2)
 _RULES = """규칙 (반드시 지킬 것):
@@ -24,6 +28,15 @@ _CANDIDATE_SCHEMA = """각 후보는 다음 키만 갖는 JSON 객체다 (params
 {"title": "짧은 제목", "chaos_type": "allowed_chaos의 chaos_type 중 하나",
  "target_workload": "manifest의 Deployment 이름", "hypothesis": "실패 예상형 가설 한 문장",
  "expected_impact": "예상 영향 한두 문장"}"""
+
+_IMPROVEMENT_SCHEMA = """각 제안은 다음 키만 갖는 JSON 객체다:
+{"title": "짧은 제목(예: readinessProbe 주기 단축)", "type": "deployment_env" 또는 "manifest_patch",
+ "deployment": "manifest의 Deployment 이름", "container": "컨테이너 이름(replicas만 바꾸면 빈 문자열)",
+ "key": "deployment_env일 때 환경변수 이름(아니면 빈 문자열)", "value": "deployment_env일 때 새 값(아니면 빈 문자열)",
+ "patch": manifest_patch일 때 Deployment 루트 기준 strategic merge patch 객체(아니면 {}),
+ "rationale": "phase_summaries·manifest 사실을 인용한 근거 한두 문장", "expected_effect": "기대 효과 한두 문장"}
+patch는 allowed_improvements에 열거된 경로만 담는다. probe가 없던 컨테이너에 probe를 추가할 때는 핸들러(httpGet/tcpSocket)를 포함한다.
+deployment_env는 manifest에 이미 정의된 환경변수만 바꾼다. 같은 (deployment, 경로)를 두 제안에 중복하지 않는다."""
 
 # 순수 추론 강제 — 도구 전면 차단
 _DISALLOWED_TOOLS = "Bash,Edit,Write,NotebookEdit,Read,Glob,Grep,WebFetch,WebSearch,Task"
@@ -111,6 +124,18 @@ class ClaudeCliHypothesisAgent:
             "하나만. params의 필드는 허용 파라미터에 있는 것 전부이며 min~max 범위를 "
             "지킨다. 다른 텍스트 금지.\n\n"
             f"{self._payload_block(payload)}{self._feedback_block(feedback)}"
+        )
+        return self._parse_json(self._invoke(prompt))
+
+    def propose_improvements(self, payload: ImprovementInputPayload, feedback: str = "") -> list:
+        prompt = (
+            "너는 카오스 엔지니어링 개선 설계자다. 아래 실험 결과(phase_summaries)와 manifest를 근거로 "
+            f"이 앱의 회복탄력성을 높일 개선안을 최대 {payload.max_proposals}개 제안하라. "
+            "개선은 실험 전용 namespace의 Deployment에 적용돼 같은 장애를 다시 주입해 검증된다.\n\n"
+            f"{_RULES}\n\n{_IMPROVEMENT_SCHEMA}\n\n"
+            "출력은 제안 JSON 객체들의 배열 하나만. 다른 텍스트 금지.\n\n"
+            f"입력 페이로드:\n{json.dumps(payload.model_dump(), ensure_ascii=False)}"
+            f"{self._feedback_block(feedback)}"
         )
         return self._parse_json(self._invoke(prompt))
 

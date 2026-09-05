@@ -10,6 +10,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.rendering import templates
+from app.services.improvement_specs import change_rows
 
 
 def report_context(run) -> dict:
@@ -28,6 +29,9 @@ def report_context(run) -> dict:
         "after": comparison.get("after") or {},
         "r": comparison.get("r") or {},
         "changes": comparison.get("changes") or [],
+        # env·patch 공통 [{path, before, after}] (improvement_specs) — 보고서는 실제로 바뀐 경로만
+        "change_rows": lambda change: change_rows(change, only_changed=True),
+        "change_value": _change_value,
         "scenario_comparisons": comparison.get("scenarios") or [],
         "narrative": run.report_content or {},
         "cleanup_count": sum(item.get("cleanup_completed") is True for item in results),
@@ -112,6 +116,15 @@ def _chromium_executable() -> str | None:
 
 def _verdict_ko(value: str) -> str:
     return {"passed": "통과", "failed": "실패", "inconclusive": "판정 불가"}.get(value, value)
+
+
+def _change_value(value) -> str:
+    if value is None:
+        return "없음"
+    if isinstance(value, (dict, list)):
+        import json
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return str(value)
 
 
 def _metric(value, suffix: str = "") -> str:

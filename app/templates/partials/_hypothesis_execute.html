@@ -1,0 +1,137 @@
+{# 워크플로우 셸 2단계 — 승인 후보로 만들어진 실험 1건 (개선 반복 루프는 Phase 3).
+   ctx: hypothesis_run · experiment · experiment_candidate · chaos_labels · chaos_specs.
+   진행 중이면 data-running-exp로 SSE 구독 → 종료 시 이 view 재요청 (배지·값은 서버 렌더). #}
+{% set hrun = hypothesis_run %}
+{% set exp = experiment %}
+{% set cand = experiment_candidate %}
+{% set label, badge = exp_status_labels.get(exp.status, (exp.status, "badge-muted")) %}
+{% set spec = chaos_specs.get(exp.chaos_type, {}) %}
+
+<div class="tds-card p-5" style="border-color: var(--primary);"
+     {% if exp.status in ("pending", "deploying", "running") %}data-running-exp="{{ exp.id }}" data-running-exp-refresh="/hypothesis/{{ hrun.id }}?view=execute"{% endif %}>
+  <div class="flex items-start justify-between gap-4 mb-5">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="font-extrabold text-lg">#{{ exp.id }} {{ cand.title if cand else chaos_labels.get(exp.chaos_type, exp.chaos_type) }}</span>
+        <span class="tds-badge {{ badge }}">{{ label }}</span>
+      </div>
+      <p class="text-xs mt-1 mono" style="color: var(--muted-foreground);">{{ cand.target_workload if cand else exp.app.name }} · {{ exp.chaos_type }}{% if exp.namespace %} · {{ exp.namespace }}{% endif %}{% if exp.crd_name %} · {{ exp.crd_name }}{% endif %}</p>
+    </div>
+    <div class="text-right shrink-0">
+      <div class="text-[11px] font-bold" style="color: var(--muted-foreground);">R 지수</div>
+      {% if exp.r_index is not none %}
+      <div class="text-2xl font-extrabold" style="color: var(--primary);">{{ "%.4f"|format(exp.r_index) }}</div>
+      {% elif exp.status in ("pending", "deploying", "running") %}
+      <div class="text-2xl font-extrabold" style="color: var(--primary);">산정 전</div>
+      {% else %}
+      <div class="text-2xl font-extrabold" style="color: var(--muted-foreground);">산정 불가</div>
+      <div class="text-[11px]" style="color: var(--muted-foreground);">장애 구간 HTTP 트래픽 없음</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if cand %}
+  <div class="p-4 rounded-2xl mb-4" style="background: var(--muted);">
+    <div class="text-[11px] font-bold mb-1" style="color: var(--muted-foreground);">가설</div>
+    <p class="text-sm">{{ cand.hypothesis }}</p>
+    <p class="text-xs mt-1.5" style="color: var(--muted-foreground);">{{ cand.expected_impact }}</p>
+  </div>
+  {% endif %}
+
+  {# 실시간 메트릭 — running 동안 /experiments/{id}/metrics/stream(3s) 구독, app.js watchLiveMetrics가 그림.
+     종료 상태(final=true)면 구독 없이 저장된 fault/recovery 요약을 서버 렌더. #}
+  {% set live_final = exp.status not in ("pending", "deploying", "running") %}
+  <div class="rounded-2xl border p-4 mb-4" style="border-color: var(--border);"
+       data-live-metrics="{{ exp.id }}" data-live-metrics-final="{{ 'true' if live_final else 'false' }}">
+    <div class="flex items-center justify-between mb-3">
+      <b class="text-xs">실시간 메트릭</b>
+      <span class="text-[11px]" style="color: var(--muted-foreground);">
+        {% if live_final %}실험 종료 — 마지막 스냅샷 유지{% else %}Prometheus 즉시값 · 3초 간격{% endif %}
+        · Ready 파드 <b class="mono" data-live-metrics-pods>-</b>
+        <span data-live-metrics-note hidden> · HTTP 메트릭 미노출 앱 — Ready 파드만 실측</span>
+      </span>
+    </div>
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <div class="flex items-center gap-3 text-[11px] mb-1" style="color: var(--muted-foreground);">
+          <span>Ready 파드</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--success);"></i>ready</span>
+        </div>
+        <div style="height: 140px;"><canvas data-live-metrics-ready></canvas></div>
+      </div>
+      <div>
+        <div class="flex items-center gap-3 text-[11px] mb-1" style="color: var(--muted-foreground);">
+          <span>레이턴시(ms)</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--warning);"></i>p95</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--danger);"></i>p99</span>
+        </div>
+        <div style="height: 140px;"><canvas data-live-metrics-latency></canvas></div>
+      </div>
+      <div>
+        <div class="flex items-center gap-3 text-[11px] mb-1" style="color: var(--muted-foreground);">
+          <span>트래픽</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--primary);"></i>RPS</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--danger);"></i>오류율(%)</span>
+        </div>
+        <div style="height: 140px;"><canvas data-live-metrics-traffic></canvas></div>
+      </div>
+    </div>
+    {% if live_final %}
+    {% set fm, rm = exp.fault_metrics or {}, exp.recovery_metrics or {} %}
+    {% if fm or rm %}
+    <table class="w-full text-xs mt-3 pt-3 border-t" style="border-color: var(--border);">
+      <thead><tr style="color: var(--muted-foreground);"><th class="text-left font-bold py-1">구간</th><th class="text-right font-bold py-1">RPS 평균</th><th class="text-right font-bold py-1">오류율 피크</th><th class="text-right font-bold py-1">p95 피크</th><th class="text-right font-bold py-1">p99 피크</th><th class="text-right font-bold py-1">최소 Ready</th></tr></thead>
+      <tbody class="mono">
+        {% for name, m in (("장애", fm), ("회복", rm)) if m %}
+        <tr><td class="py-1 font-bold">{{ name }}</td><td class="text-right">{{ m.get("rps_avg", "-") }}</td><td class="text-right">{{ m.get("error_rate_peak", "-") }}%</td><td class="text-right">{{ m.get("latency_p95_peak_ms", "-") }}ms</td><td class="text-right">{{ m.get("latency_p99_peak_ms", "-") }}ms</td><td class="text-right">{{ m.get("min_ready_pods", "-") }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-xs mt-3 pt-3 border-t" style="border-color: var(--border); color: var(--muted-foreground);">실측 집계 없음(Stub)</p>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="grid grid-cols-3 gap-3 mb-4">
+    <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">장애 유형</div><div class="text-base font-extrabold mt-1">{{ chaos_labels.get(exp.chaos_type, exp.chaos_type) }}</div></div>
+    <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">시작</div><div class="text-base font-extrabold mt-1 mono">{{ exp.started_at.strftime("%m/%d %H:%M") if exp.started_at else "-" }}</div></div>
+    <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">종료</div><div class="text-base font-extrabold mt-1 mono">{{ exp.finished_at.strftime("%m/%d %H:%M") if exp.finished_at else "진행 중" }}</div></div>
+  </div>
+
+  <div class="rounded-2xl border p-4" style="border-color: var(--border);">
+    <div class="flex items-center justify-between mb-3"><b class="text-xs">구체화된 파라미터</b><span class="text-[11px]" style="color: var(--muted-foreground);">AI detailing · chaos_specs 범위 검증 통과</span></div>
+    <div class="grid grid-cols-4 gap-3 text-xs">
+      {% for key, value in (exp.params or {}).items() if key != "action" %}
+      <div><span class="block mb-1" style="color: var(--muted-foreground);">{{ (spec.get("fields", {}).get(key) or {}).get("label", key) }}</span><b class="mono">{{ value }}</b></div>
+      {% else %}
+      <div class="col-span-4" style="color: var(--muted-foreground);">추가 파라미터 없음 — 원샷 장애({{ exp.chaos_type }})</div>
+      {% endfor %}
+    </div>
+    {% if cand and cand.detail_rationale %}
+    <p class="text-xs mt-3 pt-3 border-t" style="border-color: var(--border); color: var(--muted-foreground);">근거: {{ cand.detail_rationale }}</p>
+    {% endif %}
+  </div>
+
+  {% if exp.status == "failed" %}
+  <div class="mt-4 p-4 rounded-2xl text-sm" style="background: var(--danger-soft, var(--muted)); color: var(--danger);">회복이 확인되지 않아 실패로 판정됐어요. 정리는 완료된 상태이고, 후보를 다시 골라 재실험할 수 있어요.</div>
+  {% endif %}
+</div>
+
+<div class="flex justify-between">
+  <button type="button" class="tds-btn-muted" data-workflow-go="plan"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>후보 다시 보기</button>
+  <div class="flex gap-2">
+    <button type="button" class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">실험 목록으로</button>
+    {% if exp.status in ("deploying", "running") %}
+    {# 중지 → CRD·(k3s) ns 정리는 라우트가 백그라운드로, 응답은 HX-Location으로 이 view 재요청 #}
+    <button type="button" class="tds-btn-muted" style="color: var(--danger);"
+            hx-post="/experiments/{{ exp.id }}/stop" hx-vals='{"next": "/hypothesis/{{ hrun.id }}?view=execute"}'>
+      <iconify-icon icon="solar:stop-circle-bold" width="16"></iconify-icon>실험 중지
+    </button>
+    {% endif %}
+    {% if exp.status in ("completed", "failed", "stopped") %}
+    {# 실험 종료 → 3단계(승인 후보로 조립한 최종 회귀). 셸 탭은 run.current로 이미 열려 있다 #}
+    <button type="button" class="tds-btn-primary" data-workflow-go="verify">최종 회귀로<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
+    {% endif %}
+  </div>
+</div>

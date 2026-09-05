@@ -7,18 +7,20 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
 from app.config import settings
 from app.db.database import SessionLocal, get_session
-from app.db.models import Experiment
+from app.db.models import Experiment, ExperimentCandidate
 from app.db.repositories import AppRepository, ExperimentRepository
 from app.deps import make_chaos, make_k3s_workload, make_prometheus
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
+from app.services.live_traffic import TrafficGenerator
 from app.services.metrics_collector import collect_experiment_metrics
+from app.services.regression import observation_for_app, workload_selector  # 순수 함수
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -29,12 +31,12 @@ _PODKILL_GRACE_S = 30  # pod-kill 원샷 유예
 
 
 def _experiments_response(request: Request, session: Session):
-    exps = ExperimentRepository(session).list_all()
-    apps = AppRepository(session).list_all()
+    from app.routers.pages import experiments_context  # 목록 ctx 단일 소스
+
+    ctx = experiments_context(session)
     return render_page(
         request, "pages/experiments.html",
-        {"active_nav": "experiments", "app_count": len(apps),
-         "experiments": exps, "apps": apps},
+        {"active_nav": "experiments", "app_count": len(ctx["apps"]), **ctx},
     )
 
 
@@ -135,6 +137,7 @@ def _watch_experiment(exp_id: int) -> None:
             return bool(cur and cur.status in ("deploying", "running"))
 
         status = "completed"
+        traffic: TrafficGenerator | None = None
         try:
             if is_k3s:                        # 현장 배포 단계
                 workload = make_k3s_workload()
@@ -143,7 +146,18 @@ def _watch_experiment(exp_id: int) -> None:
                     raise RuntimeError(f"워크로드가 준비되지 않음 ({namespace})")
                 if not _still_active():
                     return
-                crd_name = chaos.inject(namespace, app_name, chaos_type, params)
+                # 관측 트래픽(≈2 rps) — 없으면 Prometheus rps·오류율·레이턴시가 빈 벡터라 2단계 차트가 비어 있다.
+                # Service를 알 수 없는 앱은 경고만 남기고 트래픽 없이 진행(실험은 막지 않는다).
+                observation = observation_for_app(app)
+                if observation is None:
+                    logger.warning("live traffic skipped (exp %s): 관측 Service를 알 수 없음", exp_id)
+                else:
+                    traffic = TrafficGenerator(workload, namespace, observation).start()
+                # 가설 후보의 대상 워크로드가 있으면 그 파드만 겨냥(ns 전체 mode:one이면 무관한 파드가 죽을 수 있음)
+                candidate = s.get(ExperimentCandidate, exp.candidate_id) if exp.candidate_id else None
+                target = candidate.target_workload if candidate else None
+                crd_name = chaos.inject(namespace, app_name, chaos_type, params,
+                                        target_selector=workload_selector(app.manifest or "", target) if target else None)
                 exp = s.get(Experiment, exp_id)
                 exp.crd_name = crd_name
                 exp.status = "running"
@@ -180,6 +194,8 @@ def _watch_experiment(exp_id: int) -> None:
                 logger.exception("chaos cleanup failed (exp %s)", exp_id)
             status = "failed"
         finally:
+            if traffic is not None:           # ns 삭제 전에 부하 중지 (idempotent)
+                traffic.stop()
             if is_k3s:                        # 성공·실패·중지 모두 ns 정리 (idempotent)
                 try:
                     make_k3s_workload().teardown(namespace)
@@ -193,7 +209,7 @@ def _watch_experiment(exp_id: int) -> None:
             s.commit()
             if status == "completed":
                 # 실측 3구간 소급 집계 + R지수 (실패해도 실험 상태 불변)
-                collect_experiment_metrics(s, exp, make_prometheus())
+                collect_experiment_metrics(s, exp, make_prometheus(exp.app.env))
     finally:
         s.close()
 
@@ -204,6 +220,7 @@ def stop_experiment(
     request: Request,
     background: BackgroundTasks,
     session: Session = Depends(get_session),
+    next: str = Form(""),
 ):
     exp = ExperimentRepository(session).get(exp_id)
     if exp is None:
@@ -217,6 +234,10 @@ def stop_experiment(
     exp.finished_at = datetime.now(timezone.utc)
     session.commit()
     background.add_task(_cleanup_task, env, namespace, exp.chaos_type, exp.crd_name)
+    if next and next.startswith("/") and not next.startswith("//"):
+        # 가설 셸(2단계 카드)에서 중지 → 목록 대신 그 view로 복귀. htmx HX-Location = ajax GET + 스왑 (전체 리로드 없음)
+        return Response(status_code=204, headers={
+            "HX-Location": json.dumps({"path": next, "target": "#main-content", "swap": "innerHTML"})})
     return _experiments_response(request, session)
 
 
@@ -255,5 +276,48 @@ async def experiment_stream(exp_id: int, request: Request):
                 yield {"event": "completed", "data": json.dumps({"status": status})}
                 break
             await asyncio.sleep(2)
+
+    return EventSourceResponse(gen())
+
+
+_LIVE_ACTIVE = ("pending", "deploying", "running")
+_LIVE_KEYS = ("rps", "error_rate_pct", "p95_ms", "p99_ms", "ready_pods")
+_LIVE_INTERVAL_S = 3  # 메트릭 스트림 틱 간격
+
+
+@router.get("/experiments/{exp_id}/metrics/stream")
+async def experiment_metrics_stream(exp_id: int, request: Request):
+    """실험 진행 중 Prometheus 즉시값(live_snapshot) 3초 간격 SSE — status 스트림과 분리.
+
+    매 틱 DB 재조회 → 활성 상태를 벗어나면 completed 이벤트 후 종료. pending(k3s 배포 전)이면
+    값 None인 metric 틱을 보내되 스트림은 유지. 네임스페이스는 exp.namespace(k3s 전용 ns) 우선.
+    """
+    prom = None  # 앱 env(k3s/eks)에 따라 구현체가 달라 첫 틱에서 결정
+
+    async def gen():
+        nonlocal prom
+        for _ in range(1260):  # 3s × 1260 ≈ 63분 상한 (> watcher 상한)
+            if await request.is_disconnected():
+                break
+            s = SessionLocal()
+            try:
+                exp = s.get(Experiment, exp_id)
+                status = exp.status if exp else None
+                namespace = (exp.namespace or exp.app.namespace) if exp else ""
+                app_name = exp.app.name if exp else ""
+                if prom is None:
+                    prom = make_prometheus(exp.app.env if exp else "eks")
+            finally:
+                s.close()
+            if status not in _LIVE_ACTIVE:
+                yield {"event": "completed", "data": json.dumps({"status": status})}
+                break
+            if status == "pending":
+                snap = {"ts": datetime.now(timezone.utc).isoformat(),
+                        **{k: None for k in _LIVE_KEYS}}
+            else:
+                snap = await asyncio.to_thread(prom.live_snapshot, namespace, app_name)
+            yield {"event": "metric", "data": json.dumps({**snap, "status": status})}
+            await asyncio.sleep(_LIVE_INTERVAL_S)
 
     return EventSourceResponse(gen())

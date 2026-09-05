@@ -20,6 +20,18 @@ def _force_stub_mode(monkeypatch):
     monkeypatch.setattr(settings, "hypothesis_agent", "stub")  # claude CLI 실호출도 항상 Stub
 
 
+@pytest.fixture(autouse=True)
+def _reset_sse_app_status():
+    """sse-starlette의 전역 AppStatus.should_exit_event는 처음 await된 이벤트 루프에 묶인다.
+    TestClient는 테스트마다 새 루프를 쓰므로, SSE 스트림을 끝까지 읽은 테스트 뒤에 오는
+    스트림 테스트가 'bound to a different event loop'로 깨진다 — 매 테스트 초기화(공식 권장 패턴)."""
+    from sse_starlette.sse import AppStatus
+
+    AppStatus.should_exit_event = None
+    yield
+    AppStatus.should_exit_event = None
+
+
 @pytest.fixture
 def client():
     """앱과 분리된 in-memory DB를 seed해서 주입 (hermetic — 파일 DB에 의존하지 않음)."""

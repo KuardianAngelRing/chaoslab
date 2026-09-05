@@ -19,6 +19,7 @@ from app.deps import get_app_count, make_builder, make_gitops, make_k8s
 from app.rendering import render_page
 from app.services.interfaces import BuildRequest
 from app.services.real.gitops import derive_app_name, split_env  # 순수 함수 (IO 의존 없음)
+from app.services.regression import entry_service  # 순수 함수 — manifest Service 추론
 from app.services.sample_apps import get_sample_app
 
 router = APIRouter()
@@ -147,16 +148,19 @@ def register_k3s_app(
         raise HTTPException(status_code=422, detail="앱 이름을 입력해 주세요")
     ns = namespace.strip() or app_name
     resolved_health_path = sample["health_path"] if sample else health_path.strip() or "/healthz"
+    # 회귀 관측 Service: 샘플은 registry 값, 직접 manifest는 추론(앱명 일치 → 단일 Service). 실패 시 빈 값.
+    observe_service = sample["observe_service"] if sample else (entry_service(manifest_text, app_name) or "")
     repo = AppRepository(session)
     existing = next((a for a in repo.list_all() if a.name == app_name), None)
     if existing is None:
         repo.create(
             name=app_name, repo_url=K3S_SOURCE, branch="", framework="manifest", env="k3s",
-            manifest=manifest_text, health_path=resolved_health_path,
+            manifest=manifest_text, health_path=resolved_health_path, observe_service=observe_service,
             namespace=ns, status="registered",
         )
     else:
         existing.health_path = resolved_health_path
+        existing.observe_service = observe_service
         existing.namespace = ns
         existing.env = "k3s"
         existing.manifest = manifest_text
