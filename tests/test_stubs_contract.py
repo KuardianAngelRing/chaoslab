@@ -131,3 +131,40 @@ def test_make_chaos_routes_by_env(monkeypatch):
     assert chaos.kubeconfig == "/tmp/k3s.yaml"
     assert chaos.label_selector is False
     assert isinstance(make_chaos("eks"), stubs.StubChaos)  # eks는 use_real_services 게이트
+
+
+def test_stub_k3s_workload_patch_deployment_projects_before_after():
+    from app.services.improvement_specs import project
+
+    w = stubs.StubK3sWorkload()
+    patch = {"spec": {"replicas": 3, "template": {"spec": {"containers": [{
+        "name": "app", "lifecycle": {"preStop": {"sleep": {"seconds": 5}}}}]}}}}
+    change = w.patch_deployment("ns", "api", patch)
+    assert change["type"] == "manifest_patch" and change["rollout_ready"] is True
+    assert change["before"] == project({}, patch) and change["after"] == patch
+    again = w.patch_deployment("ns", "api", {"spec": {"replicas": 4}})
+    assert again["before"] == {"spec": {"replicas": 3}}      # 누적 적용 상태에서 전 값
+    restored = w.patch_deployment("ns", "api", change["before"])  # before = 롤백 패치(null → 삭제)
+    assert restored["after"]["spec"]["replicas"] is None
+
+
+def test_stub_hypothesis_agent_proposals_pass_validation():
+    from app.services.agent.hypothesis_schema import ImprovementInputPayload
+    from app.services.agent.hypothesis_validation import validate_proposals
+    from app.services.improvement_specs import ALLOWED_IMPROVEMENTS
+
+    manifest = ("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  template:\n"
+                "    spec:\n      containers:\n        - name: srv\n          image: x\n"
+                "          readinessProbe:\n            httpGet: {path: /, port: 80}\n")
+    payload = ImprovementInputPayload(
+        app={"name": "web", "env": "k3s", "port": 80, "health_path": "/"}, manifest_yaml=manifest,
+        manifest_findings=[], candidate={"target_workload": "web"}, experiment={"id": 1},
+        phase_summaries={}, allowed_improvements=ALLOWED_IMPROVEMENTS, max_proposals=3)
+    raw = stubs.StubHypothesisAgent().propose_improvements(payload)
+    proposals, errors = validate_proposals(raw, manifest)
+    assert errors == [] and [p.title for p in proposals] == ["readinessProbe 주기 단축", "종료 전 유예(preStop sleep)"]
+    assert proposals[0].patch["spec"]["template"]["spec"]["containers"][0]["readinessProbe"] == {
+        "periodSeconds": 2, "failureThreshold": 2}                      # 기존 probe → 핸들러 없이 주기만
+    # manifest에 없는 워크로드만 담긴 출력 → 전멸
+    assert validate_proposals([{**raw[0], "deployment": "ghost"}], manifest) == ([], [
+        "제안 1: manifest에 없는 Deployment 'ghost'"])

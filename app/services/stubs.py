@@ -33,6 +33,7 @@ class StubK3sWorkload:
             ("checkout-api", "app", "UPSTREAM_TIMEOUT_SECONDS"): "0.45",
             ("order-api", "app", "UPSTREAM_TIMEOUT_SECONDS"): "0.45",
         }
+        self.patches: dict[tuple[str, str], dict] = {}  # (ns, deployment) → 누적 적용 patch
 
     def deploy(self, namespace: str, manifest_yaml: str) -> None:
         return None
@@ -62,8 +63,43 @@ class StubK3sWorkload:
             "rollout_ready": True,
         }
 
+    def patch_deployment(self, namespace: str, deployment: str, patch: dict,
+                         timeout_s: int = 180) -> dict:
+        from app.services.improvement_specs import project
+
+        identity = (namespace, deployment)
+        before = project(self.patches.get(identity, {}), patch)
+        merged = _deep_merge(self.patches.get(identity, {}), patch)
+        self.patches[identity] = merged
+        return {
+            "type": "manifest_patch",
+            "deployment": deployment,
+            "patch": patch,
+            "before": before,
+            "after": project(merged, patch),
+            "rollout_ready": True,
+        }
+
     def teardown(self, namespace: str) -> None:
         return None
+
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    """Stub용 strategic merge 근사 — dict 재귀 병합, containers는 name 매칭, None은 삭제."""
+    out = dict(base)
+    for key, value in patch.items():
+        if value is None:
+            out.pop(key, None)
+        elif isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        elif isinstance(value, list) and all(isinstance(i, dict) and "name" in i for i in value):
+            existing = {i["name"]: i for i in out.get(key) or [] if isinstance(i, dict) and "name" in i}
+            for item in value:
+                existing[item["name"]] = _deep_merge(existing.get(item["name"], {}), item)
+            out[key] = list(existing.values())
+        else:
+            out[key] = value
+    return out
 
 
 class StubChaos:
@@ -369,6 +405,43 @@ class StubHypothesisAgent:
                 params[name] = min(max(rule["min"], _STUB_PARAM_PREFS.get(name, rule["min"])),
                                    rule["max"])
         return {"params": params, "rationale": "스텁 기본값 — 필드 범위 안의 대표값"}
+
+    def propose_improvements(self, payload, feedback: str = "") -> list:
+        """manifest 첫 Deployment·첫 컨테이너에 결정적 2안 — ① readinessProbe(있으면 주기 단축,
+        없으면 tcpSocket으로 추가) ② preStop sleep 5s. 검증은 바깥(validate_proposals)에서."""
+        from app.services.improvement_specs import container_names, manifest_workloads
+
+        workloads = manifest_workloads(payload.manifest_yaml)
+        target = payload.candidate.get("target_workload")
+        name = target if target in workloads else next(iter(workloads), None)
+        if name is None:
+            return []
+        doc = workloads[name]
+        containers = ((((doc.get("spec") or {}).get("template") or {}).get("spec") or {})
+                      .get("containers") or [])
+        container = containers[0] if containers else {}
+        cname = (container_names(doc) or ["app"])[0]
+        if container.get("readinessProbe"):
+            probe = {"periodSeconds": 2, "failureThreshold": 2}
+            probe_title = "readinessProbe 주기 단축"
+        else:
+            ports = container.get("ports") or []
+            port = (ports[0].get("containerPort") if ports else None) or payload.app.get("port") or 80
+            probe = {"tcpSocket": {"port": int(port)}, "periodSeconds": 2, "failureThreshold": 2}
+            probe_title = "readinessProbe 추가"
+        return [
+            {"title": probe_title, "type": "manifest_patch", "deployment": name, "container": cname,
+             "patch": {"spec": {"template": {"spec": {"containers": [{"name": cname, "readinessProbe": probe}]}}}},
+             "rationale": "장애 구간에서 준비되지 않은 파드가 Ready로 남아 요청을 받으면 오류가 늘어난다 — "
+                          "준비 상태를 더 자주 확인해 트래픽에서 빨리 뺀다",
+             "expected_effect": "파드 교체 중 오류 응답 감소와 회복 시간 단축이 기대돼요"},
+            {"title": "종료 전 유예(preStop sleep)", "type": "manifest_patch", "deployment": name,
+             "container": cname,
+             "patch": {"spec": {"template": {"spec": {"containers": [{"name": cname, "lifecycle": {"preStop": {"sleep": {"seconds": 5}}}}]}}}},
+             "rationale": "파드 종료 신호와 서비스 엔드포인트 제거 사이의 시차 동안 들어온 요청이 끊긴다 — "
+                          "종료 전 잠시 기다려 진행 중 요청을 마무리한다",
+             "expected_effect": "파드 종료 순간의 연결 끊김(5xx) 감소가 기대돼요"},
+        ][:payload.max_proposals]
 
     def snapshot(self) -> dict:
         return {"model_name": "stub", "cli_version": "stub"}

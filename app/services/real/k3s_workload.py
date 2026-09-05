@@ -166,19 +166,7 @@ class RealK3sWorkload:
                 }]}}}},
                 _request_timeout=_TIMEOUT,
             )
-            deadline = time.monotonic() + timeout_s
-            while time.monotonic() < deadline:
-                updated = apps.read_namespaced_deployment(
-                    deployment, namespace, _request_timeout=_TIMEOUT)
-                desired = updated.spec.replicas or 1
-                status = updated.status
-                if (status.observed_generation or 0) >= (updated.metadata.generation or 0) and (
-                    status.updated_replicas or 0
-                ) >= desired and (status.ready_replicas or 0) >= desired:
-                    break
-                time.sleep(_POLL_S)
-            else:
-                raise RuntimeError(f"Deployment {deployment} rollout 시간이 초과됐습니다")
+            _wait_rollout(apps, namespace, deployment, timeout_s)
         return {
             "type": "deployment_env",
             "deployment": deployment,
@@ -186,6 +174,34 @@ class RealK3sWorkload:
             "key": key,
             "before": before,
             "after": value,
+            "rollout_ready": True,
+        }
+
+    def patch_deployment(self, namespace: str, deployment: str, patch: dict,
+                         timeout_s: int = 180) -> dict:
+        """strategic merge patch(SDK 기본 content-type) → rollout 대기. before 프로젝션이 롤백 패치."""
+        from kubernetes import client  # lazy
+
+        from app.services.improvement_specs import project
+
+        api_client = self._api_client()
+        apps = client.AppsV1Api(api_client)
+        current = api_client.sanitize_for_serialization(
+            apps.read_namespaced_deployment(deployment, namespace, _request_timeout=_TIMEOUT))
+        before = project(current, patch)
+        after = before
+        if before != project(patch, patch):
+            apps.patch_namespaced_deployment(deployment, namespace, patch, _request_timeout=_TIMEOUT)
+            _wait_rollout(apps, namespace, deployment, timeout_s)
+            updated = api_client.sanitize_for_serialization(
+                apps.read_namespaced_deployment(deployment, namespace, _request_timeout=_TIMEOUT))
+            after = project(updated, patch)
+        return {
+            "type": "manifest_patch",
+            "deployment": deployment,
+            "patch": patch,
+            "before": before,
+            "after": after,
             "rollout_ready": True,
         }
 
@@ -199,6 +215,21 @@ class RealK3sWorkload:
         except ApiException as e:
             if e.status != 404:  # 이미 없으면 idempotent 성공
                 raise
+
+
+def _wait_rollout(apps, namespace: str, deployment: str, timeout_s: int) -> None:
+    """observedGeneration·updatedReplicas·readyReplicas가 desired에 도달할 때까지 폴링."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        updated = apps.read_namespaced_deployment(deployment, namespace, _request_timeout=_TIMEOUT)
+        desired = updated.spec.replicas or 1
+        status = updated.status
+        if (status.observed_generation or 0) >= (updated.metadata.generation or 0) and (
+            status.updated_replicas or 0
+        ) >= desired and (status.ready_replicas or 0) >= desired:
+            return
+        time.sleep(_POLL_S)
+    raise RuntimeError(f"Deployment {deployment} rollout 시간이 초과됐습니다")
 
 
 def _upsert_manifest_resource(dynamic, doc: dict, namespace: str, not_found_error: type) -> None:

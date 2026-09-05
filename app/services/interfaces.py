@@ -74,6 +74,15 @@ class K3sWorkloadService(Protocol):
         """허용된 Deployment 환경변수를 변경하고 rollout 완료까지 확인한다."""
         ...
 
+    def patch_deployment(self, namespace: str, deployment: str, patch: dict,
+                         timeout_s: int = 180) -> dict:
+        """Deployment strategic merge patch(improvement_specs 검증 통과분) → rollout 완료 대기.
+
+        {"type": "manifest_patch", "deployment", "patch", "before": project(원본, patch),
+         "after": project(적용 후, patch), "rollout_ready": True}. before가 곧 롤백 패치(null=삭제).
+        """
+        ...
+
     def teardown(self, namespace: str) -> None:
         """ns 통째 삭제 (idempotent — 이미 없으면 성공)."""
         ...
@@ -217,6 +226,10 @@ class HypothesisAgentService(Protocol):
 
     def detail(self, payload, candidate, feedback: str = "") -> dict:
         """선택 후보의 params 구체화 — DetailingResult 호환 dict."""
+        ...
+
+    def propose_improvements(self, payload, feedback: str = "") -> list:
+        """실험 결과 기반 개선안 1~3개 — ImprovementProposalOut 호환 dict 배열 (설계 09/05 §2)."""
         ...
 
     def snapshot(self) -> dict:
