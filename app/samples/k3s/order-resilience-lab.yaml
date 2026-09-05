@@ -91,6 +91,10 @@ spec:
       app.kubernetes.io/name: checkout-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *checkout_labels
     spec:
       containers:
@@ -143,6 +147,10 @@ spec:
       app.kubernetes.io/name: order-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *order_labels
     spec:
       containers:
@@ -194,6 +202,10 @@ spec:
       app.kubernetes.io/name: catalog-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *catalog_labels
     spec:
       containers:
@@ -243,6 +255,10 @@ spec:
       app.kubernetes.io/name: inventory-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *inventory_labels
     spec:
       containers:
@@ -292,6 +308,10 @@ spec:
       app.kubernetes.io/name: payment-api
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
       labels: *payment_labels
     spec:
       containers:
