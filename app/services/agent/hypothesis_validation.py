@@ -6,10 +6,21 @@
 """
 from __future__ import annotations
 
+import json
+
 from pydantic import ValidationError
 
-from app.services.agent.hypothesis_schema import CandidateProposal, DetailingResult
+from app.services.agent.hypothesis_schema import (
+    CandidateProposal,
+    DetailingResult,
+    ImprovementProposalOut,
+)
 from app.services.chaos_specs import CHAOS_SPECS, validate_params
+from app.services.improvement_specs import (
+    container_names,
+    manifest_workloads,
+    validate_improvement,
+)
 
 _MIN_TITLE = 4
 _MIN_NARRATIVE = 10
@@ -100,3 +111,66 @@ def run_detailing(agent, payload, candidate: CandidateProposal) -> tuple[dict, s
     if errors:
         raise HypothesisValidationError("params 검증 실패: " + "; ".join(errors))
     return params, rationale
+
+
+# ── 3단 — 개선 제안 검증 (설계 2026-09-05 §2) ──
+
+def validate_proposals(raw_list, manifest_yaml: str, max_proposals: int = 3,
+                       ) -> tuple[list[ImprovementProposalOut], list[str]]:
+    """원시 출력 → (생존 제안, 폐기 사유). 제안 단위 폐기: pydantic → 화이트리스트 →
+    manifest에 deployment·container 존재 → (deployment, type, key|patch 지문) 중복."""
+    if not isinstance(raw_list, list):
+        return [], ["출력이 JSON 배열이 아님"]
+    workloads = manifest_workloads(manifest_yaml)
+    survivors: list[ImprovementProposalOut] = []
+    seen: set = set()
+    errors: list[str] = []
+    for i, raw in enumerate(raw_list, start=1):
+        try:
+            p = ImprovementProposalOut.model_validate(raw)
+        except ValidationError as e:
+            first = e.errors()[0]
+            errors.append(f"제안 {i}: 형식 오류 — {first.get('loc')} {first.get('msg')}")
+            continue
+        normalized, spec_errors = validate_improvement(p.model_dump())
+        if spec_errors:
+            errors.append(f"제안 {i}: " + "; ".join(spec_errors))
+            continue
+        doc = workloads.get(normalized["deployment"])
+        if doc is None:
+            errors.append(f"제안 {i}: manifest에 없는 Deployment '{normalized['deployment']}'")
+            continue
+        names = set(container_names(doc))
+        if normalized["container"] and normalized["container"] not in names:
+            errors.append(f"제안 {i}: {normalized['deployment']}에 없는 컨테이너 '{normalized['container']}'")
+            continue
+        for c in ((normalized.get("patch") or {}).get("spec") or {}).get("template", {}) \
+                .get("spec", {}).get("containers", []):
+            if c["name"] not in names:
+                errors.append(f"제안 {i}: {normalized['deployment']}에 없는 컨테이너 '{c['name']}'")
+                break
+        else:
+            fingerprint = (normalized["deployment"], normalized["type"],
+                           normalized["key"] or json.dumps(normalized["patch"], sort_keys=True))
+            if fingerprint in seen:
+                errors.append(f"제안 {i}: 중복 제안 — {fingerprint[:2]}")
+                continue
+            if len(p.title.strip()) < _MIN_TITLE or len(p.rationale.strip()) < _MIN_NARRATIVE:
+                errors.append(f"제안 {i}: 제목·근거가 너무 짧음")
+                continue
+            seen.add(fingerprint)
+            survivors.append(ImprovementProposalOut(**{**p.model_dump(), **normalized}))
+    return survivors[:max_proposals], errors
+
+
+def run_proposing(agent, payload) -> list[ImprovementProposalOut]:
+    """propose_improvements 호출 + 검증. 전멸 시 교정 재시도 1회, 재실패면 예외."""
+    raw = agent.propose_improvements(payload)
+    proposals, errors = validate_proposals(raw, payload.manifest_yaml, payload.max_proposals)
+    if proposals:
+        return proposals
+    raw = agent.propose_improvements(payload, feedback="; ".join(errors) or "유효한 제안이 없었음")
+    proposals, errors = validate_proposals(raw, payload.manifest_yaml, payload.max_proposals)
+    if not proposals:
+        raise HypothesisValidationError("개선 제안 전멸: " + ("; ".join(errors) or "출력 없음"))
+    return proposals
