@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
@@ -193,7 +193,7 @@ def _watch_experiment(exp_id: int) -> None:
             s.commit()
             if status == "completed":
                 # 실측 3구간 소급 집계 + R지수 (실패해도 실험 상태 불변)
-                collect_experiment_metrics(s, exp, make_prometheus())
+                collect_experiment_metrics(s, exp, make_prometheus(exp.app.env))
     finally:
         s.close()
 
@@ -204,6 +204,7 @@ def stop_experiment(
     request: Request,
     background: BackgroundTasks,
     session: Session = Depends(get_session),
+    next: str = Form(""),
 ):
     exp = ExperimentRepository(session).get(exp_id)
     if exp is None:
@@ -217,6 +218,10 @@ def stop_experiment(
     exp.finished_at = datetime.now(timezone.utc)
     session.commit()
     background.add_task(_cleanup_task, env, namespace, exp.chaos_type, exp.crd_name)
+    if next and next.startswith("/") and not next.startswith("//"):
+        # 가설 셸(2단계 카드)에서 중지 → 목록 대신 그 view로 복귀. htmx HX-Location = ajax GET + 스왑 (전체 리로드 없음)
+        return Response(status_code=204, headers={
+            "HX-Location": json.dumps({"path": next, "target": "#main-content", "swap": "innerHTML"})})
     return _experiments_response(request, session)
 
 
@@ -271,9 +276,10 @@ async def experiment_metrics_stream(exp_id: int, request: Request):
     매 틱 DB 재조회 → 활성 상태를 벗어나면 completed 이벤트 후 종료. pending(k3s 배포 전)이면
     값 None인 metric 틱을 보내되 스트림은 유지. 네임스페이스는 exp.namespace(k3s 전용 ns) 우선.
     """
-    prom = make_prometheus()
+    prom = None  # 앱 env(k3s/eks)에 따라 구현체가 달라 첫 틱에서 결정
 
     async def gen():
+        nonlocal prom
         for _ in range(1260):  # 3s × 1260 ≈ 63분 상한 (> watcher 상한)
             if await request.is_disconnected():
                 break
@@ -283,6 +289,8 @@ async def experiment_metrics_stream(exp_id: int, request: Request):
                 status = exp.status if exp else None
                 namespace = (exp.namespace or exp.app.namespace) if exp else ""
                 app_name = exp.app.name if exp else ""
+                if prom is None:
+                    prom = make_prometheus(exp.app.env if exp else "eks")
             finally:
                 s.close()
             if status not in _LIVE_ACTIVE:

@@ -86,6 +86,22 @@ def test_stop_running_experiment(client):
     assert "HYP-1" in resp.text  # 목록 = 가설 Run 행 (개별 Experiment 행은 백로그)
 
 
+def test_stop_with_next_returns_hx_location(client):
+    """가설 셸 2단계 카드의 중지 버튼 — 목록 대신 next(view)로 htmx 복귀."""
+    import json
+    resp = client.post("/experiments/1/stop", data={"next": "/hypothesis/1?view=execute"})
+    assert resp.status_code == 204
+    loc = json.loads(resp.headers["HX-Location"])
+    assert loc == {"path": "/hypothesis/1?view=execute", "target": "#main-content", "swap": "innerHTML"}
+    assert client.post("/experiments/1/stop").status_code == 409   # 실제로 stopped 처리됨
+
+
+def test_stop_rejects_external_next(client):
+    # 프로토콜 상대 URL(//evil)·절대 URL은 무시하고 기존 목록 응답
+    resp = client.post("/experiments/1/stop", data={"next": "//evil.example/x"})
+    assert resp.status_code == 200 and "HX-Location" not in resp.headers
+
+
 def test_stop_non_running_409(client):
     client.post("/experiments/1/stop")            # running → stopped
     assert client.post("/experiments/1/stop").status_code == 409
@@ -350,6 +366,29 @@ def test_metrics_stream_emits_metric_then_completed(monkeypatch, client):
     assert data["status"] == "running"
     assert isinstance(data["rps"], float) and isinstance(data["ready_pods"], int)
     assert events[-1][1] == {"status": "completed"}
+
+
+def test_metrics_stream_resolves_prometheus_by_app_env(monkeypatch, client):
+    """k3s 앱이면 make_prometheus("k3s") — env별 구현체(LocalPrometheus/Real/Stub) 라우팅은 팩토리 한 곳."""
+    Session = _engine_with_experiment("running")
+    s = Session()
+    s.get(App, 1).env = "k3s"
+    s.commit(); s.close()
+    monkeypatch.setattr("app.routers.experiments.SessionLocal",
+                        _flip_status_on_nth_session(Session, 2, "completed"))
+    monkeypatch.setattr("app.routers.experiments._LIVE_INTERVAL_S", 0)
+    seen = []
+
+    def _factory(env="eks"):
+        seen.append(env)
+        from app.services.stubs import StubPrometheus
+        return StubPrometheus()
+
+    monkeypatch.setattr("app.routers.experiments.make_prometheus", _factory)
+    with client.stream("GET", "/experiments/1/metrics/stream") as r:
+        events = _sse_events("".join(r.iter_text()))
+    assert [ev for ev, _ in events] == ["metric", "completed"]
+    assert seen == ["k3s"]                                  # 스트림당 한 번, 앱 env로
 
 
 def test_metrics_stream_pending_sends_none_values(monkeypatch, client):
