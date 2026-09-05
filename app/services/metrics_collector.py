@@ -32,18 +32,20 @@ def collect_experiment_metrics(session: Session, exp: Experiment,
                                prometheus: PrometheusService) -> None:
     try:
         app = exp.app
+        # k3s는 실험 전용 ns(ADR-0009)에서 관측 — eks는 exp.namespace가 비어 앱 ns 사용
+        namespace = exp.namespace or app.namespace
         duration = int(exp.params.get("duration_s") or _PODKILL_GRACE_S)
         injected = _aware_utc(exp.started_at)
         fault_end = injected + timedelta(seconds=duration)
         recovered = _aware_utc(exp.finished_at) if exp.finished_at else fault_end
 
         baseline = prometheus.phase_summary(
-            app.namespace, app.name, "baseline",
+            namespace, app.name, "baseline",
             injected - timedelta(seconds=BASELINE_WINDOW_S), injected)
         fault = prometheus.phase_summary(
-            app.namespace, app.name, "fault", injected, fault_end)
+            namespace, app.name, "fault", injected, fault_end)
         recovery = prometheus.phase_summary(
-            app.namespace, app.name, "recovery", fault_end, recovered)
+            namespace, app.name, "recovery", fault_end, recovered)
         recovery["recovery_seconds"] = round(
             max((recovered - fault_end).total_seconds(), 0.0), 1)
 

@@ -40,3 +40,26 @@ def test_collect_failure_is_isolated(db_session, caplog):
     assert exp.status == "completed"       # 실험 상태 불변
     assert exp.r_index is None
     assert "실측 지표 수집 실패" in caplog.text
+
+
+def test_collect_queries_experiment_namespace_when_set(db_session):
+    """k3s(ADR-0009)는 실험 전용 ns에서 관측 — 앱 ns가 아니라 exp.namespace로 조회해야 한다."""
+    exp = _completed_exp(db_session)
+    exp.namespace = "chaoslab-demo-9"
+    db_session.commit()
+    seen = []
+
+    class Recording(StubPrometheus):
+        def phase_summary(self, namespace, app_name, phase, start, end):
+            seen.append(namespace)
+            return super().phase_summary(namespace, app_name, phase, start, end)
+
+    collect_experiment_metrics(db_session, exp, Recording())
+    assert seen == ["chaoslab-demo-9"] * 3
+
+    exp2 = ExperimentRepository(db_session).create(         # eks: exp.namespace 비어 있음 → 앱 ns
+        app_id=1, chaos_type="pod-kill", params={}, status="completed",
+        started_at=exp.started_at, finished_at=exp.finished_at)
+    seen.clear()
+    collect_experiment_metrics(db_session, exp2, Recording())
+    assert seen == [exp2.app.namespace] * 3
