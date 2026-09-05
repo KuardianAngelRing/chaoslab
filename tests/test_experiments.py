@@ -291,6 +291,86 @@ def test_experiment_stream_completed_immediately(monkeypatch, client):
     assert '"status": "stopped"' in body
 
 
+def _sse_events(text: str) -> list[tuple[str, dict]]:
+    """SSE 본문 → [(event, data dict)] — 빈 줄로 구분된 블록 파싱."""
+    import json
+
+    out = []
+    for block in text.replace("\r\n", "\n").strip().split("\n\n"):
+        ev, data = None, None
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                ev = line[7:]
+            elif line.startswith("data: "):
+                data = json.loads(line[6:])
+        if ev:
+            out.append((ev, data))
+    return out
+
+
+_LIVE_KEYS = {"ts", "rps", "error_rate_pct", "p95_ms", "p99_ms", "ready_pods", "status"}
+
+
+def test_metrics_stream_completed_immediately_when_not_active(monkeypatch, client):
+    Session = _engine_with_experiment("completed")
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    with client.stream("GET", "/experiments/1/metrics/stream") as r:
+        events = _sse_events("".join(r.iter_text()))
+    assert events == [("completed", {"status": "completed"})]
+
+
+def _flip_status_on_nth_session(Session, n: int, status: str):
+    """TestClient는 스트림 본문을 응답 종료까지 모아서 돌려주므로 중간에 DB를 바꿀 수 없다 —
+    라우트가 n번째로 SessionLocal()을 열기 직전에 실험 status를 바꿔 종료를 유도한다."""
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        if calls["n"] == n:
+            s = Session()
+            s.get(Experiment, 1).status = status
+            s.commit()
+            s.close()
+        return Session()
+
+    return factory
+
+
+def test_metrics_stream_emits_metric_then_completed(monkeypatch, client):
+    # running → 첫 이벤트는 계약 키를 가진 metric(Stub 즉시값), 완료로 바뀌면 completed로 종료
+    Session = _engine_with_experiment("running")
+    monkeypatch.setattr("app.routers.experiments.SessionLocal",
+                        _flip_status_on_nth_session(Session, 3, "completed"))
+    monkeypatch.setattr("app.routers.experiments._LIVE_INTERVAL_S", 0)
+    with client.stream("GET", "/experiments/1/metrics/stream") as r:
+        events = _sse_events("".join(r.iter_text()))
+    assert [ev for ev, _ in events] == ["metric", "metric", "completed"]
+    data = events[0][1]
+    assert set(data) == _LIVE_KEYS
+    assert data["status"] == "running"
+    assert isinstance(data["rps"], float) and isinstance(data["ready_pods"], int)
+    assert events[-1][1] == {"status": "completed"}
+
+
+def test_metrics_stream_pending_sends_none_values(monkeypatch, client):
+    # k3s 배포 전(pending)이면 값 None인 metric 틱 — 스트림은 유지되고 Prometheus는 조회하지 않는다
+    Session = _engine_with_experiment("pending")
+    monkeypatch.setattr("app.routers.experiments.SessionLocal",
+                        _flip_status_on_nth_session(Session, 2, "stopped"))
+    monkeypatch.setattr("app.routers.experiments._LIVE_INTERVAL_S", 0)
+
+    def _boom(*a, **k):
+        raise AssertionError("pending 상태에서는 live_snapshot을 호출하지 않는다")
+
+    monkeypatch.setattr("app.services.stubs.StubPrometheus.live_snapshot", _boom)
+    with client.stream("GET", "/experiments/1/metrics/stream") as r:
+        events = _sse_events("".join(r.iter_text()))
+    assert [ev for ev, _ in events] == ["metric", "completed"]
+    data = events[0][1]
+    assert data["status"] == "pending"
+    assert all(data[k] is None for k in ("rps", "error_rate_pct", "p95_ms", "p99_ms", "ready_pods"))
+
+
 def test_watch_k3s_experiment_deploys_injects_and_tears_down(monkeypatch):
     """ADR-0009: k3s 워처는 배포→ready→주입→관측→CRD 삭제→ns 삭제 순서로 전체 수행."""
     from app.routers.experiments import _watch_experiment
