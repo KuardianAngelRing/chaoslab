@@ -15,7 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.db.database import SessionLocal, get_session
 from app.db.models import HypothesisRun
-from app.db.repositories import AppRepository, HypothesisRepository
+from app.db.repositories import AppRepository, HypothesisRepository, ScenarioRunRepository
 from app.deps import make_hypothesis_agent
 from app.rendering import render_page
 from app.routers.experiments import _watch_experiment, start_experiment
@@ -27,6 +27,7 @@ from app.services.agent.hypothesis_validation import (
     run_generation,
 )
 from app.services.chaos_specs import CHAOS_SPECS
+from app.services.regression import DEFAULT_CRITERIA
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -45,12 +46,14 @@ def _page(request: Request, session: Session, run: HypothesisRun):
 
     1단계(후보 선택)·2단계(실험 카드)는 partials/_hypothesis_*.html — view 결정·클램프는
     템플릿의 기존 stage_meta 규칙(run.current 초과 view는 기본 view로 강등)을 그대로 쓴다.
+    3·4단계는 승인 후보로 조립한 ScenarioRun(hypothesis_run_id) 기준 — 셸의 verify/result 섹션 재사용.
     """
     repo = HypothesisRepository(session)
     candidates = repo.list_candidates(run.id)
     experiment = repo.experiment_for_run(run.id)
     experiment_candidate = (repo.get_candidate(experiment.candidate_id)
                             if experiment and experiment.candidate_id else None)
+    scenario_run = ScenarioRunRepository(session).latest_for_hypothesis(run.id)
     return render_page(
         request, "pages/experiment_detail.html",
         {"active_nav": "experiments",
@@ -58,6 +61,12 @@ def _page(request: Request, session: Session, run: HypothesisRun):
          "hypothesis_run": run, "candidates": candidates,
          "experiment": experiment, "experiment_candidate": experiment_candidate,
          "hypothesis_active": _is_active(run, candidates) and experiment is None,
+         # 3단계 준비 세션(startPreparation)은 셸의 data-workflow-app-* 속성을 읽는다
+         "workflow_app": run.app, "workflow_objective": run.goal_text,
+         "scenario_run": scenario_run,
+         "regression_candidates": [c for c in candidates
+                                   if c.detail_status == "detailed" and c.params],
+         "default_criteria": DEFAULT_CRITERIA,
          "chaos_labels": {k: v["label"] for k, v in CHAOS_SPECS.items()},
          "chaos_specs": CHAOS_SPECS},
     )

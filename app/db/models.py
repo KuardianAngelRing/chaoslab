@@ -101,6 +101,8 @@ class ScenarioRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     app_id: Mapped[int] = mapped_column(ForeignKey("apps.id"))
     preparation_session_id: Mapped[int] = mapped_column(ForeignKey("experiment_sessions.id"))
+    hypothesis_run_id: Mapped[int | None] = mapped_column(  # 가설 경로에서 조립된 회귀 (YAML 경로는 None)
+        ForeignKey("hypothesis_runs.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="queued")
     scenario: Mapped[dict] = mapped_column(JSON, default=dict)
     progress: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -116,6 +118,7 @@ class ScenarioRun(Base):
 
     app: Mapped["App"] = relationship(back_populates="scenario_runs")
     preparation_session: Mapped["ExperimentSession"] = relationship()
+    hypothesis_run: Mapped["HypothesisRun | None"] = relationship()
 
 
 class AgentIteration(Base):

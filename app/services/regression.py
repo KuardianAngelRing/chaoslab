@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from app.db.database import SessionLocal
-from app.db.models import Experiment, ScenarioRun
+from app.db.models import App, Experiment, HypothesisRun, ScenarioRun
 from app.deps import make_chaos, make_k3s_workload
 from app.services.chaos_specs import validate_params
 from app.services.observations import summarize, take_sample
@@ -29,10 +29,63 @@ _CRITERIA_KEYS = {
 _IMPROVEMENT_KEYS = {
     "id", "type", "deployment", "container", "key", "value", "reason", "applies_to",
 }
+# 가설 경로 기본 판정 기준 — nginx 매니페스트(replicas 2) 기준 min_ready_pods=1이 안전.
+# 값은 팀 튜닝 대상이므로 여기 한 곳에서만 관리한다.
+DEFAULT_CRITERIA = {
+    "max_error_rate_pct": 20,
+    "max_p95_latency_ms": 1500,
+    "max_recovery_seconds": 30,
+    "min_ready_pods": 1,
+}
 
 
 def scenario_snapshot(app_name: str, selected_ids: list[str]) -> dict:
-    """등록된 시나리오에서 사용자가 고른 실험과 허용된 개선만 원래 순서로 고정한다."""
+    """등록된 시나리오에서 사용자가 고른 실험과 허용된 개선만 원래 순서로 고정한다 (YAML 경로)."""
+    return _snapshot_from_yaml(app_name, selected_ids)
+
+
+def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
+    """가설 경로 — 승인(detailed)된 후보를 회귀 시나리오 스냅샷으로 조립한다.
+
+    YAML 경로와 같은 스펙 형태(`_run_one`이 그대로 소비)를 만들되, 후보는 최소 1개로 완화.
+    improvements는 비어 있다(Phase 3 전) — baseline·final을 같은 조건으로 돌려
+    보고서에 "적용된 개선 없음"이 정직하게 드러난다.
+    """
+    approved = [c for c in run.candidates if c.detail_status == "detailed" and c.params]
+    if not approved:
+        raise ValueError("승인(구체화 완료)된 후보가 없어 최종 회귀를 조립할 수 없습니다")
+    experiments = []
+    for candidate in approved:
+        params, errors = validate_params(candidate.chaos_type, candidate.params)
+        if errors:
+            raise ValueError(" / ".join(errors))
+        if not candidate.target_workload:
+            raise ValueError("후보의 대상 워크로드가 비어 있습니다")
+        experiments.append({
+            "id": f"cand-{candidate.id}",
+            "title": candidate.title,
+            "chaos_type": candidate.chaos_type,
+            "params": params,
+            "target_selector": {"app.kubernetes.io/name": candidate.target_workload},
+            "criteria": dict(DEFAULT_CRITERIA),
+        })
+    return {
+        "id": f"hyp-{run.id}",
+        "title": run.goal_text or f"{app.name} 복원력 검증",
+        "app": app.name,
+        # 관측 대상 Service명 = 앱명 가정(nginx 샘플처럼 Service가 앱명과 같은 앱만).
+        # Service명이 다른 앱은 이번 범위 밖.
+        "observation": {
+            "service": app.name,
+            "path": app.health_path or "/",
+            "expected_status": 200,
+        },
+        "improvements": [],
+        "experiments": experiments,
+    }
+
+
+def _snapshot_from_yaml(app_name: str, selected_ids: list[str]) -> dict:
     if app_name != "order-resilience-lab":
         raise ValueError("최종 회귀 시나리오는 order-resilience-lab에서만 지원합니다")
     raw = yaml.safe_load((_SCENARIOS / "order-resilience-lab.yaml").read_text(encoding="utf-8"))

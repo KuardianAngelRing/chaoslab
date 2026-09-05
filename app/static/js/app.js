@@ -393,6 +393,7 @@ async function startPreparation(root) {
       const done = JSON.parse(event.data);
       closePreparationStream();
       root.dataset.preparing = 'false';
+      root.dataset.preparationStatus = done.status;
       renderPreparation(root, done);
       if (done.status === 'ready') maybePlayExecution(root);
     });
@@ -400,6 +401,7 @@ async function startPreparation(root) {
     fetch(`/experiment-sessions/${payload.id}/start`, {method: 'POST'}).catch(() => {
       closePreparationStream();
       root.dataset.preparing = 'false';
+      root.dataset.preparationStatus = 'failed';
       renderPreparation(root, {status: 'failed', error: '환경 준비를 시작하지 못했습니다'});
     });
     return true;
@@ -714,20 +716,25 @@ function watchScenarioRun(root, runId) {
 async function startScenarioRun(root) {
   if (root.dataset.scenarioRunId) return true;
   const sessionId = root.dataset.preparationSessionId;
-  const selectedIds = root.dataset.selectedCandidateIds || '';
+  const hypothesisRun = root.dataset.hypothesisRun || '';
+  // 가설 경로는 승인 후보로 서버가 조립 — selected_ids 대신 hypothesis_run_id
+  const selectedIds = hypothesisRun ? '' : (root.dataset.selectedCandidateIds || '');
   if (!sessionId) return false;
   try {
-    const response = await fetch('/scenario-runs', {
-      method: 'POST',
-      body: new URLSearchParams({session_id: sessionId, selected_ids: selectedIds}),
-    });
+    const body = new URLSearchParams({session_id: sessionId, selected_ids: selectedIds});
+    if (hypothesisRun) body.set('hypothesis_run_id', hypothesisRun);
+    const response = await fetch('/scenario-runs', {method: 'POST', body});
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || '최종 회귀를 시작하지 못했습니다');
     root.dataset.scenarioRunId = String(payload.id);
-    const url = new URL(window.location.href);
+    const url = hypothesisRun
+      ? new URL(`/hypothesis/${hypothesisRun}`, window.location.origin)
+      : new URL(window.location.href);
     url.searchParams.set('view', 'verify');
     url.searchParams.set('scenario_run_id', payload.id);
     history.replaceState({}, '', url);
+    const setup = root.querySelector('[data-hypothesis-regression-setup]');
+    if (setup) setup.classList.add('hidden');
     renderScenarioRun(root, payload);
     watchScenarioRun(root, payload.id);
     return true;
@@ -736,6 +743,29 @@ async function startScenarioRun(root) {
     if (panel) { panel.classList.remove('hidden'); panel.textContent = error.message; }
     return false;
   }
+}
+
+// 가설 경로 3단계: 준비 세션(ready) → 승인 후보 회귀 시작. startPreparation은 스트림만 열고
+// 바로 돌아오므로 dataset(preparing·preparationStatus)으로 종료를 기다린다.
+function waitPreparation(root) {
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (root.dataset.preparing === 'true') { setTimeout(tick, 500); return; }
+      resolve(root.dataset.preparationStatus || (root.dataset.preparationSessionId ? 'ready' : 'failed'));
+    };
+    tick();
+  });
+}
+async function startHypothesisRegression(root) {
+  if (!await startPreparation(root)) return false;
+  const status = await waitPreparation(root);
+  if (status !== 'ready') {
+    // 실패한 세션은 버리고 다음 클릭에서 새 세션을 만들 수 있게
+    delete root.dataset.preparationSessionId;
+    delete root.dataset.preparationStatus;
+    return false;
+  }
+  return startScenarioRun(root);
 }
 
 function syncWorkflowExecutionSelection(root, selectedIds) {
@@ -882,12 +912,22 @@ document.addEventListener('click', async (e) => {
     maybePlayExecution(shell);
   }
 
+  const hypStart = e.target.closest && e.target.closest('[data-hypothesis-regression-start]');
+  if (hypStart) {
+    if (hypStart.disabled) return;
+    const root = hypStart.closest('[data-workflow-shell]');
+    hypStart.disabled = true;
+    if (!await startHypothesisRegression(root)) hypStart.disabled = false;
+    return;
+  }
+
   const go = e.target.closest && e.target.closest('[data-workflow-go]');
   if (!go || go.disabled) return;
   const root = go.closest('[data-workflow-shell]');
   const target = root?.querySelector(`[data-workflow-stage="${go.dataset.workflowGo}"]`);
   if (target) {
-    if (go.dataset.workflowGo === 'execute' && root.dataset.workflowAppEnv === 'k3s') {
+    // 가설 경로는 2단계 실험이 이미 끝난 상태 — 준비 세션은 3단계 회귀 시작 버튼이 만든다
+    if (go.dataset.workflowGo === 'execute' && root.dataset.workflowAppEnv === 'k3s' && !root.dataset.hypothesisRun) {
       if (!await startPreparation(root)) return;
     }
     if (go.hasAttribute('data-regression-start')) {
@@ -913,9 +953,10 @@ document.addEventListener('click', (e) => {
   const root = result.closest('[data-workflow-shell]');
   const runId = root?.dataset.scenarioRunId;
   if (!runId) return;
-  htmx.ajax('GET', `/experiments/${root.dataset.workflowRunId}?view=result&scenario_run_id=${runId}`, {
-    target: '#main-content', swap: 'innerHTML', pushUrl: true,
-  });
+  const resultUrl = root.dataset.hypothesisRun
+    ? `/hypothesis/${root.dataset.hypothesisRun}?view=result`
+    : `/experiments/${root.dataset.workflowRunId}?view=result&scenario_run_id=${runId}`;
+  htmx.ajax('GET', resultUrl, {target: '#main-content', swap: 'innerHTML', pushUrl: true});
 });
 
 document.addEventListener('change', (e) => {
