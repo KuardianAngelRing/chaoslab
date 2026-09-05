@@ -66,6 +66,12 @@ def create_scenario_run(
             raise HTTPException(status_code=404, detail="가설 요청을 찾을 수 없습니다")
         if hypothesis_run.app_id != preparation.app_id:
             raise HTTPException(status_code=422, detail="가설 요청과 준비 세션의 앱이 다릅니다")
+        if hypothesis_run.improvement_status == "generating":
+            raise HTTPException(status_code=409, detail="개선안을 만드는 중이에요 — 끝난 뒤 시작해 주세요")
+        if hypothesis_run.improvement_status == "ready" and any(
+                p.status == "proposed" for p in hypothesis_run.proposals):
+            # 미결 제안이 남은 채 개선 없이 도는 실수를 막는다(설계 09/05 §6)
+            raise HTTPException(status_code=422, detail="개선안을 승인하거나 제외해 주세요")
     try:
         if hypothesis_run is not None:
             scenario = scenario_snapshot_from_hypothesis(hypothesis_run, preparation.app)

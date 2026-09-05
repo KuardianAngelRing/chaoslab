@@ -363,3 +363,144 @@ def test_workload_selector_parses_match_labels_and_falls_back():
     assert workload_selector(single, "other-name") == {"app": "nginx"}     # 유일 워크로드면 이름 달라도 그것
     assert workload_selector("kind: Deployment", "nginx") is None
     assert workload_selector(":: not yaml [", "nginx") is None
+
+
+# ── 개선 단계 (설계 2026-09-05): 승인 제안 → 스냅샷 improvements → 적용/롤백 ──
+
+_PROBE_PATCH = {"spec": {"template": {"spec": {"containers": [{
+    "name": "nginx", "readinessProbe": {"periodSeconds": 2, "failureThreshold": 2, "tcpSocket": {"port": 80}}}]}}}}
+_PRESTOP_PATCH = {"spec": {"template": {"spec": {"containers": [{
+    "name": "nginx", "lifecycle": {"preStop": {"sleep": {"seconds": 5}}}}]}}}}
+
+
+def _add_proposals(Session, run_id, statuses):
+    from app.services.agent.hypothesis_schema import ImprovementProposalOut
+
+    session = Session()
+    repo = HypothesisRepository(session)
+    rows = repo.replace_proposals(run_id, None, [
+        ImprovementProposalOut(title="readinessProbe 추가", type="manifest_patch", deployment="nginx",
+                               container="nginx", patch=_PROBE_PATCH, rationale="r", expected_effect="e"),
+        ImprovementProposalOut(title="preStop sleep", type="manifest_patch", deployment="nginx",
+                               container="nginx", patch=_PRESTOP_PATCH, rationale="r", expected_effect="e"),
+    ])
+    for row, status in zip(rows, statuses):
+        row.status = status
+    run = repo.get_run(run_id)
+    run.improvement_status = "ready"
+    session.commit()
+    ids = [row.id for row in rows]
+    session.close()
+    return ids
+
+
+def test_scenario_snapshot_from_hypothesis_includes_only_approved_proposals():
+    Session = _session_factory()
+    _, run_id, _, cand_id = _hypothesis_fixture(Session)
+    approved_id, _ = _add_proposals(Session, run_id, ["approved", "rejected"])
+    session = Session()
+    run = HypothesisRepository(session).get_run(run_id)
+    scenario = scenario_snapshot_from_hypothesis(run, run.app)
+    [imp] = scenario["improvements"]
+    assert imp["id"] == f"imp-{approved_id}" and imp["type"] == "manifest_patch"
+    assert imp["title"] == "readinessProbe 추가" and imp["reason"] == "r"
+    assert imp["patch"] == _PROBE_PATCH and imp["applies_to"] == [f"cand-{cand_id}"]
+    session.close()
+
+
+def test_regression_applies_approved_patch_and_reports_rows(monkeypatch, client):
+    """승인 패치가 baseline 뒤 patch_deployment로 적용되고 improvement_changes·보고서 표에 경로별 전후가 남는다."""
+    from app.db.database import get_session
+    from app.main import app as fastapi_app
+
+    Session = _session_factory()
+    _, run_id, session_id, _ = _hypothesis_fixture(Session)
+    _add_proposals(Session, run_id, ["approved", "approved"])
+    monkeypatch.setattr("app.services.regression.SessionLocal", Session)
+    monkeypatch.setattr("app.services.regression.time.sleep", lambda _seconds: None)
+
+    def _override():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    fastapi_app.dependency_overrides[get_session] = _override
+
+    resp = client.post("/scenario-runs", data={"session_id": session_id, "hypothesis_run_id": run_id})
+    assert resp.status_code == 201, resp.text
+    session = Session()
+    saved = session.get(ScenarioRun, resp.json()["id"])
+    assert saved.status == "completed"
+    assert [c["type"] for c in saved.improvement_changes] == ["manifest_patch", "manifest_patch"]
+    probe = saved.improvement_changes[0]
+    assert probe["title"] == "readinessProbe 추가" and probe["rollout_ready"] is True
+    assert probe["before"]["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]["periodSeconds"] is None
+    assert probe["after"] == _PROBE_PATCH
+    assert len(saved.comparison["changes"]) == 2
+    html = report_html(saved)
+    assert "containers[nginx].readinessProbe.periodSeconds" in html and "없음 → 2" in html
+    assert "containers[nginx].lifecycle.preStop.sleep" in html
+    session.close()
+
+
+def test_scenario_run_rejects_undecided_proposals(monkeypatch, client):
+    from app.db.database import get_session
+    from app.main import app as fastapi_app
+
+    Session = _session_factory()
+    _, run_id, session_id, _ = _hypothesis_fixture(Session)
+    _add_proposals(Session, run_id, ["proposed", "rejected"])
+
+    def _override():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    fastapi_app.dependency_overrides[get_session] = _override
+    resp = client.post("/scenario-runs", data={"session_id": session_id, "hypothesis_run_id": run_id})
+    assert resp.status_code == 422 and "승인하거나 제외" in resp.json()["detail"]
+
+
+def test_apply_improvements_rolls_back_patch_when_later_one_fails():
+    from app.services.regression import _apply_improvements
+
+    calls = []
+
+    class _Workload:
+        def patch_deployment(self, namespace, deployment, patch, timeout_s=180):
+            calls.append((deployment, patch))
+            if "lifecycle" in str(patch):
+                raise RuntimeError("rollout timeout")
+            from app.services.improvement_specs import project
+            return {"type": "manifest_patch", "deployment": deployment, "patch": patch,
+                    "before": project({}, patch), "after": patch, "rollout_ready": True}
+
+    class _Prep:
+        namespace = "ns"
+
+    class _Run:
+        id = 1
+        preparation_session = _Prep()
+        scenario = {"improvements": [
+            {"id": "a", "type": "manifest_patch", "deployment": "nginx", "patch": _PROBE_PATCH,
+             "title": "probe", "reason": "r", "applies_to": ["x"]},
+            {"id": "b", "type": "manifest_patch", "deployment": "nginx", "patch": _PRESTOP_PATCH,
+             "title": "prestop", "reason": "r", "applies_to": ["x"]},
+        ]}
+        progress = {}
+        updated_at = None
+
+    class _Session:
+        def commit(self):
+            return None
+
+    import pytest
+    with pytest.raises(RuntimeError):
+        _apply_improvements(_Session(), _Run(), _Workload())
+    # 적용 → 실패 → 첫 변경을 before(null 프로젝션 = 필드 삭제)로 롤백
+    assert [d for d, _ in calls] == ["nginx", "nginx", "nginx"]
+    rollback = calls[2][1]
+    assert rollback["spec"]["template"]["spec"]["containers"][0]["readinessProbe"] == {
+        "periodSeconds": None, "failureThreshold": None, "tcpSocket": None}

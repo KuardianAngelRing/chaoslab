@@ -13,6 +13,7 @@ from app.db.database import SessionLocal
 from app.db.models import App, Experiment, HypothesisRun, ScenarioRun
 from app.deps import make_chaos, make_k3s_workload
 from app.services.chaos_specs import validate_params
+from app.services.improvement_specs import validate_improvement
 from app.services.observations import summarize, take_sample
 from app.services.report_writer import write_report
 from app.services.resilience import compare_runs, evaluate_experiment
@@ -28,9 +29,7 @@ _RECOVER_POLLS = 60
 _CRITERIA_KEYS = {
     "max_error_rate_pct", "max_p95_latency_ms", "max_recovery_seconds", "min_ready_pods",
 }
-_IMPROVEMENT_KEYS = {
-    "id", "type", "deployment", "container", "key", "value", "reason", "applies_to",
-}
+_IMPROVEMENT_META_KEYS = {"id", "title", "reason", "applies_to"}
 # 가설 경로 기본 판정 기준 — nginx 매니페스트(replicas 2) 기준 min_ready_pods=1이 안전.
 # 값은 팀 튜닝 대상이므로 여기 한 곳에서만 관리한다.
 DEFAULT_CRITERIA = {
@@ -75,8 +74,8 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
     """가설 경로 — 승인(detailed)된 후보를 회귀 시나리오 스냅샷으로 조립한다.
 
     YAML 경로와 같은 스펙 형태(`_run_one`이 그대로 소비)를 만들되, 후보는 최소 1개로 완화.
-    improvements는 비어 있다(Phase 3 전) — baseline·final을 같은 조건으로 돌려
-    보고서에 "적용된 개선 없음"이 정직하게 드러난다.
+    improvements = 사용자가 승인한 ImprovementProposal(설계 09/05) — 없으면 빈 리스트로
+    baseline·final을 같은 조건으로 돌리고 보고서에 "적용된 개선 없음"이 정직하게 드러난다.
     """
     approved = [c for c in run.candidates if c.detail_status == "detailed" and c.params]
     if not approved:
@@ -107,9 +106,23 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
             "path": app.health_path or "/",
             "expected_status": 200,
         },
-        "improvements": [],
+        "improvements": [
+            _improvement_spec(p, [e["id"] for e in experiments])
+            for p in run.proposals if p.status == "approved"
+        ],
         "experiments": experiments,
     }
+
+
+def _improvement_spec(proposal, applies_to: list[str]) -> dict:
+    normalized, errors = validate_improvement({
+        "type": proposal.type, "deployment": proposal.deployment, "container": proposal.container,
+        "key": proposal.key, "value": proposal.value, "patch": proposal.patch,
+    })
+    if errors:
+        raise ValueError(f"승인 개선안 '{proposal.title}' 검증 실패: " + "; ".join(errors))
+    return {**normalized, "id": f"imp-{proposal.id}", "title": proposal.title,
+            "reason": proposal.rationale, "applies_to": list(applies_to)}
 
 
 def _snapshot_from_yaml(app_name: str, selected_ids: list[str]) -> dict:
@@ -133,10 +146,12 @@ def _snapshot_from_yaml(app_name: str, selected_ids: list[str]) -> dict:
             raise ValueError(f"{item['id']} 시나리오 판정 기준이 올바르지 않습니다")
     improvements = []
     for item in raw.get("improvements") or []:
-        if set(item) != _IMPROVEMENT_KEYS or item.get("type") != "deployment_env":
+        normalized, errors = validate_improvement(item)
+        if errors or not (set(item) - _IMPROVEMENT_META_KEYS) <= set(normalized):
             raise ValueError("허용되지 않은 개선 명세입니다")
         if selected.intersection(item["applies_to"]):
-            improvements.append(item)
+            improvements.append({**normalized, "id": item["id"], "title": item.get("title", item["reason"]),
+                                 "reason": item["reason"], "applies_to": item["applies_to"]})
     return {**raw, "experiments": experiments, "improvements": improvements}
 
 
@@ -354,41 +369,47 @@ def _run_one(session, run: ScenarioRun, spec: dict, workload, round_name: str) -
 
 
 def _apply_improvements(session, run: ScenarioRun, workload) -> list[dict]:
+    """승인 개선을 순서대로 적용(타입별 분기). 하나라도 실패하면 이미 적용한 변경을 역순 롤백 후 예외."""
     changes = []
     improvements = (run.scenario or {}).get("improvements") or []
+    namespace = run.preparation_session.namespace
     for index, spec in enumerate(improvements):
         run.progress = {
             "round": "improvement",
             "current": index + 1,
             "total": len(improvements),
             "stage": "applying_improvement",
-            "title": spec["reason"],
+            "title": spec.get("title") or spec["reason"],
             "message": f"{spec['deployment']} 설정을 개선하고 rollout을 확인하고 있습니다",
         }
         run.updated_at = datetime.now(timezone.utc)
         session.commit()
         try:
-            change = workload.apply_deployment_env(
-                run.preparation_session.namespace,
-                spec["deployment"],
-                spec["container"],
-                spec["key"],
-                spec["value"],
-            )
+            if spec["type"] == "manifest_patch":
+                change = workload.patch_deployment(namespace, spec["deployment"], spec["patch"])
+            else:
+                change = workload.apply_deployment_env(
+                    namespace, spec["deployment"], spec["container"], spec["key"], spec["value"])
             if change["before"] != change["after"]:
-                changes.append({**change, "id": spec["id"], "reason": spec["reason"],
-                                "applies_to": spec["applies_to"]})
+                changes.append({**change, "id": spec["id"], "title": spec.get("title", ""),
+                                "reason": spec["reason"], "applies_to": spec["applies_to"]})
         except Exception:
             for applied in reversed(changes):
                 try:
-                    workload.apply_deployment_env(
-                        run.preparation_session.namespace,
-                        applied["deployment"], applied["container"], applied["key"], applied["before"],
-                    )
+                    _rollback_change(workload, namespace, applied)
                 except Exception:
                     logger.exception("improvement rollback failed (%s)", applied["id"])
             raise
     return changes
+
+
+def _rollback_change(workload, namespace: str, applied: dict) -> None:
+    if applied["type"] == "manifest_patch":
+        # before 프로젝션 = 롤백 패치 (strategic merge에서 null은 필드 삭제)
+        workload.patch_deployment(namespace, applied["deployment"], applied["before"])
+    else:
+        workload.apply_deployment_env(
+            namespace, applied["deployment"], applied["container"], applied["key"], applied["before"])
 
 
 def _collect_samples(workload, namespace: str, observation: dict, count: int) -> list[dict]:
