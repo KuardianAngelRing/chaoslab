@@ -421,14 +421,8 @@ document.addEventListener('click', (e) => {
   const appId = picked.value;
   const objective = form.querySelector('textarea[name="objective"]')?.value.trim() || '';
   closeDialog('newExperiment');
-  // 시나리오 회귀 워크플로우는 order-resilience-lab 전용(regression.scenario_snapshot 제약)
-  // — 그 외 앱은 가설 수립 흐름(POST /hypothesis)으로.
-  if (picked.dataset.appName === 'order-resilience-lab') {
-    htmx.ajax('GET', `/experiments/1?${new URLSearchParams({view: 'plan', app_id: appId, objective})}`, {
-      target: '#main-content', swap: 'innerHTML', pushUrl: true,
-    });
-    return;
-  }
+  // 모든 앱이 가설 수립 흐름(POST /hypothesis)으로 — order-resilience-lab 전용 YAML 셸 분기는
+  // 회귀가 가설 후보를 소비하게 되면서(09/05) 제거. 구 셸(/experiments/{1,2,3})은 데모 URL로만 남음.
   htmx.ajax('POST', '/hypothesis', {
     target: '#main-content', swap: 'innerHTML',
     values: {
@@ -463,12 +457,14 @@ function k3sSampleSync(root) {
   const name = root.querySelector('[data-k3s-app-name]');
   const healthPath = root.querySelector('[data-k3s-health-path]');
   if (!selected || !name || !healthPath) return;
-  if (selected.value === 'order-resilience-lab') {
-    name.value = 'order-resilience-lab';
-    healthPath.value = '/orders';
+  const samples = [...root.querySelectorAll('input[name="sample_id"][data-sample-name]')];
+  if (selected.dataset.sampleName) {
+    name.value = selected.dataset.sampleName;
+    healthPath.value = selected.dataset.sampleHealth || '/healthz';
   } else {
-    if (name.value === 'order-resilience-lab') name.value = '';
-    if (healthPath.value === '/orders') healthPath.value = '/healthz';
+    // 직접 업로드로 전환: 샘플이 채워 둔 자동값만 비우고 사용자가 친 값은 보존
+    if (samples.some((s) => s.dataset.sampleName === name.value)) name.value = '';
+    if (samples.some((s) => s.dataset.sampleHealth === healthPath.value)) healthPath.value = '/healthz';
   }
 }
 document.addEventListener('change', (e) => {
