@@ -960,3 +960,55 @@ function watchHypothesis() {
 }
 document.addEventListener('DOMContentLoaded', watchHypothesis);
 document.body.addEventListener('htmx:afterSwap', watchHypothesis);
+
+// ── 실험 진행 중 실시간 메트릭 (data-live-metrics → /experiments/{id}/metrics/stream) ──
+// 화면에 실행 카드는 1개 — 전역 스트림 1개만 유지, 스왑으로 요소가 바뀌면 이전 스트림을 닫고 다시 구독.
+let _liveMetricsStream = null;
+function watchLiveMetrics() {
+  const el = document.querySelector('[data-live-metrics]');
+  if (_liveMetricsStream) {
+    if (_liveMetricsStream._el === el) return;   // 같은 요소 — 구독 유지
+    _liveMetricsStream.close(); _liveMetricsStream = null;
+  }
+  if (!el || el.dataset.liveMetricsFinal === 'true' || typeof Chart === 'undefined') return;
+
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const WINDOW = 60;  // rolling window — 최근 60틱(3s × 60 = 3분)
+  const cc = chartCommon();
+  const line = (color, yAxisID) => ({ data: [], borderColor: color, backgroundColor: color + '22', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true, yAxisID });
+  const latency = new Chart(el.querySelector('[data-live-metrics-latency]'), {
+    type: 'line',
+    data: { labels: [], datasets: [line(cssVar('--warning'), 'y'), line(cssVar('--danger'), 'y')] },
+    options: { ...cc, animation: false, scales: { ...cc.scales, x: { display: false }, y: { ...cc.scales.y, min: 0 } } }
+  });
+  const traffic = new Chart(el.querySelector('[data-live-metrics-traffic]'), {
+    type: 'line',
+    data: { labels: [], datasets: [line(cssVar('--primary'), 'y'), line(cssVar('--danger'), 'y1')] },
+    options: { ...cc, animation: false, scales: { ...cc.scales, x: { display: false }, y: { ...cc.scales.y, min: 0 },
+      y1: { position: 'right', min: 0, grid: { display: false }, ticks: { color: tdsTextColor(), font: { size: 10 }, callback: (v) => `${v}%` } } } }
+  });
+  const push = (chart, values, label) => {
+    chart.data.labels.push(label);
+    values.forEach((v, i) => chart.data.datasets[i].data.push(v));
+    if (chart.data.labels.length > WINDOW) { chart.data.labels.shift(); chart.data.datasets.forEach((d) => d.data.shift()); }
+    chart.update();
+  };
+  const pods = el.querySelector('[data-live-metrics-pods]');
+
+  const es = new EventSource(`/experiments/${el.dataset.liveMetrics}/metrics/stream`);
+  es._el = el;
+  es.addEventListener('metric', (e) => {
+    let m = {};
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    const label = (m.ts || '').slice(11, 19);
+    push(latency, [m.p95_ms, m.p99_ms], label);
+    push(traffic, [m.rps, m.error_rate_pct], label);
+    if (pods) pods.textContent = m.ready_pods == null ? '-' : m.ready_pods;
+  });
+  // completed 이후 화면 재요청은 watchExperiments(status 스트림)가 담당 — 여기선 스트림만 닫고 차트를 남긴다.
+  es.addEventListener('completed', () => { es.close(); if (_liveMetricsStream === es) _liveMetricsStream = null; });
+  es.onerror = () => { es.close(); if (_liveMetricsStream === es) _liveMetricsStream = null; };
+  _liveMetricsStream = es;
+}
+document.addEventListener('DOMContentLoaded', watchLiveMetrics);
+document.body.addEventListener('htmx:afterSwap', watchLiveMetrics);

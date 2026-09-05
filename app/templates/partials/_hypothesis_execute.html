@@ -31,6 +31,53 @@
   </div>
   {% endif %}
 
+  {# 실시간 메트릭 — running 동안 /experiments/{id}/metrics/stream(3s) 구독, app.js watchLiveMetrics가 그림.
+     종료 상태(final=true)면 구독 없이 저장된 fault/recovery 요약을 서버 렌더. #}
+  {% set live_final = exp.status not in ("pending", "deploying", "running") %}
+  <div class="rounded-2xl border p-4 mb-4" style="border-color: var(--border);"
+       data-live-metrics="{{ exp.id }}" data-live-metrics-final="{{ 'true' if live_final else 'false' }}">
+    <div class="flex items-center justify-between mb-3">
+      <b class="text-xs">실시간 메트릭</b>
+      <span class="text-[11px]" style="color: var(--muted-foreground);">
+        {% if live_final %}실험 종료 — 마지막 스냅샷 유지{% else %}Prometheus 즉시값 · 3초 간격{% endif %}
+        · Ready 파드 <b class="mono" data-live-metrics-pods>-</b>
+      </span>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <div class="flex items-center gap-3 text-[11px] mb-1" style="color: var(--muted-foreground);">
+          <span>레이턴시(ms)</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--warning);"></i>p95</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--danger);"></i>p99</span>
+        </div>
+        <div style="height: 140px;"><canvas data-live-metrics-latency></canvas></div>
+      </div>
+      <div>
+        <div class="flex items-center gap-3 text-[11px] mb-1" style="color: var(--muted-foreground);">
+          <span>트래픽</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--primary);"></i>RPS</span>
+          <span><i class="inline-block w-2 h-2 rounded-full mr-1" style="background: var(--danger);"></i>오류율(%)</span>
+        </div>
+        <div style="height: 140px;"><canvas data-live-metrics-traffic></canvas></div>
+      </div>
+    </div>
+    {% if live_final %}
+    {% set fm, rm = exp.fault_metrics or {}, exp.recovery_metrics or {} %}
+    {% if fm or rm %}
+    <table class="w-full text-xs mt-3 pt-3 border-t" style="border-color: var(--border);">
+      <thead><tr style="color: var(--muted-foreground);"><th class="text-left font-bold py-1">구간</th><th class="text-right font-bold py-1">RPS 평균</th><th class="text-right font-bold py-1">오류율 피크</th><th class="text-right font-bold py-1">p95 피크</th><th class="text-right font-bold py-1">p99 피크</th><th class="text-right font-bold py-1">최소 Ready</th></tr></thead>
+      <tbody class="mono">
+        {% for name, m in (("장애", fm), ("회복", rm)) if m %}
+        <tr><td class="py-1 font-bold">{{ name }}</td><td class="text-right">{{ m.get("rps_avg", "-") }}</td><td class="text-right">{{ m.get("error_rate_peak", "-") }}%</td><td class="text-right">{{ m.get("latency_p95_peak_ms", "-") }}ms</td><td class="text-right">{{ m.get("latency_p99_peak_ms", "-") }}ms</td><td class="text-right">{{ m.get("min_ready_pods", "-") }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-xs mt-3 pt-3 border-t" style="border-color: var(--border); color: var(--muted-foreground);">실측 집계 없음(Stub)</p>
+    {% endif %}
+    {% endif %}
+  </div>
+
   <div class="grid grid-cols-3 gap-3 mb-4">
     <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">장애 유형</div><div class="text-base font-extrabold mt-1">{{ chaos_labels.get(exp.chaos_type, exp.chaos_type) }}</div></div>
     <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">시작</div><div class="text-base font-extrabold mt-1 mono">{{ exp.started_at.strftime("%m/%d %H:%M") if exp.started_at else "-" }}</div></div>

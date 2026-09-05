@@ -257,3 +257,43 @@ async def experiment_stream(exp_id: int, request: Request):
             await asyncio.sleep(2)
 
     return EventSourceResponse(gen())
+
+
+_LIVE_ACTIVE = ("pending", "deploying", "running")
+_LIVE_KEYS = ("rps", "error_rate_pct", "p95_ms", "p99_ms", "ready_pods")
+_LIVE_INTERVAL_S = 3  # 메트릭 스트림 틱 간격
+
+
+@router.get("/experiments/{exp_id}/metrics/stream")
+async def experiment_metrics_stream(exp_id: int, request: Request):
+    """실험 진행 중 Prometheus 즉시값(live_snapshot) 3초 간격 SSE — status 스트림과 분리.
+
+    매 틱 DB 재조회 → 활성 상태를 벗어나면 completed 이벤트 후 종료. pending(k3s 배포 전)이면
+    값 None인 metric 틱을 보내되 스트림은 유지. 네임스페이스는 exp.namespace(k3s 전용 ns) 우선.
+    """
+    prom = make_prometheus()
+
+    async def gen():
+        for _ in range(1260):  # 3s × 1260 ≈ 63분 상한 (> watcher 상한)
+            if await request.is_disconnected():
+                break
+            s = SessionLocal()
+            try:
+                exp = s.get(Experiment, exp_id)
+                status = exp.status if exp else None
+                namespace = (exp.namespace or exp.app.namespace) if exp else ""
+                app_name = exp.app.name if exp else ""
+            finally:
+                s.close()
+            if status not in _LIVE_ACTIVE:
+                yield {"event": "completed", "data": json.dumps({"status": status})}
+                break
+            if status == "pending":
+                snap = {"ts": datetime.now(timezone.utc).isoformat(),
+                        **{k: None for k in _LIVE_KEYS}}
+            else:
+                snap = await asyncio.to_thread(prom.live_snapshot, namespace, app_name)
+            yield {"event": "metric", "data": json.dumps({**snap, "status": status})}
+            await asyncio.sleep(_LIVE_INTERVAL_S)
+
+    return EventSourceResponse(gen())

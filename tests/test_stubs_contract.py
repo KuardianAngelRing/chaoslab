@@ -15,6 +15,7 @@ def test_stubs_satisfy_protocols():
     p: interfaces.PrometheusService = stubs.StubPrometheus()
     red = p.red_metrics("ns")
     assert {"rate", "error", "duration"} <= set(red)
+    assert set(p.live_snapshot("ns", "app")) == set(stubs.LIVE_SNAPSHOT_KEYS)
 
     k: interfaces.K8sService = stubs.StubK8s()
     assert isinstance(k.nodes(), list)
@@ -62,6 +63,28 @@ def test_stub_prometheus_phase_summary_matches_contract():
         s = PhaseSummary(**p.phase_summary("sut", "demo", phase, t, t))
         if phase == "recovery":
             assert s.recovery_seconds is not None
+
+
+def test_stub_live_series_is_deterministic_and_moves():
+    # 순수 함수: 정상(0~4) → 악화(5~14) → 회복(15~) — 같은 tick은 같은 값, 단계별 값이 실제로 움직인다
+    keys = set(stubs.LIVE_SNAPSHOT_KEYS) - {"ts"}
+    for t in range(0, 30):
+        snap = stubs._stub_live_series(t)
+        assert set(snap) == keys
+        assert snap == stubs._stub_live_series(t)
+    normal, fault, recovered = (stubs._stub_live_series(t) for t in (2, 12, 25))
+    assert fault["error_rate_pct"] > normal["error_rate_pct"]
+    assert fault["p99_ms"] > normal["p99_ms"] and fault["ready_pods"] < normal["ready_pods"]
+    assert recovered["error_rate_pct"] == normal["error_rate_pct"] == 0.3
+    assert recovered["ready_pods"] == 3
+
+
+def test_stub_prometheus_live_snapshot_advances_per_call():
+    p = stubs.StubPrometheus()
+    a, b = p.live_snapshot("ns", "app"), p.live_snapshot("ns", "app")
+    assert "T" in a["ts"]  # ISO 8601
+    assert {k: a[k] for k in a if k != "ts"} == stubs._stub_live_series(0)
+    assert {k: b[k] for k in b if k != "ts"} == stubs._stub_live_series(1)
 
 
 def test_stub_loki_returns_lines():

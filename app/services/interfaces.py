@@ -106,6 +106,13 @@ class PrometheusService(Protocol):
         """rate/error/duration(p99) 반환."""
         ...
 
+    def live_snapshot(self, namespace: str, app_name: str) -> dict:
+        """최근 1분 rate 기준 즉시값. 키: ts(iso), rps, error_rate_pct, p95_ms, p99_ms, ready_pods.
+
+        조회 실패 시 예외 대신 값 None (스트림은 끊기지 않는다).
+        """
+        ...
+
 
 class LokiService(Protocol):
     def tail(self, namespace: str, limit: int = 100) -> list[str]:

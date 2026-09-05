@@ -1,4 +1,6 @@
 """Slice 1 스텁 — mock 데이터 반환. 외부 시스템 호출 없음. 운영은 services/real/ 사용."""
+from datetime import datetime, timezone
+
 from app.services.interfaces import BuildRequest
 
 
@@ -124,7 +126,36 @@ class StubLocalK8s:
         }
 
 
+LIVE_SNAPSHOT_KEYS = ("ts", "rps", "error_rate_pct", "p95_ms", "p99_ms", "ready_pods")
+
+
+def _stub_live_series(tick: int) -> dict:
+    """호출 횟수(tick, 0부터) 기반 결정적 즉시값 — 정상(0~4) → 악화(5~14) → 회복(15~).
+
+    ts는 호출자가 채운다(순수 함수). 값 키는 live_snapshot 계약에서 ts를 뺀 것.
+    """
+    if tick < 5:      # 정상
+        return {"rps": 42.0 + (tick % 3), "error_rate_pct": 0.3,
+                "p95_ms": 118.0 + 4 * (tick % 2), "p99_ms": 205.0 + 6 * (tick % 2),
+                "ready_pods": 3}
+    if tick < 15:     # 장애 주입 — 오류율·레이턴시 상승, ready 파드 감소
+        k = tick - 5  # 0~9
+        return {"rps": round(38.0 - 2.4 * k, 1),
+                "error_rate_pct": round(min(23.1, 3.0 + 2.3 * k), 1),
+                "p95_ms": round(460.0 + 43.0 * k, 1), "p99_ms": round(1120.0 + 118.0 * k, 1),
+                "ready_pods": 1 if k >= 3 else 2}
+    k = min(tick - 15, 8)  # 회복 — 8틱에 걸쳐 기준선 복귀 후 유지
+    return {"rps": round(14.0 + 3.5 * k, 1),
+            "error_rate_pct": round(max(0.3, 12.0 - 1.5 * k), 1),
+            "p95_ms": round(max(118.0, 850.0 - 92.0 * k), 1),
+            "p99_ms": round(max(205.0, 2100.0 - 237.0 * k), 1),
+            "ready_pods": 3 if k >= 2 else 2}
+
+
 class StubPrometheus:
+    def __init__(self) -> None:
+        self._tick = 0
+
     def red_metrics(self, namespace: str) -> dict:
         return {"rate": 42.0, "error": 1.8, "duration": 380.0}
 
@@ -132,6 +163,11 @@ class StubPrometheus:
                       start, end) -> dict:
         # 모듈 하단 _PHASE_SUMMARY_SAMPLES 재사용 (호출 시점 해석)
         return dict(_PHASE_SUMMARY_SAMPLES[phase])
+
+    def live_snapshot(self, namespace: str, app_name: str) -> dict:
+        snap = _stub_live_series(self._tick)
+        self._tick += 1
+        return {"ts": datetime.now(timezone.utc).isoformat(), **snap}
 
 
 class StubLoki:

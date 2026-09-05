@@ -52,6 +52,25 @@ def instant_by_label(resp: dict, label: str) -> dict[str, float]:
     return out
 
 
+def live_queries(namespace: str, app_name: str) -> dict[str, str]:
+    """live_snapshot용 즉시 쿼리 5종 — phase_summary와 동일 istio selector·pod 패턴 (순수 함수)."""
+    sel = istio_selector(namespace, app_name)
+    pod_sel = f'namespace="{namespace}",pod=~"{app_name}-[a-z0-9]+-[a-z0-9]+"'
+
+    def pct(q: float) -> str:
+        return (f'histogram_quantile({q}, sum by (le) '
+                f'(rate(istio_request_duration_milliseconds_bucket{{{sel}}}[1m])))')
+
+    return {
+        "rps": f'sum(rate(istio_requests_total{{{sel}}}[1m]))',
+        "error_rate_pct": (f'100 * sum(rate(istio_requests_total{{{sel},response_code=~"5.."}}[1m]))'
+                           f' / sum(rate(istio_requests_total{{{sel}}}[1m]))'),
+        "p95_ms": pct(0.95),
+        "p99_ms": pct(0.99),
+        "ready_pods": f'sum(kube_pod_status_ready{{condition="true",{pod_sel}}})',
+    }
+
+
 def summarize(values: list[float]) -> dict:
     if not values:
         return {"avg": 0.0, "min": 0.0, "max": 0.0, "peak": 0.0}
@@ -95,6 +114,18 @@ class RealPrometheus:
             "error": round(instant_value(self._instant(err_q, now)), 2),
             "duration": round(instant_value(self._instant(p99_q, now)), 2),
         }
+
+    def live_snapshot(self, namespace: str, app_name: str) -> dict:
+        """now 시점 즉시값 — 쿼리 하나가 실패해도 해당 키만 None (스트림은 끊기지 않는다)."""
+        now = datetime.now(timezone.utc)
+        out: dict = {"ts": now.isoformat()}
+        for key, q in live_queries(namespace, app_name).items():
+            try:
+                v = instant_value(self._instant(q, now))
+                out[key] = int(v) if key == "ready_pods" else round(v, 2)
+            except Exception:  # noqa: BLE001
+                out[key] = None
+        return out
 
     def phase_summary(self, namespace: str, app_name: str, phase: str,
                       start, end) -> dict:
