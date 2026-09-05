@@ -9,7 +9,14 @@ SAMPLE_APPS = {
     "order-resilience-lab": {
         "name": "order-resilience-lab",
         "health_path": "/orders",
+        "observe_service": "checkout-api",   # 5개 Service 중 진입점 — 회귀 관측 요청 대상
         "manifest": _SAMPLES_DIR / "order-resilience-lab.yaml",
+    },
+    "nginx": {
+        "name": "nginx",
+        "health_path": "/",
+        "observe_service": "nginx",
+        "manifest": _SAMPLES_DIR / "nginx.yaml",
     },
 }
 

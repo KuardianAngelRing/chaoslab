@@ -23,6 +23,8 @@ class App(Base):
     namespace: Mapped[str] = mapped_column(String(100), default="default")
     env: Mapped[str] = mapped_column(String(10), default="eks")  # "eks" | "k3s" (ADR-0002: 환경은 앱 속성)
     manifest: Mapped[str] = mapped_column(Text, default="")  # k3s 전용 — 등록=저장만, 배포는 실험 시 (ADR-0009)
+    # 회귀 관측 요청을 보낼 진입 Service명(k3s). 빈 문자열=미지정 → 회귀 시 manifest에서 추론, 실패 시 422.
+    observe_service: Mapped[str] = mapped_column(String(100), default="")
     image_repo: Mapped[str] = mapped_column(String(300), default="")
     current_sha: Mapped[str] = mapped_column(String(40), default="")
     status: Mapped[str] = mapped_column(String(30), default="unknown")

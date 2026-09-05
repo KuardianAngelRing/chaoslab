@@ -75,7 +75,7 @@ def seed_data(session: Session) -> None:
     order_msa = apps.create(
         name="order-msa", repo_url="k3s://manifest-upload", env="k3s",
         framework="manifest", namespace="order-msa", current_sha="", status="registered",
-        manifest=_ORDER_MSA_MANIFEST,
+        manifest=_ORDER_MSA_MANIFEST, observe_service="order-api",
     )
 
     builds.create(app_id=boutique.id, status="succeeded", image_tag="a1b2c3d4",
