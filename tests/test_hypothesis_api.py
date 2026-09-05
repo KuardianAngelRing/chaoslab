@@ -291,3 +291,45 @@ def test_watch_detailing_validation_failure(monkeypatch):
     assert cand.detail_status == "failed" and cand.error
     assert repo.experiment_for_run(run_id) is None
     s.close()
+
+
+def test_execute_card_offers_stop_while_running(monkeypatch, client):
+    """2단계 카드: 진행 중이면 '실험 중지'(next=이 view로 복귀) — 종료 후엔 사라지고 3단계 CTA만."""
+    from app.db.database import get_session
+    from app.db.models import Experiment
+    from app.main import app as fastapi_app
+    from app.routers.hypothesis import _watch_detailing
+    from app.services.stubs import StubChaos, StubK3sWorkload
+
+    Session = _engine_session()
+    run_id, cand_id = _prep_detailing(Session)
+    monkeypatch.setattr("app.routers.hypothesis.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: StubChaos())
+    monkeypatch.setattr("app.routers.experiments.make_k3s_workload", lambda: StubK3sWorkload())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+    _watch_detailing(cand_id)
+
+    def _override():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    fastapi_app.dependency_overrides[get_session] = _override
+
+    s = Session()
+    exp = s.query(Experiment).one()
+    exp.status = "running"
+    s.commit(); s.close()
+    html = client.get(f"/hypothesis/{run_id}?view=execute").text
+    assert "실험 중지" in html and f'hx-post="/experiments/{exp.id}/stop"' in html
+    assert f'"next": "/hypothesis/{run_id}?view=execute"' in html
+    assert 'data-live-metrics-note hidden' in html          # HTTP 미노출 안내는 기본 숨김(app.js 토글)
+    assert "최종 회귀로" not in html
+
+    s = Session()
+    s.query(Experiment).one().status = "completed"
+    s.commit(); s.close()
+    html = client.get(f"/hypothesis/{run_id}?view=execute").text
+    assert "실험 중지" not in html and "최종 회귀로" in html

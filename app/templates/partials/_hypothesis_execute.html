@@ -19,7 +19,14 @@
     </div>
     <div class="text-right shrink-0">
       <div class="text-[11px] font-bold" style="color: var(--muted-foreground);">R 지수</div>
-      <div class="text-2xl font-extrabold" style="color: var(--primary);">{{ "%.4f"|format(exp.r_index) if exp.r_index is not none else "산정 전" }}</div>
+      {% if exp.r_index is not none %}
+      <div class="text-2xl font-extrabold" style="color: var(--primary);">{{ "%.4f"|format(exp.r_index) }}</div>
+      {% elif exp.status in ("pending", "deploying", "running") %}
+      <div class="text-2xl font-extrabold" style="color: var(--primary);">산정 전</div>
+      {% else %}
+      <div class="text-2xl font-extrabold" style="color: var(--muted-foreground);">산정 불가</div>
+      <div class="text-[11px]" style="color: var(--muted-foreground);">장애 구간 HTTP 트래픽 없음</div>
+      {% endif %}
     </div>
   </div>
 
@@ -41,6 +48,7 @@
       <span class="text-[11px]" style="color: var(--muted-foreground);">
         {% if live_final %}실험 종료 — 마지막 스냅샷 유지{% else %}Prometheus 즉시값 · 3초 간격{% endif %}
         · Ready 파드 <b class="mono" data-live-metrics-pods>-</b>
+        <span data-live-metrics-note hidden> · HTTP 메트릭 미노출 앱 — Ready 파드만 실측</span>
       </span>
     </div>
     <div class="grid grid-cols-2 gap-3">
@@ -107,7 +115,14 @@
   <button type="button" class="tds-btn-muted" data-workflow-go="plan"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>후보 다시 보기</button>
   <div class="flex gap-2">
     <button type="button" class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">실험 목록으로</button>
-    {% if exp.status in ("completed", "failed") %}
+    {% if exp.status in ("deploying", "running") %}
+    {# 중지 → CRD·(k3s) ns 정리는 라우트가 백그라운드로, 응답은 HX-Location으로 이 view 재요청 #}
+    <button type="button" class="tds-btn-muted" style="color: var(--danger);"
+            hx-post="/experiments/{{ exp.id }}/stop" hx-vals='{"next": "/hypothesis/{{ hrun.id }}?view=execute"}'>
+      <iconify-icon icon="solar:stop-circle-bold" width="16"></iconify-icon>실험 중지
+    </button>
+    {% endif %}
+    {% if exp.status in ("completed", "failed", "stopped") %}
     {# 실험 종료 → 3단계(승인 후보로 조립한 최종 회귀). 셸 탭은 run.current로 이미 열려 있다 #}
     <button type="button" class="tds-btn-primary" data-workflow-go="verify">최종 회귀로<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
     {% endif %}

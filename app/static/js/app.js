@@ -23,6 +23,8 @@ document.addEventListener('click', (e) => {
   const icon = document.getElementById('themeIcon');
   if (icon) icon.setAttribute('icon', next === 'dark' ? 'solar:sun-bold' : 'solar:moon-bold');
   Object.values(window._charts || {}).forEach(c => c && c.update());
+  // 라이브 메트릭 차트는 색 옵션이 스크립터블(CSS 변수 재조회)이라 update()만으로 새 테마 색을 입는다
+  _liveCharts.forEach(c => c && c.update());
 });
 
 // ============== 탭 전환 (이벤트 위임) ==============
@@ -491,6 +493,13 @@ function watchExperiments() {
     _expStreams.add(id);
     const es = new EventSource(`/experiments/${id}/stream`);
     const refresh = el.dataset.runningExpRefresh || '/experiments';
+    // 중간 상태 전환(deploying→running)도 서버 렌더 배지가 단일 소스 — 첫 status(현재값)는 건너뛰고 바뀔 때만 재요청.
+    // 재요청 후 같은 id 요소가 다시 그려져도 _expStreams에 남아 있어 스트림은 그대로 이어진다.
+    let firstStatus = true;
+    es.addEventListener('status', () => {
+      if (firstStatus) { firstStatus = false; return; }
+      if (window.htmx) htmx.ajax('GET', refresh, { target: '#main-content', swap: 'innerHTML' });
+    });
     es.addEventListener('completed', () => {
       es.close(); _expStreams.delete(id);
       if (window.htmx) htmx.ajax('GET', refresh, { target: '#main-content', swap: 'innerHTML' });
@@ -1005,29 +1014,35 @@ document.body.addEventListener('htmx:afterSwap', watchHypothesis);
 // ── 실험 진행 중 실시간 메트릭 (data-live-metrics → /experiments/{id}/metrics/stream) ──
 // 화면에 실행 카드는 1개 — 전역 스트림 1개만 유지, 스왑으로 요소가 바뀌면 이전 스트림을 닫고 다시 구독.
 let _liveMetricsStream = null;
+let _liveCharts = [];  // 테마 토글 시 update() 대상 — window._charts(initCharts가 스왑마다 파기)와 분리
 function watchLiveMetrics() {
   const el = document.querySelector('[data-live-metrics]');
   if (_liveMetricsStream) {
     if (_liveMetricsStream._el === el) return;   // 같은 요소 — 구독 유지
     _liveMetricsStream.close(); _liveMetricsStream = null;
   }
+  _liveCharts.forEach(c => c && c.destroy()); _liveCharts = [];
   if (!el || el.dataset.liveMetricsFinal === 'true' || typeof Chart === 'undefined') return;
 
+  // 색은 스크립터블 옵션으로 매 렌더마다 CSS 변수를 다시 읽는다 → 다크 토글 시 update()만으로 반영
   const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const WINDOW = 60;  // rolling window — 최근 60틱(3s × 60 = 3분)
-  const cc = chartCommon();
-  const line = (color, yAxisID) => ({ data: [], borderColor: color, backgroundColor: color + '22', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true, yAxisID });
+  const axis = (extra = {}) => ({ grid: { color: () => tdsBorderColor() }, ticks: { color: () => tdsTextColor(), font: { size: 10 }, ...extra } });
+  const common = { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false } } };
+  const line = (varName, yAxisID) => ({ data: [], borderColor: () => cssVar(varName), backgroundColor: () => cssVar(varName) + '22', fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true, yAxisID });
   const latency = new Chart(el.querySelector('[data-live-metrics-latency]'), {
     type: 'line',
-    data: { labels: [], datasets: [line(cssVar('--warning'), 'y'), line(cssVar('--danger'), 'y')] },
-    options: { ...cc, animation: false, scales: { ...cc.scales, x: { display: false }, y: { ...cc.scales.y, min: 0 } } }
+    data: { labels: [], datasets: [line('--warning', 'y'), line('--danger', 'y')] },
+    options: { ...common, scales: { x: { display: false }, y: { ...axis(), min: 0 } } }
   });
   const traffic = new Chart(el.querySelector('[data-live-metrics-traffic]'), {
     type: 'line',
-    data: { labels: [], datasets: [line(cssVar('--primary'), 'y'), line(cssVar('--danger'), 'y1')] },
-    options: { ...cc, animation: false, scales: { ...cc.scales, x: { display: false }, y: { ...cc.scales.y, min: 0 },
-      y1: { position: 'right', min: 0, grid: { display: false }, ticks: { color: tdsTextColor(), font: { size: 10 }, callback: (v) => `${v}%` } } } }
+    data: { labels: [], datasets: [line('--primary', 'y'), line('--danger', 'y1')] },
+    options: { ...common, scales: { x: { display: false }, y: { ...axis(), min: 0 },
+      y1: { position: 'right', min: 0, grid: { display: false }, ticks: { color: () => tdsTextColor(), font: { size: 10 }, callback: (v) => `${v}%` } } } }
   });
+  _liveCharts = [latency, traffic];
+  const note = el.querySelector('[data-live-metrics-note]');
   const push = (chart, values, label) => {
     chart.data.labels.push(label);
     values.forEach((v, i) => chart.data.datasets[i].data.push(v));
@@ -1045,6 +1060,8 @@ function watchLiveMetrics() {
     push(latency, [m.p95_ms, m.p99_ms], label);
     push(traffic, [m.rps, m.error_rate_pct], label);
     if (pods) pods.textContent = m.ready_pods == null ? '-' : m.ready_pods;
+    // Ready 파드는 오는데 HTTP 지표가 전부 null이면 앱이 메트릭을 노출하지 않는 것(k3s nginx 샘플 등) — 안내만 보여준다
+    if (note) note.hidden = !(m.ready_pods != null && m.rps == null && m.p95_ms == null);
   });
   // completed 이후 화면 재요청은 watchExperiments(status 스트림)가 담당 — 여기선 스트림만 닫고 차트를 남긴다.
   es.addEventListener('completed', () => { es.close(); if (_liveMetricsStream === es) _liveMetricsStream = null; });
