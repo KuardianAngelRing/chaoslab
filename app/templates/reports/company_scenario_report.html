@@ -80,8 +80,8 @@
 
     {% if changes %}<section>
       <div class="section-head"><b>2</b><h2>개선 조치 및 적용 현황</h2></div>
-      {% for item in changes %}<div class="change"><div><span class="label">변경 대상</span><strong>{{ item.deployment }}</strong><br><code>{{ item.container }}</code></div><div><span class="label">설정 변경</span><code>{{ item.key }}</code><br><strong>{{ item.before }} → {{ item.after }}</strong></div><div><span class="label">변경 목적</span><span>{{ item.reason }}</span></div><div><span class="label">적용 결과</span><span class="status {{ 'passed' if item.rollout_ready else 'failed' }}">{{ 'Rollout Ready' if item.rollout_ready else '적용 실패' }}</span></div></div>{% endfor %}
-      <p class="footnote">표시된 변경은 실제 Deployment에 적용되고 rollout Ready가 확인된 항목만 포함합니다. 변경 전 값은 실행 결과에 함께 보존됩니다.</p>
+      {% for item in changes %}<div class="change"><div><span class="label">변경 대상</span><strong>{{ item.deployment }}</strong><br><code>{{ item.container or ('환경변수' if item.type == 'deployment_env' else '매니페스트 패치') }}</code>{% if item.title %}<br><span>{{ item.title }}</span>{% endif %}</div><div><span class="label">설정 변경</span>{% for row in change_rows(item) %}<code>{{ row.path }}</code><br><strong>{{ change_value(row.before) }} → {{ change_value(row.after) }}</strong>{% if not loop.last %}<br>{% endif %}{% endfor %}</div><div><span class="label">변경 목적</span><span>{{ item.reason }}</span></div><div><span class="label">적용 결과</span><span class="status {{ 'passed' if item.rollout_ready else 'failed' }}">{{ 'Rollout Ready' if item.rollout_ready else '적용 실패' }}</span></div></div>{% endfor %}
+      <p class="footnote">표시된 변경은 실제 Deployment에 적용되고 rollout Ready가 확인된 항목만 포함합니다. 변경 전 값은 실행 결과에 함께 보존되며, 개선은 검증 전용 namespace에만 적용되고 앱의 저장 manifest는 바뀌지 않습니다.</p>
     </section>{% endif %}
 
     <section>
