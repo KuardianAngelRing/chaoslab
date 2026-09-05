@@ -17,9 +17,12 @@ data:
     UPSTREAMS = [item for item in os.getenv("UPSTREAMS", "").split(",") if item]
     TIMEOUT = float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", "0.45"))
     DEPENDENCY_HEALTHCHECKS = os.getenv("DEPENDENCY_HEALTHCHECKS", "0") == "1"
+    # 개선 단계가 env로 켤 수 있는 회복 로직 — 기본값은 전부 꺼져 있다(의도된 약점).
+    RETRIES = int(os.getenv("UPSTREAM_RETRIES", "0"))                 # 실패 시 재시도 횟수
+    OPTIONAL = {item.strip() for item in os.getenv("OPTIONAL_UPSTREAMS", "").split(",") if item.strip()}
     requests_total = 0
 
-    def call(url):
+    def call_once(url):
         started = time.monotonic()
         try:
             with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
@@ -30,6 +33,21 @@ data:
             return {"upstream": url, "ok": False,
                     "latency_ms": round((time.monotonic() - started) * 1000, 1),
                     "error": str(exc)}
+
+    def call(url):
+        result = call_once(url)
+        attempts = 1
+        while not result["ok"] and attempts <= RETRIES:
+            time.sleep(0.1)
+            result = call_once(url)
+            attempts += 1
+        result["attempts"] = attempts
+        host = url.split("//", 1)[-1].split("/", 1)[0]
+        if not result["ok"] and host in OPTIONAL:
+            # 선택적 의존성(예: 결제 지연 처리) — 실패해도 요청은 degraded 성공으로 마무리
+            result["ok"] = True
+            result["degraded"] = True
+        return result
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -68,7 +86,9 @@ data:
             requests_total += 1
             checks = [call(url + ("/orders" if SERVICE == "checkout-api" else "/work")) for url in UPSTREAMS]
             ok = all(c["ok"] for c in checks)
-            payload = {"service": SERVICE, "path": self.path, "ok": ok, "attempts": 1,
+            payload = {"service": SERVICE, "path": self.path, "ok": ok,
+                       "attempts": max([c.get("attempts", 1) for c in checks], default=1),
+                       "degraded": any(c.get("degraded") for c in checks),
                        "dependencies": checks,
                        "latency_ms": round((time.monotonic() - started) * 1000, 1)}
             print(json.dumps(payload), flush=True)
@@ -107,6 +127,8 @@ spec:
             - {name: SERVICE_NAME, value: checkout-api}
             - {name: UPSTREAMS, value: http://order-api}
             - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+            - {name: UPSTREAM_RETRIES, value: "0"}
+            - {name: OPTIONAL_UPSTREAMS, value: ""}
             - {name: DEPENDENCY_HEALTHCHECKS, value: "1"}
           ports: [{containerPort: 8080, name: http}]
           resources:
@@ -160,8 +182,10 @@ spec:
           command: ["python", "/app/app.py"]
           env:
             - {name: SERVICE_NAME, value: order-api}
-            - {name: UPSTREAMS, value: http://catalog-api,http://inventory-api,http://payment-api}
+            - {name: UPSTREAMS, value: "http://catalog-api,http://inventory-api,http://payment-api"}
             - {name: UPSTREAM_TIMEOUT_SECONDS, value: "0.45"}
+            - {name: UPSTREAM_RETRIES, value: "0"}
+            - {name: OPTIONAL_UPSTREAMS, value: ""}
             - {name: DEPENDENCY_HEALTHCHECKS, value: "1"}
           ports: [{containerPort: 8080, name: http}]
           resources:
@@ -302,7 +326,7 @@ metadata:
     app.kubernetes.io/part-of: order-resilience-lab
     chaoslab.dev/component: payment
 spec:
-  replicas: 2
+  replicas: 1          # 의도된 약점 — 결제 서비스가 단일 장애점(파드 1개)
   selector:
     matchLabels:
       app.kubernetes.io/name: payment-api
