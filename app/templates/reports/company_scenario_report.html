@@ -95,7 +95,7 @@
 
     {% if comparison %}<section>
       <div class="section-head"><b>4</b><h2>검증 범위 및 판정 기준</h2></div>
-      <table><thead><tr><th>시나리오</th><th>대상 / 장애</th><th>오류율 기준</th><th>p95 기준</th><th>Ready Pod</th><th>복구 기준</th></tr></thead><tbody>{% for spec in scenario.experiments %}<tr><td><strong>{{ spec.title }}</strong></td><td><code>{{ spec.target_selector['app.kubernetes.io/name'] }}</code><br>{{ spec.chaos_type }}</td><td>{{ spec.criteria.max_error_rate_pct }}% 이하</td><td>{{ spec.criteria.max_p95_latency_ms }}ms 이하</td><td>{{ spec.criteria.min_ready_pods }}개 이상</td><td>{{ spec.criteria.max_recovery_seconds }}초 이내</td></tr>{% endfor %}</tbody></table>
+      <table><thead><tr><th>시나리오</th><th>대상 / 장애</th><th>오류율 기준</th><th>p95 기준</th><th>Ready Pod</th><th>복구 기준</th></tr></thead><tbody>{% for spec in scenario.experiments %}<tr><td><strong>{{ spec.title }}</strong></td><td><code>{{ (spec.target_selector or {}).values() | join(", ") or "namespace 전체" }}</code><br>{{ spec.chaos_type }}</td><td>{{ spec.criteria.max_error_rate_pct }}% 이하</td><td>{{ spec.criteria.max_p95_latency_ms }}ms 이하</td><td>{{ spec.criteria.min_ready_pods }}개 이상</td><td>{{ spec.criteria.max_recovery_seconds }}초 이내</td></tr>{% endfor %}</tbody></table>
       <p class="footnote">통과는 장애 주입, 장애 구간, 정리, 복구 후 관측이 모두 유효하고 모든 기준을 충족한 경우입니다. 관측 유효성이 부족하면 시스템 실패와 구분해 판정 불가로 기록합니다.</p>
     </section>
 

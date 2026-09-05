@@ -44,6 +44,31 @@ def scenario_snapshot(app_name: str, selected_ids: list[str]) -> dict:
     return _snapshot_from_yaml(app_name, selected_ids)
 
 
+def workload_selector(manifest_yaml: str, workload_name: str) -> dict[str, str] | None:
+    """매니페스트에서 워크로드(Deployment/StatefulSet/DaemonSet)의 `spec.selector.matchLabels`를 찾는다.
+
+    이름이 일치하는 워크로드 우선, 없으면 워크로드가 정확히 1개일 때 그것. 못 찾으면 None
+    (= 실험 전용 ns 전체 대상 — 가설 경로 단일 실험과 같은 동작). nginx 샘플처럼 `app: nginx`
+    라벨만 쓰는 앱을 `app.kubernetes.io/name` 가정으로 잘못 고르지 않기 위한 처리."""
+    workloads = []
+    try:
+        docs = list(yaml.safe_load_all(manifest_yaml or ""))
+    except yaml.YAMLError:
+        return None
+    for doc in docs:
+        if not isinstance(doc, dict) or doc.get("kind") not in ("Deployment", "StatefulSet", "DaemonSet"):
+            continue
+        labels = ((doc.get("spec") or {}).get("selector") or {}).get("matchLabels") or {}
+        if labels:
+            workloads.append(((doc.get("metadata") or {}).get("name"), dict(labels)))
+    for name, labels in workloads:
+        if name == workload_name:
+            return labels
+    if len(workloads) == 1:
+        return workloads[0][1]
+    return None
+
+
 def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
     """가설 경로 — 승인(detailed)된 후보를 회귀 시나리오 스냅샷으로 조립한다.
 
@@ -66,7 +91,7 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
             "title": candidate.title,
             "chaos_type": candidate.chaos_type,
             "params": params,
-            "target_selector": {"app.kubernetes.io/name": candidate.target_workload},
+            "target_selector": workload_selector(app.manifest, candidate.target_workload),
             "criteria": dict(DEFAULT_CRITERIA),
         })
     return {

@@ -623,7 +623,7 @@ function appendRegressionRow(tbody, spec, baselineResult, finalResult, progress)
   row.style.borderColor = 'var(--border)';
   const values = [
     [spec.title, finalResult?.crd_name || baselineResult?.crd_name || ''],
-    [spec.target_selector?.['app.kubernetes.io/name'] || '', ''],
+    [Object.values(spec.target_selector || {}).join(', ') || 'namespace 전체', ''],
     [spec.chaos_type || '', ''],
   ];
   values.forEach(([primary, secondary], index) => {

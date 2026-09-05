@@ -227,7 +227,8 @@ def _hypothesis_fixture(Session, *, detailed=True):
     """nginx(k3s) 앱 + ready 준비 세션 + 후보 2개(하나만 detailed). (app_id, run_id, session_id, cand_id)"""
     session = Session()
     app = App(name="nginx", repo_url="k3s://manifest-upload", framework="manifest", env="k3s",
-              health_path="/", manifest="kind: Deployment", status="registered")
+              health_path="/", status="registered",
+              manifest="kind: Deployment\nmetadata:\n  name: nginx\nspec:\n  selector:\n    matchLabels:\n      app: nginx\n")
     session.add(app)
     session.commit()
     preparation = ExperimentSession(app_id=app.id, status="ready", namespace="chaoslab-session-nginx-1")
@@ -265,7 +266,7 @@ def test_scenario_snapshot_from_hypothesis_uses_detailed_candidates_only():
     assert spec["title"] == "nginx 파드 강제 종료 검증"
     assert spec["chaos_type"] == "pod-kill"
     assert spec["params"] == {"action": "pod-kill"}          # validate_params 정규화
-    assert spec["target_selector"] == {"app.kubernetes.io/name": "nginx"}
+    assert spec["target_selector"] == {"app": "nginx"}              # 매니페스트 matchLabels에서 파싱
     assert spec["criteria"] == DEFAULT_CRITERIA
     session.close()
 
@@ -343,3 +344,18 @@ def test_create_scenario_run_from_hypothesis_and_reach_result_stage(monkeypatch,
     assert resp.status_code == 200
     assert f"/hypothesis/{run_id}?view=result" in resp.text
     assert "4/4" in resp.text and "전체 통과" in resp.text and "R=" in resp.text
+
+
+def test_workload_selector_parses_match_labels_and_falls_back():
+    from app.services.regression import workload_selector
+
+    multi = ("kind: Deployment\nmetadata:\n  name: api\nspec:\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: api\n"
+             "---\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  selector:\n    matchLabels:\n      app: web\n"
+             "---\nkind: Service\nmetadata:\n  name: web\n")
+    assert workload_selector(multi, "web") == {"app": "web"}
+    assert workload_selector(multi, "api") == {"app.kubernetes.io/name": "api"}
+    assert workload_selector(multi, "unknown") is None                    # 여러 개인데 이름 불일치 → ns 전체
+    single = "kind: Deployment\nmetadata:\n  name: nginx\nspec:\n  selector:\n    matchLabels:\n      app: nginx\n"
+    assert workload_selector(single, "other-name") == {"app": "nginx"}     # 유일 워크로드면 이름 달라도 그것
+    assert workload_selector("kind: Deployment", "nginx") is None
+    assert workload_selector(":: not yaml [", "nginx") is None
