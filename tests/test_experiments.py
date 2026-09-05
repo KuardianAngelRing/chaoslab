@@ -437,8 +437,8 @@ def test_watch_k3s_experiment_deploys_injects_and_tears_down(monkeypatch):
             calls.append(("teardown", ns))
 
     class _SpyChaos:
-        def inject(self, ns, app_name, chaos_type, params):
-            calls.append(("inject", ns))
+        def inject(self, ns, app_name, chaos_type, params, target_selector=None):
+            calls.append(("inject", ns, target_selector))   # 후보 없는 단독 실험 → ns 전체(None)
             return "exp-msa-xyz"
         def phase(self, chaos_type, crd_name):
             return "recovered"
@@ -532,3 +532,49 @@ def test_watch_marks_failed_when_never_recovered(monkeypatch):
     assert ExperimentRepository(s).get(exp_id).status == "failed"
     s.close()
     assert deleted == ["exp-demo-stuck"]  # CRD 정리는 여전히 수행
+
+
+def test_watch_k3s_experiment_targets_candidate_workload(monkeypatch):
+    """가설 후보가 있으면 manifest matchLabels로 대상 파드만 겨냥(ns 전체 mode:one이면 무관한 파드가 죽음)."""
+    from app.db.repositories import HypothesisRepository
+    from app.routers.experiments import _watch_experiment
+    from app.services.agent.hypothesis_schema import CandidateProposal
+
+    Session = _engine_session()
+    s = Session()
+    manifest = ("kind: Deployment\nmetadata:\n  name: order-api\nspec:\n  selector:\n    matchLabels:\n"
+                "      app.kubernetes.io/name: order-api\n---\n"
+                "kind: Deployment\nmetadata:\n  name: payment-api\nspec:\n  selector:\n    matchLabels:\n"
+                "      app.kubernetes.io/name: payment-api\n")
+    app = AppRepository(s).create(name="lab", repo_url="k3s://manifest-upload", framework="manifest",
+                                  env="k3s", manifest=manifest)
+    repo = HypothesisRepository(s)
+    run = repo.create_run(app_id=app.id, goal_text="g", candidate_count=1, input_payload={}, status="ready")
+    [cand] = repo.add_candidates(run.id, [CandidateProposal(
+        title="t", chaos_type="pod-failure", target_workload="payment-api", hypothesis="h", expected_impact="i")])
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="pod-failure", params={"action": "pod-failure", "duration_s": 30},
+        status="deploying", namespace="chaoslab-lab-1", candidate_id=cand.id)
+    exp_id = exp.id
+    s.close()
+
+    seen = {}
+
+    class _Workload:
+        def deploy(self, ns, manifest): pass
+        def wait_ready(self, ns, timeout_s=180): return True
+        def teardown(self, ns): pass
+
+    class _Chaos:
+        def inject(self, ns, app_name, chaos_type, params, target_selector=None):
+            seen["selector"] = target_selector
+            return "crd-1"
+        def phase(self, chaos_type, crd_name): return "recovered"
+        def delete(self, chaos_type, crd_name): pass
+
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: _Chaos())
+    monkeypatch.setattr("app.routers.experiments.make_k3s_workload", lambda: _Workload())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+    _watch_experiment(exp_id)
+    assert seen["selector"] == {"app.kubernetes.io/name": "payment-api"}

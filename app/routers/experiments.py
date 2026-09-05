@@ -13,12 +13,13 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.config import settings
 from app.db.database import SessionLocal, get_session
-from app.db.models import Experiment
+from app.db.models import Experiment, ExperimentCandidate
 from app.db.repositories import AppRepository, ExperimentRepository
 from app.deps import make_chaos, make_k3s_workload, make_prometheus
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
 from app.services.metrics_collector import collect_experiment_metrics
+from app.services.regression import workload_selector  # 순수 함수 — manifest matchLabels 파싱
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -143,7 +144,11 @@ def _watch_experiment(exp_id: int) -> None:
                     raise RuntimeError(f"워크로드가 준비되지 않음 ({namespace})")
                 if not _still_active():
                     return
-                crd_name = chaos.inject(namespace, app_name, chaos_type, params)
+                # 가설 후보의 대상 워크로드가 있으면 그 파드만 겨냥(ns 전체 mode:one이면 무관한 파드가 죽을 수 있음)
+                candidate = s.get(ExperimentCandidate, exp.candidate_id) if exp.candidate_id else None
+                target = candidate.target_workload if candidate else None
+                crd_name = chaos.inject(namespace, app_name, chaos_type, params,
+                                        target_selector=workload_selector(app.manifest or "", target) if target else None)
                 exp = s.get(Experiment, exp_id)
                 exp.crd_name = crd_name
                 exp.status = "running"
