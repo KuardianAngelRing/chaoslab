@@ -29,12 +29,12 @@ _PODKILL_GRACE_S = 30  # pod-kill 원샷 유예
 
 
 def _experiments_response(request: Request, session: Session):
-    exps = ExperimentRepository(session).list_all()
-    apps = AppRepository(session).list_all()
+    from app.routers.pages import experiments_context  # 목록 ctx 단일 소스
+
+    ctx = experiments_context(session)
     return render_page(
         request, "pages/experiments.html",
-        {"active_nav": "experiments", "app_count": len(apps),
-         "experiments": exps, "apps": apps},
+        {"active_nav": "experiments", "app_count": len(ctx["apps"]), **ctx},
     )
 
 

@@ -488,9 +488,10 @@ function watchExperiments() {
     if (_expStreams.has(id)) return;
     _expStreams.add(id);
     const es = new EventSource(`/experiments/${id}/stream`);
+    const refresh = el.dataset.runningExpRefresh || '/experiments';
     es.addEventListener('completed', () => {
       es.close(); _expStreams.delete(id);
-      if (window.htmx) htmx.ajax('GET', '/experiments', { target: '#main-content', swap: 'innerHTML' });
+      if (window.htmx) htmx.ajax('GET', refresh, { target: '#main-content', swap: 'innerHTML' });
     });
     es.onerror = () => { es.close(); _expStreams.delete(id); };
   });
@@ -547,6 +548,15 @@ function syncWorkflowCandidates(root) {
   const selectedCandidates = candidates.filter((candidate) => candidate.checked);
   const selectedIds = selectedCandidates.map((candidate) => candidate.dataset.candidateId);
   const selected = selectedIds.length;
+  if (root.dataset.workflowSelectMode === 'single') {
+    // 가설 셸: radio 1개 → CTA 활성. 요약·도움말 문구는 서버 렌더 유지 (선택 시에만 덮어씀)
+    const next = root.querySelector('[data-workflow-selection-next]');
+    if (!next) return; // CTA 없음 = 구체화 중·실험 시작됨 — 서버 렌더 문구 그대로 (checked+disabled radio가 있어도 덮어쓰지 않음)
+    next.disabled = selected < 1;
+    const summary = root.querySelector('[data-workflow-selection-summary]');
+    if (summary && selected) summary.textContent = `"${selectedCandidates[0].dataset.candidateTitle}" 후보를 선택했어요`;
+    return;
+  }
   const maxSelected = Number(root.dataset.workflowMaxSelected || 3);
   candidates.forEach((candidate) => {
     const card = candidate.closest('label')?.querySelector('[data-candidate-card]');
@@ -930,17 +940,20 @@ function watchHypothesis() {
     const id = el.dataset.hypothesisRun;
     if (_hypStreams.has(id)) return;
     _hypStreams.add(id);
+    const refresh = el.dataset.hypothesisRefresh || `/hypothesis/${id}`;
     const es = new EventSource(`/hypothesis/${id}/stream`);
     let first = true; // 최초 스냅샷은 방금 렌더된 화면과 같음 — 재요청 생략
     es.addEventListener('status', () => {
       if (first) { first = false; return; }
-      if (window.htmx) htmx.ajax('GET', `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+      if (window.htmx) htmx.ajax('GET', refresh, { target: '#main-content', swap: 'innerHTML' });
     });
     es.addEventListener('completed', (e) => {
       es.close(); _hypStreams.delete(id);
       let redirect = '';
       try { redirect = JSON.parse(e.data).redirect || ''; } catch (err) { /* noop */ }
-      if (window.htmx) htmx.ajax('GET', redirect || `/hypothesis/${id}`, { target: '#main-content', swap: 'innerHTML' });
+      // 실험이 만들어지면 2단계로 착지 (URL도 맞춰 둔다 — 새로고침 시 같은 탭)
+      if (redirect) history.replaceState({}, '', redirect);
+      if (window.htmx) htmx.ajax('GET', redirect || refresh, { target: '#main-content', swap: 'innerHTML' });
     });
     es.onerror = () => { es.close(); _hypStreams.delete(id); };
   });

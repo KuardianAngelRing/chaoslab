@@ -15,7 +15,24 @@
   2: {"code":"CL-041", "current":2, "current_label":"순차 실행·개선", "status":"실행 예시", "badge":"badge-info", "default_view":"execute", "selected":["frontend", "catalog"]},
   3: {"code":"CL-040", "current":4, "current_label":"결과", "status":"완료 · 보완 필요", "badge":"badge-warning", "default_view":"result", "selected":["frontend", "catalog"]}
 } %}
-{% if scenario_run %}
+{% if hypothesis_run %}
+  {# 가설 경로: 셸 앵커 = HypothesisRun. 1단계=후보 선택, 2단계=승인 후보로 만든 실험 1건. 3·4단계는 시나리오 회귀 전용(준비 중) #}
+  {% if experiment %}
+    {% set hyp_status, hyp_badge = exp_status_labels.get(experiment.status, (experiment.status, "badge-muted")) %}
+  {% elif hypothesis_run.status == "generating" %}{% set hyp_status, hyp_badge = "후보 생성 중", "badge-info" %}
+  {% elif hypothesis_run.status == "failed" %}{% set hyp_status, hyp_badge = "생성 실패", "badge-danger" %}
+  {% elif candidates | selectattr("detail_status", "equalto", "detailing") | list %}{% set hyp_status, hyp_badge = "파라미터 구체화 중", "badge-info" %}
+  {% else %}{% set hyp_status, hyp_badge = "선택 필요", "badge-warning" %}{% endif %}
+  {% set run = {
+    "code": "HYP-" ~ hypothesis_run.id,
+    "title": hypothesis_run.goal_text or (hypothesis_run.app.name ~ " 복원력 검증"),
+    "current": 2 if experiment else 1,
+    "current_label": "순차 실행·개선" if experiment else "후보 선택",
+    "status": hyp_status, "badge": hyp_badge,
+    "default_view": "execute" if experiment else "plan",
+    "selected": []
+  } %}
+{% elif scenario_run %}
   {% set scenario_verdict = (scenario_run.comparison or {}).get('verdict', '') %}
   {% set run = {
     "code": "CL-R" ~ scenario_run.id,
@@ -33,7 +50,7 @@
 {% if requested_view not in stage_meta or stage_meta[requested_view].index > run.current %}{% set view = run.default_view %}{% else %}{% set view = requested_view %}{% endif %}
 {% set active = stage_meta.get(view) %}
 
-<div class="max-w-7xl mx-auto px-8 py-8" data-workflow-shell data-initial-stage="{{ view }}" data-workflow-current-stage="{{ run.current }}" data-workflow-run-id="{{ run_id }}" data-workflow-max-selected="3"{% if scenario_run %} data-scenario-run-id="{{ scenario_run.id }}"{% endif %}{% if workflow_app %} data-workflow-app-id="{{ workflow_app.id }}" data-workflow-app-env="{{ workflow_app.env }}" data-workflow-objective="{{ workflow_objective }}"{% endif %}>
+<div class="max-w-7xl mx-auto px-8 py-8" data-workflow-shell data-initial-stage="{{ view }}" data-workflow-current-stage="{{ run.current }}" data-workflow-run-id="{{ hypothesis_run.id if hypothesis_run else run_id }}" data-workflow-max-selected="3"{% if hypothesis_run %} data-workflow-select-mode="single" data-hypothesis-run="{{ hypothesis_run.id }}" data-hypothesis-refresh="/hypothesis/{{ hypothesis_run.id }}?view={{ view }}"{% if hypothesis_active %} data-hypothesis-active="1"{% endif %}{% endif %}{% if scenario_run %} data-scenario-run-id="{{ scenario_run.id }}"{% endif %}{% if workflow_app %} data-workflow-app-id="{{ workflow_app.id }}" data-workflow-app-env="{{ workflow_app.env }}" data-workflow-objective="{{ workflow_objective }}"{% endif %}>
   <div class="flex items-center gap-3 mb-3">
     <button type="button" class="p-2 rounded-xl hover:bg-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" style="color: var(--muted-foreground);" aria-label="카오스 테스트 목록으로">
       <iconify-icon icon="lucide:arrow-left" width="18"></iconify-icon>
@@ -47,7 +64,8 @@
     <div class="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);">
       <iconify-icon icon="solar:shield-check-bold" width="30"></iconify-icon>
     </div>
-    <h1 class="text-2xl font-extrabold">Checkout 복원력 검증</h1>
+    <h1 class="text-2xl font-extrabold">{{ run.get('title', 'Checkout 복원력 검증') }}</h1>
+    {% if hypothesis_run %}<span class="tds-badge {{ run.badge }}">{{ run.status }}</span><span class="text-xs mono" style="color: var(--muted-foreground);">{{ hypothesis_run.app.name }}</span>{% endif %}
   </div>
 
   <div class="tds-card p-2 grid grid-cols-4 gap-2 mb-5" role="tablist" aria-label="실험 워크플로우 단계">
@@ -60,7 +78,7 @@
     <button type="button"
             class="workflow-stage-button {% if view == key %}active{% endif %}"
             data-tab-trigger="{{ key }}" data-tab-group="workflow" data-workflow-stage="{{ key }}" data-stage-index="{{ loop.index }}" data-stage-label="{{ label }}"
-            role="tab" aria-selected="{{ 'true' if view == key else 'false' }}" {% if loop.index > run.current %}disabled aria-disabled="true" title="현재 실행 단계가 완료된 뒤 열립니다"{% endif %}>
+            role="tab" aria-selected="{{ 'true' if view == key else 'false' }}" {% if loop.index > run.current %}disabled aria-disabled="true" title="{{ '회귀 검증은 시나리오 실험에서 지원 — 준비 중' if hypothesis_run and loop.index > 2 else '현재 실행 단계가 완료된 뒤 열립니다' }}"{% endif %}>
       <span class="workflow-stage-number"><span data-stage-number>{{ loop.index }}</span><iconify-icon data-stage-check icon="solar:check-circle-bold" width="18"></iconify-icon></span>
       <span class="min-w-0 text-left"><span class="block text-sm font-extrabold truncate">{{ label }}</span><span class="block text-[11px] mt-0.5 truncate" style="color: var(--muted-foreground);">{{ caption }}</span></span>
     </button>
@@ -69,6 +87,9 @@
 
   <div class="min-w-0">
       <section data-tab-content="plan" data-tab-group="workflow" class="{% if view == 'plan' %}active{% endif %} space-y-4">
+        {% if hypothesis_run %}
+        {% include "partials/_hypothesis_plan.html" %}
+        {% else %}
         <!-- 사전 점검 배너 — 구 준비 탭의 게이트 3종을 흡수. 실패 시엔 후보 영역을 차단하는 자리 -->
         <details class="tds-card" data-precheck-banner>
           <summary class="px-5 py-3.5 cursor-pointer flex items-center gap-3">
@@ -196,6 +217,7 @@
           <div class="flex-1"><div class="font-extrabold" data-workflow-selection-summary>아직 선택한 후보가 없어요</div><div class="text-xs mt-1" style="color: var(--muted-foreground);" data-workflow-selection-help>1개 이상, 최대 3개까지 선택할 수 있습니다.</div></div>
           <button type="button" class="tds-btn-primary disabled:opacity-40 disabled:cursor-not-allowed" data-workflow-selection-next data-workflow-go="execute" disabled>선택한 후보로 계속<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
         </div>
+        {% endif %}
       </section>
 
       {% set execution_samples = [
@@ -205,6 +227,11 @@
         {"id":"custom", "title":"Checkout 메모리 압박과 OOM 회복", "target":"checkoutservice · memory-stress", "error_before":"3.6%", "error_after":"0.7%", "latency_before":"742ms", "latency_after":"326ms", "recovery_before":"81s", "recovery_after":"47s", "analysis":"메모리 압박 중 GC 지연 뒤 재시작이 발생하며 요청 실패가 집중됐습니다. 메모리 request와 회복 여유를 조정한 뒤 같은 memory stress 조건으로 재검증했습니다.", "change":"memory request 256Mi", "validation":"manifest · rollout 통과"}
       ] %}
       <section data-tab-content="execute" data-tab-group="workflow" class="{% if view == 'execute' %}active{% endif %} space-y-4">
+        {% if hypothesis_run %}
+        {% if experiment %}{% include "partials/_hypothesis_execute.html" %}{% else %}
+        <div class="tds-card p-8 text-center"><h2 class="text-xl font-extrabold">후보를 승인하면 실험이 여기에 표시돼요.</h2></div>
+        {% endif %}
+        {% else %}
         {% if workflow_app and workflow_app.env == "k3s" %}
         <details class="tds-card" data-preparation-panel>
           <summary class="px-5 py-3.5 cursor-pointer flex items-center gap-3">
@@ -259,6 +286,7 @@
           <button type="button" class="tds-btn-muted" data-workflow-go="plan"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>후보 다시 보기</button>
           <button type="button" class="tds-btn-primary" data-workflow-go="verify" data-regression-start>최종 회귀 검증 시작<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
         </div>
+        {% endif %}
       </section>
 
       <section data-tab-content="verify" data-tab-group="workflow" class="{% if view == 'verify' %}active{% endif %} space-y-4">

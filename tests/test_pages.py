@@ -28,13 +28,15 @@ def test_experiments_page(client):
     resp = client.get("/experiments")
     assert resp.status_code == 200
     assert "카오스 테스트" in resp.text
-    assert "UI 디자인 시안" in resp.text
+    assert "UI 디자인 시안" not in resp.text     # 목록은 가설 Run 실데이터 — 시안 배너 제거
     assert "새 실험 시작" in resp.text
     assert "후보 선택" in resp.text and "최종 검증" in resp.text
     assert 'hx-post="/experiments"' not in resp.text
     assert "data-running-exp" not in resp.text
-    for run_id, stage in ((1, "plan"), (2, "execute"), (3, "result")):
-        assert f'/experiments/{run_id}?view={stage}' in resp.text
+    # seed Run 1(ready·후보 3) → 후보 선택 단계 행
+    assert "HYP-1" in resp.text and "/hypothesis/1?view=plan" in resp.text
+    assert "3개 후보" in resp.text and "선택 필요" in resp.text
+    assert "CL-042" not in resp.text            # 데모 셸 행은 목록에서 제거 (위저드 분기로만 도달)
 
 
 def test_experiment_detail(client):

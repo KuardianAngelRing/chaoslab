@@ -186,6 +186,11 @@ class HypothesisRepository:
                 .order_by(HypothesisRun.id.desc()).limit(1))
         return self.session.scalars(stmt).first()
 
+    def list_runs(self) -> list[HypothesisRun]:
+        """실험 목록 행용 — 최신순."""
+        stmt = select(HypothesisRun).order_by(HypothesisRun.id.desc())
+        return list(self.session.scalars(stmt))
+
     def set_status(self, run: HypothesisRun, status: str, error: str = "",
                    finished: bool = False) -> HypothesisRun:
         run.status = status

@@ -41,16 +41,25 @@ def _is_active(run: HypothesisRun, candidates) -> bool:
 
 
 def _page(request: Request, session: Session, run: HypothesisRun):
+    """워크플로우 셸(experiment_detail.html)을 가설 Run 앵커로 렌더.
+
+    1단계(후보 선택)·2단계(실험 카드)는 partials/_hypothesis_*.html — view 결정·클램프는
+    템플릿의 기존 stage_meta 규칙(run.current 초과 view는 기본 view로 강등)을 그대로 쓴다.
+    """
     repo = HypothesisRepository(session)
     candidates = repo.list_candidates(run.id)
     experiment = repo.experiment_for_run(run.id)
+    experiment_candidate = (repo.get_candidate(experiment.candidate_id)
+                            if experiment and experiment.candidate_id else None)
     return render_page(
-        request, "pages/hypothesis.html",
+        request, "pages/experiment_detail.html",
         {"active_nav": "experiments",
          "app_count": len(AppRepository(session).list_all()),
-         "run": run, "candidates": candidates, "experiment": experiment,
-         "hypothesis_active": _is_active(run, candidates),
-         "chaos_labels": {k: v["label"] for k, v in CHAOS_SPECS.items()}},
+         "hypothesis_run": run, "candidates": candidates,
+         "experiment": experiment, "experiment_candidate": experiment_candidate,
+         "hypothesis_active": _is_active(run, candidates) and experiment is None,
+         "chaos_labels": {k: v["label"] for k, v in CHAOS_SPECS.items()},
+         "chaos_specs": CHAOS_SPECS},
     )
 
 
@@ -81,7 +90,7 @@ def create_run(
         input_payload=payload.model_dump(), status="generating")
     background.add_task(_watch_generation, run.id)
     resp = _page(request, session, run)
-    resp.headers["HX-Push-Url"] = f"/hypothesis/{run.id}"
+    resp.headers["HX-Push-Url"] = f"/hypothesis/{run.id}?view=plan"
     return resp
 
 
@@ -240,7 +249,8 @@ async def hypothesis_stream(run_id: int, request: Request):
     """상태 전용 SSE(DB 폴링) — 활동이 없으면 종료 (experiments/stream 미러).
 
     활동 = generating · freeform 생성 · 후보 detailing. 실험이 만들어지면
-    completed(redirect=/experiments)로 종료 — 배지·값은 항상 서버 렌더가 단일 소스.
+    completed(redirect=/hypothesis/{id}?view=execute)로 종료 — 셸 2단계(실험 카드)로 착지.
+    배지·값은 항상 서버 렌더가 단일 소스.
     """
     async def gen():
         last = None
@@ -263,7 +273,7 @@ async def hypothesis_stream(run_id: int, request: Request):
                         "experiment_id": experiment.id if experiment else None,
                     }
                     active = _is_active(run, candidates) and experiment is None
-                    redirect = "/experiments" if experiment else ""
+                    redirect = f"/hypothesis/{run_id}?view=execute" if experiment else ""
             finally:
                 s.close()
             if snapshot != last:

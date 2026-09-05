@@ -55,7 +55,7 @@ def test_create_experiment_success(client):
         "latency_ms": "200", "duration_s": "30",
     })
     assert resp.status_code == 200
-    assert "UI 디자인 시안" in resp.text  # 기존 POST가 돌아와도 새 화면은 정적 시안만 렌더
+    assert "HYP-1" in resp.text  # 기존 POST가 돌아와도 목록은 가설 Run 행(서버 렌더)
 
 
 def test_create_experiment_validation_error_422(client):
@@ -83,7 +83,7 @@ def test_stop_running_experiment(client):
     # seed 실험 1번이 running
     resp = client.post("/experiments/1/stop")
     assert resp.status_code == 200
-    assert "UI 디자인 시안" in resp.text  # 상태를 화면에 주입하지 않는 정적 시안
+    assert "HYP-1" in resp.text  # 목록 = 가설 Run 행 (개별 Experiment 행은 백로그)
 
 
 def test_stop_non_running_409(client):

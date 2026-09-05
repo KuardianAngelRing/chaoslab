@@ -29,12 +29,30 @@ spec:
 
 # ── 라우트 (client fixture — seed: order-msa=app 4, run 1 ready + 후보 3) ──
 
-def test_seeded_hypothesis_page(client):
+def test_seeded_hypothesis_page_renders_workflow_shell(client):
     resp = client.get("/hypothesis/1")
     assert resp.status_code == 200
-    assert "가설 수립" in resp.text
+    for stage in ("후보 선택", "순차 실행·개선", "최종 회귀 검증", "결과"):
+        assert stage in resp.text
+    assert "HYP-1" in resp.text
+    assert 'data-initial-stage="plan"' in resp.text
+    assert 'data-workflow-select-mode="single"' in resp.text
+    assert 'type="radio" name="candidate_id"' in resp.text
     assert "order-api" in resp.text                 # Stub 후보 대상 = manifest findings 워크로드
-    assert "이 후보로 실험 시작" in resp.text
+    assert "선택한 후보로 실험 시작" in resp.text
+    assert 'hx-post="/hypothesis/1/select"' in resp.text
+    assert 'hx-post="/hypothesis/1/freeform"' in resp.text
+    # 하드코딩 시안 잔재 없음 — 사전 점검 "3/3 통과"·SAMPLE·데모 후보
+    for stale in ("사전 점검 3/3 통과", "SAMPLE", "Frontend Pod 1개 손실", "data-candidate-execution"):
+        assert stale not in resp.text
+    assert "manifest 정적 분석" in resp.text     # 배너는 조립 근거만 말한다
+
+
+def test_view_beyond_current_stage_clamps_to_plan(client):
+    resp = client.get("/hypothesis/1?view=execute")   # 실험 없음 → 2단계 미개방
+    assert 'data-initial-stage="plan"' in resp.text
+    resp = client.get("/hypothesis/1?view=result")
+    assert 'data-initial-stage="plan"' in resp.text
 
 
 def test_create_run_for_k3s_app(client):
@@ -42,7 +60,8 @@ def test_create_run_for_k3s_app(client):
         "app_id": "4", "objective": "지연에도 응답 유지", "max_candidates": "3"})
     assert resp.status_code == 200
     assert "후보를 만들고 있어요" in resp.text        # generating 페이지
-    assert resp.headers.get("hx-push-url", "").startswith("/hypothesis/")
+    assert resp.headers.get("hx-push-url", "").endswith("?view=plan")
+    assert 'data-hypothesis-active="1"' in resp.text  # 생성 중 → SSE 구독 훅
 
 
 def test_create_run_rejects_eks_app(client):
@@ -54,6 +73,8 @@ def test_select_marks_candidate_detailing(client):
     resp = client.post("/hypothesis/1/select", data={"candidate_id": "1"})
     assert resp.status_code == 200
     assert "구체화 중" in resp.text
+    assert 'hx-post="/hypothesis/1/select"' not in resp.text   # detailing 중엔 재선택 CTA 없음
+    assert 'data-hypothesis-active="1"' in resp.text
     # 같은 후보 재선택은 409 (이미 detailing)
     resp = client.post("/hypothesis/1/select", data={"candidate_id": "1"})
     assert resp.status_code == 409
@@ -177,6 +198,63 @@ def test_watch_detailing_creates_experiment(monkeypatch):
     assert exp is not None and exp.candidate_id == cand_id
     assert exp.status == "completed"                # k3s 현장 배포 → 주입 → 회복 → 정리
     s.close()
+
+
+def test_run_with_experiment_lands_on_execute_stage(monkeypatch, client):
+    """실험이 생기면 셸 기본 view=execute, 실험 카드(파라미터·근거) 렌더, SSE는 execute로 redirect.
+
+    experiments의 stream 테스트 패턴 미러 — client fixture(lifespan) + SessionLocal 몽키패치,
+    페이지 렌더는 dependency_overrides를 격리 엔진으로 덮어씀(fixture가 정리)."""
+    from app.db.database import get_session
+    from app.main import app as fastapi_app
+    from app.routers.hypothesis import _watch_detailing
+    from app.services.stubs import StubChaos, StubK3sWorkload
+
+    Session = _engine_session()
+    run_id, cand_id = _prep_detailing(Session)
+    monkeypatch.setattr("app.routers.hypothesis.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.SessionLocal", Session)
+    monkeypatch.setattr("app.routers.experiments.make_chaos", lambda *a, **k: StubChaos())
+    monkeypatch.setattr("app.routers.experiments.make_k3s_workload", lambda: StubK3sWorkload())
+    monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
+    _watch_detailing(cand_id)
+
+    def _override():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    fastapi_app.dependency_overrides[get_session] = _override
+
+    resp = client.get(f"/hypothesis/{run_id}")
+    assert resp.status_code == 200
+    assert 'data-initial-stage="execute"' in resp.text
+    assert "파드 강제 종료 검증" in resp.text and "실험 완료" in resp.text
+    assert "구체화된 파라미터" in resp.text
+    assert 'hx-post="/hypothesis/' not in resp.text   # 실험 이후 선택·직접 입력 CTA 없음
+    with client.stream("GET", f"/hypothesis/{run_id}/stream") as r:
+        body = "".join(chunk for chunk in r.iter_text())
+    # completed 이벤트의 data JSON을 실제로 파싱 — 문자열 포함 검사보다 형식 변경에 민감
+    import json
+    events, name = [], ""
+    for line in body.splitlines():   # sse-starlette는 \r\n 구분 — 줄 단위로 event/data 쌍을 모은다
+        if line.startswith("event:"):
+            name = line[len("event:"):].strip()
+        elif line.startswith("data:"):
+            events.append((name, json.loads(line[len("data:"):])))
+    assert [n for n, _ in events] == ["status", "completed"]
+    assert events[0][1]["experiment_id"] == 1 and events[0][1]["details"] == {"1": "detailed"}
+    assert events[1][1] == {"redirect": f"/hypothesis/{run_id}?view=execute"}
+
+    # 후보 다시 보기(plan): 승인 후보만 checked+disabled, CTA 대신 "실험 보기", 직접 입력 폼 없음
+    resp = client.get(f"/hypothesis/{run_id}?view=plan")
+    assert 'data-initial-stage="plan"' in resp.text
+    assert "승인됨" in resp.text and "실험 보기" in resp.text
+    assert "승인한 후보로 실험이 시작됐어요" in resp.text
+    assert 'data-workflow-selection-next' not in resp.text
+    assert "후보로 추가" not in resp.text
+    assert f'data-workflow-run-id="{run_id}"' in resp.text
 
 
 def test_watch_detailing_validation_failure(monkeypatch):

@@ -1,0 +1,146 @@
+{# 워크플로우 셸 1단계 — 가설 Run 후보 선택 (ADR-0007 근거형 카드 · 단일 선택).
+   ctx: hypothesis_run · candidates · experiment · chaos_labels. 배너는 Run 상태만 말한다 (dashboard-honesty). #}
+{% set hrun = hypothesis_run %}
+{% set detailing = candidates | selectattr("detail_status", "equalto", "detailing") | list %}
+{% set selectable = hrun.status == "ready" and not experiment and not detailing %}
+{% set findings = (hrun.input_payload or {}).get("manifest_findings", []) %}
+{% set allowed = (hrun.input_payload or {}).get("allowed_chaos", []) %}
+
+{% if hrun.status == "generating" %}
+<div class="tds-card p-8 text-center">
+  <span class="tossface-lg">🤖</span>
+  <div class="font-extrabold text-lg mt-3">AI가 실험 후보를 만들고 있어요</div>
+  <p class="text-sm mt-2" style="color: var(--muted-foreground);">
+    앱 구조와 과거 실험을 근거로 후보 {{ hrun.candidate_count }}개를 제안해요 — 준비되면 화면이 갱신돼요
+  </p>
+  <div class="progress-track mt-6 max-w-md mx-auto"><div class="progress-fill" style="width: 60%;"></div></div>
+</div>
+
+{% elif hrun.status == "failed" %}
+<div class="tds-card p-8">
+  <div class="flex items-center gap-2.5">
+    <iconify-icon icon="solar:danger-triangle-bold" width="22" style="color: var(--danger);"></iconify-icon>
+    <span class="font-extrabold text-lg">후보 생성에 실패했어요</span>
+  </div>
+  <p class="text-sm mt-3 mono" style="color: var(--muted-foreground);">{{ hrun.error }}</p>
+  <form class="mt-5">
+    <input type="hidden" name="app_id" value="{{ hrun.app_id }}" />
+    <input type="hidden" name="objective" value="{{ hrun.goal_text }}" />
+    <input type="hidden" name="max_candidates" value="{{ hrun.candidate_count }}" />
+    <button type="button" class="tds-btn-primary" hx-post="/hypothesis" hx-include="closest form"
+            hx-target="#main-content" hx-swap="innerHTML">
+      <iconify-icon icon="solar:refresh-bold" width="16"></iconify-icon> 다시 생성
+    </button>
+  </form>
+</div>
+
+{% else %}
+<!-- 후보 근거 배너 — 조립기가 에이전트에 넘긴 정적 분석 요약 (검사 게이트 아님) -->
+<details class="tds-card" data-hypothesis-basis>
+  <summary class="px-5 py-3.5 cursor-pointer flex items-center gap-3">
+    <iconify-icon icon="solar:magic-stick-3-bold" width="18" style="color: var(--primary);"></iconify-icon>
+    <span class="text-sm font-extrabold flex-1">후보 근거 — manifest 정적 분석 {{ findings|length }}건 · 허용 장애 유형 {{ allowed|length }}종</span>
+    {% if hrun.model_name %}<span class="tds-badge badge-muted mono">{{ hrun.model_name }}</span>{% endif %}
+    <span class="tds-badge badge-success">후보 {{ candidates|length }}개</span>
+    <iconify-icon icon="solar:alt-arrow-down-linear" width="14" style="color: var(--muted-foreground);"></iconify-icon>
+  </summary>
+  <div class="px-5 pb-4 divide-y border-t" style="border-color: var(--border);">
+    {% for f in findings %}
+    <div class="py-3 flex items-start gap-3 text-xs">
+      <iconify-icon icon="solar:server-square-bold" width="16" class="shrink-0 mt-0.5" style="color: var(--primary);"></iconify-icon>
+      <span class="mono shrink-0">{{ f.workload }}</span>
+      <span style="color: var(--muted-foreground);">{{ f.finding }}</span>
+    </div>
+    {% else %}
+    <div class="py-3 text-xs" style="color: var(--muted-foreground);">manifest에서 눈에 띄는 취약 지점을 찾지 못했어요 — 후보는 허용 장애 유형과 검증 목표만으로 제안됐어요.</div>
+    {% endfor %}
+  </div>
+</details>
+
+<form class="space-y-3" data-hypothesis-select>
+  {% for c in candidates %}
+  <label class="block {% if selectable %}cursor-pointer{% else %}cursor-default{% endif %}">
+    <input type="radio" name="candidate_id" value="{{ c.id }}" class="sr-only"
+           data-workflow-candidate data-candidate-id="{{ c.id }}" data-candidate-title="{{ c.title }}"
+           {% if c.detail_status in ("detailing", "detailed") %}checked{% endif %}
+           {% if not selectable %}disabled{% endif %} />
+    <div class="tds-card p-5 workflow-candidate-card" data-candidate-card>
+      <div class="flex items-start gap-4">
+        <span class="workflow-candidate-check"><iconify-icon icon="solar:check-read-bold" width="18"></iconify-icon></span>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-extrabold text-base">{{ c.title }}</span>
+            <span class="tds-badge badge-info">{{ chaos_labels.get(c.chaos_type, c.chaos_type) }}</span>
+            {% if c.source == "user_input" %}<span class="tds-badge badge-muted">직접 입력</span>{% endif %}
+            {% if c.detail_status == "detailing" %}<span class="tds-badge badge-info">파라미터 구체화 중…</span>
+            {% elif c.detail_status == "detailed" %}<span class="tds-badge badge-success">승인됨</span>{% endif %}
+          </div>
+          <p class="text-sm mt-2">{{ c.hypothesis }}</p>
+          <div class="grid grid-cols-3 gap-3 mt-4 text-xs">
+            <div><span class="block mb-1" style="color: var(--muted-foreground);">대상</span><b class="mono">{{ c.target_workload }}</b></div>
+            <div><span class="block mb-1" style="color: var(--muted-foreground);">장애 유형</span><b>{{ chaos_labels.get(c.chaos_type, c.chaos_type) }}</b></div>
+            <div><span class="block mb-1" style="color: var(--muted-foreground);">예상 영향</span><b>{{ c.expected_impact }}</b></div>
+          </div>
+          {% if c.detail_status == "failed" %}
+          <p class="text-xs mt-3 mono" style="color: var(--danger);">구체화 실패: {{ c.error }} — 다시 선택하면 재시도해요</p>
+          {% endif %}
+        </div>
+        <span class="text-xs font-bold shrink-0" style="color: var(--primary);">후보 {{ loop.index }}</span>
+      </div>
+    </div>
+  </label>
+  {% endfor %}
+
+  {% if hrun.freeform_status == "generating" %}
+  <div class="tds-card p-5" style="border-style: dashed;">
+    <p class="text-sm" style="color: var(--muted-foreground);"><span class="tossface">🤖</span> 요청하신 시나리오를 후보로 구체화하고 있어요…</p>
+  </div>
+  {% endif %}
+</form>
+
+{% if selectable %}
+<div class="tds-card p-5" data-candidate-generator style="border-style: dashed;">
+  <div class="flex items-start gap-4">
+    <span class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style="background: var(--primary-soft); color: var(--primary);"><iconify-icon icon="solar:magic-stick-3-bold" width="20"></iconify-icon></span>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2"><h3 class="font-extrabold">원하는 후보가 없나요?</h3><span class="tds-badge badge-info">직접 입력</span></div>
+      <p class="text-xs mt-1" style="color: var(--muted-foreground);">확인하고 싶은 장애, 제외할 대상, 기대하는 검증 방향을 자연어로 적어 주세요 — AI가 허용 범위 안의 후보로 구체화해요.</p>
+      {% if hrun.freeform_status == "failed" %}
+      <p class="text-xs mt-2 mono" style="color: var(--danger);">직접 입력 실패: {{ hrun.freeform_error }}</p>
+      {% endif %}
+      <form class="mt-4">
+        <textarea name="user_text" class="tds-input h-20 py-3 resize-none text-sm" maxlength="200" data-candidate-prompt
+                  placeholder="예: {{ hrun.app.name }}의 메모리 압박과 OOM 회복도 확인해줘"></textarea>
+        <div class="flex items-center gap-2 mt-2">
+          <button type="button" class="tds-badge badge-muted cursor-pointer" data-candidate-prompt-example="메모리 압박과 OOM 회복도 확인해줘">메모리 · OOM</button>
+          <button type="button" class="tds-badge badge-muted cursor-pointer" data-candidate-prompt-example="네트워크 패킷 손실 상황에서 재시도가 동작하는지 확인해줘">패킷 손실</button>
+          <span class="flex-1"></span>
+          <button type="button" class="tds-btn-muted text-sm"
+                  hx-post="/hypothesis/{{ hrun.id }}/freeform" hx-include="closest form"
+                  hx-target="#main-content" hx-swap="innerHTML">
+            <iconify-icon icon="solar:add-circle-bold" width="15"></iconify-icon> 후보로 추가
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="tds-card p-4 flex items-center gap-4">
+  <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: var(--muted);"><iconify-icon icon="solar:checklist-bold" width="20"></iconify-icon></div>
+  <div class="flex-1">
+    <div class="font-extrabold" data-workflow-selection-summary>{% if detailing %}선택한 후보의 파라미터를 구체화하고 있어요{% elif experiment %}승인한 후보로 실험이 시작됐어요{% else %}아직 선택한 후보가 없어요{% endif %}</div>
+    <div class="text-xs mt-1" style="color: var(--muted-foreground);" data-workflow-selection-help>{% if detailing or experiment %}2단계에서 실험 진행을 확인할 수 있어요.{% else %}후보 1개를 고르면 AI가 파라미터를 구체화한 뒤 실험을 시작해요.{% endif %}</div>
+  </div>
+  {% if selectable %}
+  <button type="button" class="tds-btn-primary disabled:opacity-40 disabled:cursor-not-allowed" data-workflow-selection-next disabled
+          hx-post="/hypothesis/{{ hrun.id }}/select" hx-include="[data-hypothesis-select]"
+          hx-target="#main-content" hx-swap="innerHTML">
+    선택한 후보로 실험 시작<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon>
+  </button>
+  {% elif experiment %}
+  <button type="button" class="tds-btn-primary" data-workflow-go="execute">실험 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
+  {% endif %}
+</div>
+{% endif %}
