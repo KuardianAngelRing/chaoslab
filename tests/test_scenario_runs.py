@@ -586,3 +586,17 @@ def test_regression_rolls_back_improvements_after_final_round(monkeypatch, clien
     assert patches[2] == saved.improvement_changes[1]["before"]
     assert patches[3] == saved.improvement_changes[0]["before"]
     assert len(patches) == 4
+
+
+def test_observation_for_app_resolves_registered_then_inferred_service():
+    """회귀 take_sample·단독 실험 트래픽이 공유하는 관측 대상 해석 — 한 곳 원칙."""
+    from app.db.models import App
+    from app.services.regression import observation_for_app
+
+    single = "kind: Service\nmetadata:\n  name: web\n"
+    app = App(name="demo", env="k3s", manifest=single, health_path="", observe_service="")
+    assert observation_for_app(app) == {"service": "web", "path": "/", "expected_status": 200}
+    app.observe_service = "checkout-api"; app.health_path = "/orders"
+    assert observation_for_app(app) == {"service": "checkout-api", "path": "/orders", "expected_status": 200}
+    multi = single + "---\nkind: Service\nmetadata:\n  name: api\n"
+    assert observation_for_app(App(name="demo", env="k3s", manifest=multi, observe_service="")) is None

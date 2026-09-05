@@ -578,3 +578,96 @@ def test_watch_k3s_experiment_targets_candidate_workload(monkeypatch):
     monkeypatch.setattr("app.routers.experiments.time.sleep", lambda n: None)
     _watch_experiment(exp_id)
     assert seen["selector"] == {"app.kubernetes.io/name": "payment-api"}
+
+
+def _k3s_watch_fixture(monkeypatch, *, observe_service="", manifest="kind: Deployment"):
+    """k3s 워처 트래픽 테스트 공용: 앱·실험 생성 + Spy 워크로드/카오스 + TrafficGenerator 스파이."""
+    from app.routers import experiments as mod
+
+    Session = _engine_session()
+    s = Session()
+    app = AppRepository(s).create(
+        name="lab", repo_url="k3s://manifest-upload", framework="manifest",
+        env="k3s", manifest=manifest, health_path="/orders")
+    app.observe_service = observe_service
+    s.commit()
+    exp = ExperimentRepository(s).create(
+        app_id=app.id, chaos_type="pod-kill", params={"action": "pod-kill"},
+        status="deploying", namespace="chaoslab-lab-1")
+    exp_id = exp.id
+    s.close()
+
+    calls = []
+
+    class _SpyWorkload:
+        def deploy(self, ns, manifest): calls.append(("deploy", ns))
+        def wait_ready(self, ns, timeout_s=180): calls.append(("ready", ns)); return True
+        def teardown(self, ns): calls.append(("teardown", ns))
+
+    class _SpyChaos:
+        def inject(self, ns, app_name, chaos_type, params, target_selector=None): return "crd-1"
+        def phase(self, chaos_type, crd_name): return "recovered"
+        def delete(self, chaos_type, crd_name): calls.append(("delete-crd", crd_name))
+
+    class _SpyTraffic:
+        def __init__(self, workload, namespace, observation, interval_s=0.5):
+            calls.append(("traffic-init", namespace, observation))
+        def start(self): calls.append(("traffic-start",)); return self
+        def stop(self, timeout_s=5.0): calls.append(("traffic-stop",))
+
+    monkeypatch.setattr(mod, "SessionLocal", Session)
+    monkeypatch.setattr(mod, "make_chaos", lambda *a, **k: _SpyChaos())
+    monkeypatch.setattr(mod, "make_k3s_workload", lambda: _SpyWorkload())
+    monkeypatch.setattr(mod, "TrafficGenerator", _SpyTraffic)
+    monkeypatch.setattr(mod.time, "sleep", lambda n: None)
+    return mod, Session, exp_id, calls
+
+
+def test_watch_k3s_runs_live_traffic_from_ready_until_before_teardown(monkeypatch):
+    """2단계 차트용 부하: ready 직후 시작 → CRD 삭제 후·ns 삭제 전 중지. 대상은 observe_service·health_path."""
+    mod, Session, exp_id, calls = _k3s_watch_fixture(monkeypatch, observe_service="checkout-api")
+
+    mod._watch_experiment(exp_id)
+
+    kinds = [c[0] for c in calls]
+    assert kinds == ["deploy", "ready", "traffic-init", "traffic-start", "delete-crd", "traffic-stop", "teardown"]
+    assert calls[2][1] == "chaoslab-lab-1"
+    assert calls[2][2] == {"service": "checkout-api", "path": "/orders", "expected_status": 200}
+    s = Session()
+    assert ExperimentRepository(s).get(exp_id).status == "completed"
+    s.close()
+
+
+def test_watch_k3s_stops_live_traffic_on_failure(monkeypatch):
+    """주입 이후 예외(failed 경로)에서도 트래픽은 반드시 중지된다."""
+    mod, Session, exp_id, calls = _k3s_watch_fixture(monkeypatch, observe_service="checkout-api")
+
+    class _BrokenChaos:
+        def inject(self, *a, **k): raise RuntimeError("apiserver down")
+        def delete(self, *a, **k): pass
+
+    monkeypatch.setattr(mod, "make_chaos", lambda *a, **k: _BrokenChaos())
+    mod._watch_experiment(exp_id)
+
+    kinds = [c[0] for c in calls]
+    assert kinds[-2:] == ["traffic-stop", "teardown"]
+    s = Session()
+    assert ExperimentRepository(s).get(exp_id).status == "failed"
+    s.close()
+
+
+def test_watch_k3s_skips_live_traffic_when_service_unknown(monkeypatch, caplog):
+    """관측 Service 미해석(등록값 없음 + manifest 다중 Service) → 경고만, 실험은 정상 완료."""
+    multi = "kind: Service\nmetadata:\n  name: a\n---\nkind: Service\nmetadata:\n  name: b\n"
+    mod, Session, exp_id, calls = _k3s_watch_fixture(monkeypatch, manifest=multi)
+
+    with caplog.at_level("WARNING"):
+        mod._watch_experiment(exp_id)
+
+    kinds = [c[0] for c in calls]
+    assert "traffic-init" not in kinds and "traffic-stop" not in kinds
+    assert kinds == ["deploy", "ready", "delete-crd", "teardown"]
+    assert "live traffic skipped" in caplog.text
+    s = Session()
+    assert ExperimentRepository(s).get(exp_id).status == "completed"
+    s.close()
