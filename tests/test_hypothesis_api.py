@@ -201,7 +201,8 @@ def test_watch_detailing_creates_experiment(monkeypatch):
 
 
 def test_run_with_experiment_lands_on_execute_stage(monkeypatch, client):
-    """실험이 생기면 셸 기본 view=execute, 실험 카드(파라미터·근거) 렌더, SSE는 execute로 redirect.
+    """실험이 생기면 실험 카드(파라미터·근거) 렌더, SSE는 execute로 redirect.
+    실험이 종료(Stub은 즉시 completed)되면 3단계(최종 회귀)가 열리고 기본 view도 verify.
 
     experiments의 stream 테스트 패턴 미러 — client fixture(lifespan) + SessionLocal 몽키패치,
     페이지 렌더는 dependency_overrides를 격리 엔진으로 덮어씀(fixture가 정리)."""
@@ -227,12 +228,25 @@ def test_run_with_experiment_lands_on_execute_stage(monkeypatch, client):
             s.close()
     fastapi_app.dependency_overrides[get_session] = _override
 
-    resp = client.get(f"/hypothesis/{run_id}")
+    resp = client.get(f"/hypothesis/{run_id}?view=execute")
     assert resp.status_code == 200
     assert 'data-initial-stage="execute"' in resp.text
     assert "파드 강제 종료 검증" in resp.text and "실험 완료" in resp.text
     assert "구체화된 파라미터" in resp.text
     assert 'hx-post="/hypothesis/' not in resp.text   # 실험 이후 선택·직접 입력 CTA 없음
+    assert 'data-workflow-go="verify"' in resp.text and "최종 회귀로" in resp.text
+    assert 'data-workflow-current-stage="3"' in resp.text
+    assert 'data-workflow-app-id=' in resp.text and 'data-workflow-app-env="k3s"' in resp.text
+    # 실험 종료 → 기본 view=verify(3단계) — 승인 후보 목록·기본 기준·시작 버튼은 서버 렌더
+    resp = client.get(f"/hypothesis/{run_id}")
+    assert 'data-initial-stage="verify"' in resp.text
+    assert "data-hypothesis-regression-start" in resp.text and "최종 회귀 시작" in resp.text
+    assert "파드 강제 종료 검증" in resp.text and "demo-api" in resp.text
+    assert "최소 Ready Pod" in resp.text
+    assert "data-preparation-panel" in resp.text
+    assert "준비 중" not in resp.text                     # 3·4단계 "준비 중" 툴팁 제거
+    resp = client.get(f"/hypothesis/{run_id}?view=result")   # 회귀 전 → verify로 클램프
+    assert 'data-initial-stage="verify"' in resp.text
     with client.stream("GET", f"/hypothesis/{run_id}/stream") as r:
         body = "".join(chunk for chunk in r.iter_text())
     # completed 이벤트의 data JSON을 실제로 파싱 — 문자열 포함 검사보다 형식 변경에 민감

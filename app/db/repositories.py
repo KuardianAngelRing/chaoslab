@@ -109,6 +109,14 @@ class ScenarioRunRepository:
         )
         return self.session.scalars(stmt).first()
 
+    def latest_for_hypothesis(self, hypothesis_run_id: int) -> ScenarioRun | None:
+        stmt = (
+            select(ScenarioRun)
+            .where(ScenarioRun.hypothesis_run_id == hypothesis_run_id)
+            .order_by(ScenarioRun.id.desc())
+        )
+        return self.session.scalars(stmt).first()
+
 
 class IterationRepository:
     def __init__(self, session: Session):

@@ -4,7 +4,14 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base
 from app.db.models import App, ExperimentSession, ScenarioRun
-from app.services.regression import run_regression, scenario_snapshot
+from app.db.repositories import HypothesisRepository
+from app.services.agent.hypothesis_schema import CandidateProposal
+from app.services.regression import (
+    DEFAULT_CRITERIA,
+    run_regression,
+    scenario_snapshot,
+    scenario_snapshot_from_hypothesis,
+)
 from app.services.report_writer import deterministic_report
 from app.services.reports import report_html
 from app.services.resilience import calculate_r, compare_runs
@@ -212,3 +219,127 @@ def _result(spec, status, *, error_rate, p95):
         "cleanup_completed": True,
         "error": "",
     }
+
+
+# ── 가설 경로: 승인 후보 → 회귀 시나리오 조립 (스펙 2026-09-05) ──
+
+def _hypothesis_fixture(Session, *, detailed=True):
+    """nginx(k3s) 앱 + ready 준비 세션 + 후보 2개(하나만 detailed). (app_id, run_id, session_id, cand_id)"""
+    session = Session()
+    app = App(name="nginx", repo_url="k3s://manifest-upload", framework="manifest", env="k3s",
+              health_path="/", manifest="kind: Deployment", status="registered")
+    session.add(app)
+    session.commit()
+    preparation = ExperimentSession(app_id=app.id, status="ready", namespace="chaoslab-session-nginx-1")
+    session.add(preparation)
+    session.commit()
+    repo = HypothesisRepository(session)
+    run = repo.create_run(app_id=app.id, goal_text="nginx가 파드 종료를 버티는지", candidate_count=2,
+                          input_payload={}, status="ready")
+    approved, proposed = repo.add_candidates(run.id, [
+        CandidateProposal(title="nginx 파드 강제 종료 검증", chaos_type="pod-kill",
+                          target_workload="nginx", hypothesis="h", expected_impact="i"),
+        CandidateProposal(title="nginx 지연 검증", chaos_type="network-delay",
+                          target_workload="nginx", hypothesis="h", expected_impact="i"),
+    ])
+    if detailed:
+        repo.set_candidate_detail(approved, "detailed", params={"action": "pod-kill"}, rationale="r")
+    ids = (app.id, run.id, preparation.id, approved.id)
+    session.close()
+    return ids
+
+
+def test_scenario_snapshot_from_hypothesis_uses_detailed_candidates_only():
+    Session = _session_factory()
+    app_id, run_id, _, cand_id = _hypothesis_fixture(Session)
+    session = Session()
+    run = HypothesisRepository(session).get_run(run_id)
+    scenario = scenario_snapshot_from_hypothesis(run, run.app)
+    assert scenario["id"] == f"hyp-{run_id}"
+    assert scenario["title"] == "nginx가 파드 종료를 버티는지"
+    assert scenario["app"] == "nginx"
+    assert scenario["observation"] == {"service": "nginx", "path": "/", "expected_status": 200}
+    assert scenario["improvements"] == []
+    [spec] = scenario["experiments"]                       # proposed 후보는 제외, 1개 허용
+    assert spec["id"] == f"cand-{cand_id}"
+    assert spec["title"] == "nginx 파드 강제 종료 검증"
+    assert spec["chaos_type"] == "pod-kill"
+    assert spec["params"] == {"action": "pod-kill"}          # validate_params 정규화
+    assert spec["target_selector"] == {"app.kubernetes.io/name": "nginx"}
+    assert spec["criteria"] == DEFAULT_CRITERIA
+    session.close()
+
+
+def test_scenario_snapshot_from_hypothesis_requires_detailed_candidate():
+    import pytest
+
+    Session = _session_factory()
+    _, run_id, _, _ = _hypothesis_fixture(Session, detailed=False)
+    session = Session()
+    run = HypothesisRepository(session).get_run(run_id)
+    with pytest.raises(ValueError):
+        scenario_snapshot_from_hypothesis(run, run.app)
+    session.close()
+
+
+def test_create_scenario_run_from_hypothesis_and_reach_result_stage(monkeypatch, client):
+    """POST /scenario-runs(hypothesis_run_id) → 201·컬럼 저장 → Stub 회귀 completed →
+    셸 4단계(?view=result)에 R지수·보고서 링크, 보고서 HTML 200, 실험 목록 행은 4/4."""
+    from app.db.database import get_session
+    from app.main import app as fastapi_app
+
+    Session = _session_factory()
+    _, run_id, session_id, cand_id = _hypothesis_fixture(Session)
+    monkeypatch.setattr("app.services.regression.SessionLocal", Session)
+    monkeypatch.setattr("app.services.regression.time.sleep", lambda _seconds: None)
+
+    def _override():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    fastapi_app.dependency_overrides[get_session] = _override
+
+    # YAML 경로 검증은 그대로 — 가설 앱에 selected_ids만 보내면 422 (order-resilience-lab 전용)
+    resp = client.post("/scenario-runs", data={"session_id": session_id, "selected_ids": "frontend,catalog"})
+    assert resp.status_code == 422
+
+    resp = client.post("/scenario-runs", data={"session_id": session_id, "hypothesis_run_id": run_id})
+    assert resp.status_code == 201, resp.text
+    payload = resp.json()
+    assert payload["hypothesis_run_id"] == run_id
+    assert payload["scenario"]["id"] == f"hyp-{run_id}"
+    assert [item["id"] for item in payload["scenario"]["experiments"]] == [f"cand-{cand_id}"]
+
+    session = Session()
+    saved = session.get(ScenarioRun, payload["id"])
+    assert saved.hypothesis_run_id == run_id
+    assert saved.status == "completed"                      # BackgroundTasks가 응답 후 동기 실행(Stub)
+    assert saved.comparison["verdict"] == "passed"
+    assert saved.improvement_changes == []                  # 가설 경로엔 개선 명세 없음
+    assert saved.report_content
+    session.close()
+
+    resp = client.get(f"/hypothesis/{run_id}?view=result")
+    assert resp.status_code == 200
+    assert 'data-initial-stage="result"' in resp.text
+    assert 'data-workflow-current-stage="4"' in resp.text
+    assert f'data-scenario-run-id="{payload["id"]}"' in resp.text
+    assert f"/scenario-runs/{payload['id']}/report" in resp.text
+    assert f"/scenario-runs/{payload['id']}/report.pdf" in resp.text
+    assert "R 지수" in resp.text and "전체 통과" in resp.text
+    assert "data-hypothesis-regression-start" not in resp.text   # 회귀가 있으면 시작 블록 없음
+
+    resp = client.get(f"/hypothesis/{run_id}?view=verify")
+    assert 'data-initial-stage="verify"' in resp.text
+    assert "nginx 파드 강제 종료 검증" in resp.text
+
+    resp = client.get(f"/scenario-runs/{payload['id']}/report")
+    assert resp.status_code == 200
+    assert "nginx가 파드 종료를 버티는지" in resp.text and "chaoslab-session-nginx-1" in resp.text
+
+    resp = client.get("/experiments")
+    assert resp.status_code == 200
+    assert f"/hypothesis/{run_id}?view=result" in resp.text
+    assert "4/4" in resp.text and "전체 통과" in resp.text and "R=" in resp.text

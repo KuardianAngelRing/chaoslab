@@ -42,12 +42,33 @@ def hypothesis_run_rows(session) -> list[dict]:
     from app.routers.apps import _ago
 
     repo = HypothesisRepository(session)
+    scenario_repo = ScenarioRunRepository(session)
     rows = []
     for run in repo.list_runs():
         candidates = repo.list_candidates(run.id)
         exp = repo.experiment_for_run(run.id)
         chosen = next((c for c in candidates if c.detail_status in ("detailing", "detailed")), None)
-        if exp is not None:
+        scenario_run = scenario_repo.latest_for_hypothesis(run.id)
+        if scenario_run is not None:
+            # 3·4단계 — 승인 후보로 조립한 최종 회귀(ScenarioRun.hypothesis_run_id)
+            comparison = scenario_run.comparison or {}
+            ts = scenario_run.finished_at or scenario_run.updated_at
+            if scenario_run.status in ("completed", "failed"):
+                stage, step, view = "결과", "4/4", "result"
+                after_r = (comparison.get("r") or {}).get("after") or {}
+                if scenario_run.status == "failed":
+                    label, badge, verdict = "실행 실패", "badge-danger", "판정 불가"
+                else:
+                    label, badge = {
+                        "passed": ("전체 통과", "badge-success"),
+                        "failed": ("기준 미충족", "badge-danger"),
+                    }.get(comparison.get("verdict", ""), ("판정 불가 포함", "badge-warning"))
+                    verdict = (f"R={after_r['score']}" if after_r.get("available")
+                               else "R 산정 불가")
+            else:
+                stage, step, view = "최종 회귀 검증", "3/4", "verify"
+                label, badge, verdict = "회귀 진행 중", "badge-info", "판정 전"
+        elif exp is not None:
             label, badge = EXPERIMENT_STATUS_LABELS.get(exp.status, (exp.status, "badge-muted"))
             stage, step, view = "순차 실행·개선", "2/4", "execute"
             verdict = (f"R={exp.r_index:.4f}" if exp.r_index is not None

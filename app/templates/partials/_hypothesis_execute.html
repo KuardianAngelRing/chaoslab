@@ -105,5 +105,11 @@
 
 <div class="flex justify-between">
   <button type="button" class="tds-btn-muted" data-workflow-go="plan"><iconify-icon icon="solar:alt-arrow-left-linear" width="16"></iconify-icon>후보 다시 보기</button>
-  <button type="button" class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">실험 목록으로<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
+  <div class="flex gap-2">
+    <button type="button" class="tds-btn-muted" hx-get="/experiments" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">실험 목록으로</button>
+    {% if exp.status in ("completed", "failed") %}
+    {# 실험 종료 → 3단계(승인 후보로 조립한 최종 회귀). 셸 탭은 run.current로 이미 열려 있다 #}
+    <button type="button" class="tds-btn-primary" data-workflow-go="verify">최종 회귀로<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button>
+    {% endif %}
+  </div>
 </div>
