@@ -7,6 +7,7 @@ from app.db.models import App, ExperimentSession, ScenarioRun
 from app.db.repositories import HypothesisRepository
 from app.services.agent.hypothesis_schema import CandidateProposal
 from app.services.regression import (
+    entry_service,
     DEFAULT_CRITERIA,
     run_regression,
     scenario_snapshot,
@@ -232,7 +233,8 @@ def _hypothesis_fixture(Session, *, detailed=True):
     session = Session()
     app = App(name="nginx", repo_url="k3s://manifest-upload", framework="manifest", env="k3s",
               health_path="/", status="registered",
-              manifest="kind: Deployment\nmetadata:\n  name: nginx\nspec:\n  selector:\n    matchLabels:\n      app: nginx\n")
+              manifest=("kind: Deployment\nmetadata:\n  name: nginx\nspec:\n  selector:\n    matchLabels:\n"
+                        "      app: nginx\n---\nkind: Service\nmetadata:\n  name: nginx\n"))
     session.add(app)
     session.commit()
     preparation = ExperimentSession(app_id=app.id, status="ready", namespace="chaoslab-session-nginx-1")
@@ -272,6 +274,44 @@ def test_scenario_snapshot_from_hypothesis_uses_detailed_candidates_only():
     assert spec["params"] == {"action": "pod-kill"}          # validate_params 정규화
     assert spec["target_selector"] == {"app": "nginx"}              # 매니페스트 matchLabels에서 파싱
     assert spec["criteria"] == DEFAULT_CRITERIA
+    session.close()
+
+
+def test_entry_service_prefers_app_name_then_single_service():
+    multi = "kind: Service\nmetadata:\n  name: checkout-api\n---\nkind: Service\nmetadata:\n  name: order-api\n"
+    assert entry_service(multi, "order-api") == "order-api"           # 앱명 일치 우선
+    assert entry_service(multi, "order-resilience-lab") is None       # 다중 Service·앱명 불일치 → 미지정
+    assert entry_service("kind: Service\nmetadata:\n  name: web\n", "demo") == "web"   # 단일 Service
+    assert entry_service("kind: Deployment\nmetadata:\n  name: demo\n", "demo") is None
+    assert entry_service("", "demo") is None
+    assert entry_service("kind: [broken", "demo") is None
+
+
+def test_scenario_snapshot_from_hypothesis_uses_registered_observe_service():
+    Session = _session_factory()
+    app_id, run_id, _, _ = _hypothesis_fixture(Session)
+    session = Session()
+    app = session.get(App, app_id)
+    app.observe_service = "checkout-api"                              # 등록 정보가 추론보다 우선
+    session.commit()
+    run = HypothesisRepository(session).get_run(run_id)
+    assert scenario_snapshot_from_hypothesis(run, run.app)["observation"]["service"] == "checkout-api"
+    session.close()
+
+
+def test_scenario_snapshot_from_hypothesis_rejects_unresolvable_service():
+    import pytest
+
+    Session = _session_factory()
+    app_id, run_id, _, _ = _hypothesis_fixture(Session)
+    session = Session()
+    app = session.get(App, app_id)
+    app.manifest = ("kind: Service\nmetadata:\n  name: checkout-api\n---\n"
+                    "kind: Service\nmetadata:\n  name: order-api\n")
+    session.commit()
+    run = HypothesisRepository(session).get_run(run_id)
+    with pytest.raises(ValueError, match="Service를 알 수 없습니다"):
+        scenario_snapshot_from_hypothesis(run, run.app)
     session.close()
 
 
@@ -504,3 +544,45 @@ def test_apply_improvements_rolls_back_patch_when_later_one_fails():
     rollback = calls[2][1]
     assert rollback["spec"]["template"]["spec"]["containers"][0]["readinessProbe"] == {
         "periodSeconds": None, "failureThreshold": None, "tcpSocket": None}
+
+
+def test_regression_rolls_back_improvements_after_final_round(monkeypatch, client):
+    """final 라운드 뒤 적용 개선을 역순 롤백 — 준비 세션을 재사용해도 다음 baseline이 '개선 전'이다."""
+    from app.db.database import get_session
+    from app.main import app as fastapi_app
+    from app.services.stubs import StubK3sWorkload
+
+    Session = _session_factory()
+    _, run_id, session_id, _ = _hypothesis_fixture(Session)
+    _add_proposals(Session, run_id, ["approved", "approved"])
+    monkeypatch.setattr("app.services.regression.SessionLocal", Session)
+    monkeypatch.setattr("app.services.regression.time.sleep", lambda _seconds: None)
+
+    patches = []
+
+    class _Recording(StubK3sWorkload):
+        def patch_deployment(self, namespace, deployment, patch, timeout_s=180):
+            patches.append(patch)
+            return super().patch_deployment(namespace, deployment, patch, timeout_s)
+    shared = _Recording()
+    monkeypatch.setattr("app.services.regression.make_k3s_workload", lambda: shared)
+
+    def _override():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    fastapi_app.dependency_overrides[get_session] = _override
+    resp = client.post("/scenario-runs", data={"session_id": session_id, "hypothesis_run_id": run_id})
+    assert resp.status_code == 201, resp.text
+    session = Session()
+    saved = session.get(ScenarioRun, resp.json()["id"])
+    assert saved.status == "completed"
+    assert len(saved.improvement_changes) == 2 and len(saved.comparison["changes"]) == 2   # 보고서엔 전후 유지
+    session.close()
+    # 적용 A, B → 롤백 B(before), A(before) 순서
+    assert patches[:2] == [_PROBE_PATCH, _PRESTOP_PATCH]
+    assert patches[2] == saved.improvement_changes[1]["before"]
+    assert patches[3] == saved.improvement_changes[0]["before"]
+    assert len(patches) == 4

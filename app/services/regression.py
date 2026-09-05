@@ -70,6 +70,28 @@ def workload_selector(manifest_yaml: str, workload_name: str) -> dict[str, str] 
     return None
 
 
+def entry_service(manifest_yaml: str, app_name: str) -> str | None:
+    """manifest의 Service 목록에서 회귀 관측 요청을 보낼 진입 Service를 추론한다.
+
+    앱명과 같은 Service가 있으면 그것, 아니면 Service가 정확히 1개일 때 그것. 그 외(0개·다중)는 None —
+    다중 Service 앱의 진입점은 등록 정보(`App.observe_service`)로 명시해야 한다.
+    """
+    try:
+        docs = list(yaml.safe_load_all(manifest_yaml or ""))
+    except yaml.YAMLError:
+        return None
+    names = [
+        ((doc.get("metadata") or {}).get("name") or "")
+        for doc in docs if isinstance(doc, dict) and doc.get("kind") == "Service"
+    ]
+    names = [n for n in names if n]
+    if app_name in names:
+        return app_name
+    if len(names) == 1:
+        return names[0]
+    return None
+
+
 def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
     """가설 경로 — 승인(detailed)된 후보를 회귀 시나리오 스냅샷으로 조립한다.
 
@@ -95,14 +117,18 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
             "target_selector": workload_selector(app.manifest, candidate.target_workload),
             "criteria": dict(DEFAULT_CRITERIA),
         })
+    service = app.observe_service or entry_service(app.manifest, app.name)
+    if not service:
+        raise ValueError(
+            "검증 요청을 보낼 Service를 알 수 없습니다 — manifest에 앱명과 같은 Service가 없고 Service가 "
+            "여러 개(또는 없음)입니다. 앱 등록 정보의 관측 Service를 지정해 주세요"
+        )
     return {
         "id": f"hyp-{run.id}",
         "title": run.goal_text or f"{app.name} 복원력 검증",
         "app": app.name,
-        # 관측 대상 Service명 = 앱명 가정(nginx 샘플처럼 Service가 앱명과 같은 앱만).
-        # Service명이 다른 앱은 이번 범위 밖.
         "observation": {
-            "service": app.name,
+            "service": service,
             "path": app.health_path or "/",
             "expected_status": 200,
         },
@@ -173,6 +199,7 @@ def run_regression(run_id: int) -> None:
         run.improvement_changes = _apply_improvements(session, run, workload)
         session.commit()
         run.results = _run_suite(session, run, experiments, workload, "final")
+        _rollback_improvements(run, workload)   # 보고서에 전후가 남으므로 세션 ns는 manifest 상태로 되돌린다
         run.comparison = compare_runs(run.baseline_results or [], run.results or [],
                                       run.improvement_changes or [])
         run.report_content = write_report({
@@ -401,6 +428,17 @@ def _apply_improvements(session, run: ScenarioRun, workload) -> list[dict]:
                     logger.exception("improvement rollback failed (%s)", applied["id"])
             raise
     return changes
+
+
+def _rollback_improvements(run: ScenarioRun, workload) -> None:
+    """final 라운드 뒤 적용 개선을 역순 롤백 — 준비 세션을 재사용해도 다음 run의 baseline이 '개선 전'이도록.
+    롤백 실패는 기록만(회귀 결과 자체는 유효)."""
+    namespace = run.preparation_session.namespace
+    for applied in reversed(run.improvement_changes or []):
+        try:
+            _rollback_change(workload, namespace, applied)
+        except Exception:
+            logger.exception("post-run improvement rollback failed (run %s, %s)", run.id, applied.get("id"))
 
 
 def _rollback_change(workload, namespace: str, applied: dict) -> None:
