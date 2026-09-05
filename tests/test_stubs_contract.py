@@ -162,9 +162,11 @@ def test_stub_hypothesis_agent_proposals_pass_validation():
         phase_summaries={}, allowed_improvements=ALLOWED_IMPROVEMENTS, max_proposals=3)
     raw = stubs.StubHypothesisAgent().propose_improvements(payload)
     proposals, errors = validate_proposals(raw, manifest)
-    assert errors == [] and [p.title for p in proposals] == ["readinessProbe 주기 단축", "종료 전 유예(preStop sleep)"]
-    assert proposals[0].patch["spec"]["template"]["spec"]["containers"][0]["readinessProbe"] == {
-        "periodSeconds": 2, "failureThreshold": 2}                      # 기존 probe → 핸들러 없이 주기만
+    assert errors == [] and [p.title for p in proposals] == [
+        "web 파드 개수 1 → 3으로 증설", "readinessProbe 주기 단축", "종료 전 유예(preStop sleep)"]
+    assert proposals[0].patch == {"spec": {"replicas": 3}}              # replicas 없음(=1) → 증설
+    assert proposals[1].patch["spec"]["template"]["spec"]["containers"][0]["readinessProbe"] == {
+        "initialDelaySeconds": 2, "periodSeconds": 2, "failureThreshold": 2}   # 기존 probe → 핸들러 없이 주기만
     # manifest에 없는 워크로드만 담긴 출력 → 전멸
     assert validate_proposals([{**raw[0], "deployment": "ghost"}], manifest) == ([], [
         "제안 1: manifest에 없는 Deployment 'ghost'"])

@@ -407,8 +407,10 @@ class StubHypothesisAgent:
         return {"params": params, "rationale": "스텁 기본값 — 필드 범위 안의 대표값"}
 
     def propose_improvements(self, payload, feedback: str = "") -> list:
-        """manifest 첫 Deployment·첫 컨테이너에 결정적 2안 — ① readinessProbe(있으면 주기 단축,
-        없으면 tcpSocket으로 추가) ② preStop sleep 5s. 검증은 바깥(validate_proposals)에서."""
+        """manifest 약점 기반 결정적 제안(최대 max_proposals) — 순서대로
+        ① 대상 replicas < 2 → 3 ② readinessProbe 주기 > 3s(또는 없음) → 2s/추가
+        ③ 대상을 UPSTREAMS로 부르는 워크로드에 UPSTREAM_RETRIES가 있으면 0 → 2
+        ④ 채움용 preStop sleep 5s. 검증은 바깥(validate_proposals)에서."""
         from app.services.improvement_specs import container_names, manifest_workloads
 
         workloads = manifest_workloads(payload.manifest_yaml)
@@ -421,27 +423,67 @@ class StubHypothesisAgent:
                       .get("containers") or [])
         container = containers[0] if containers else {}
         cname = (container_names(doc) or ["app"])[0]
-        if container.get("readinessProbe"):
-            probe = {"periodSeconds": 2, "failureThreshold": 2}
-            probe_title = "readinessProbe 주기 단축"
-        else:
+        out = []
+
+        replicas = int((doc.get("spec") or {}).get("replicas") or 1)
+        if replicas < 2:
+            out.append({
+                "title": f"{name} 파드 개수 {replicas} → 3으로 증설", "type": "manifest_patch",
+                "deployment": name, "container": cname, "patch": {"spec": {"replicas": 3}},
+                "rationale": f"{name}는 파드가 {replicas}개뿐이라 파드 장애가 곧 서비스 중단이다 — "
+                             "여분 파드가 있어야 하나가 죽어도 나머지가 요청을 받는다",
+                "expected_effect": "장애 구간 오류율이 크게 줄고 Ready 파드가 0으로 떨어지지 않아요",
+            })
+
+        probe = container.get("readinessProbe")
+        if probe and int(probe.get("periodSeconds") or 10) > 3:
+            out.append({
+                "title": "readinessProbe 주기 단축", "type": "manifest_patch", "deployment": name,
+                "container": cname,
+                "patch": {"spec": {"template": {"spec": {"containers": [
+                    {"name": cname, "readinessProbe": {"initialDelaySeconds": 2, "periodSeconds": 2,
+                                                       "failureThreshold": 2}}]}}}},
+                "rationale": f"준비 확인 주기가 {probe.get('periodSeconds')}초라 교체 파드가 트래픽에 늦게 합류하고, "
+                             "죽은 파드도 늦게 빠진다 — 준비 상태를 더 자주 확인한다",
+                "expected_effect": "파드 교체 중 오류 응답 감소와 회복 시간 단축이 기대돼요",
+            })
+        elif not probe:
             ports = container.get("ports") or []
             port = (ports[0].get("containerPort") if ports else None) or payload.app.get("port") or 80
-            probe = {"tcpSocket": {"port": int(port)}, "periodSeconds": 2, "failureThreshold": 2}
-            probe_title = "readinessProbe 추가"
-        return [
-            {"title": probe_title, "type": "manifest_patch", "deployment": name, "container": cname,
-             "patch": {"spec": {"template": {"spec": {"containers": [{"name": cname, "readinessProbe": probe}]}}}},
-             "rationale": "장애 구간에서 준비되지 않은 파드가 Ready로 남아 요청을 받으면 오류가 늘어난다 — "
-                          "준비 상태를 더 자주 확인해 트래픽에서 빨리 뺀다",
-             "expected_effect": "파드 교체 중 오류 응답 감소와 회복 시간 단축이 기대돼요"},
-            {"title": "종료 전 유예(preStop sleep)", "type": "manifest_patch", "deployment": name,
-             "container": cname,
-             "patch": {"spec": {"template": {"spec": {"containers": [{"name": cname, "lifecycle": {"preStop": {"sleep": {"seconds": 5}}}}]}}}},
-             "rationale": "파드 종료 신호와 서비스 엔드포인트 제거 사이의 시차 동안 들어온 요청이 끊긴다 — "
-                          "종료 전 잠시 기다려 진행 중 요청을 마무리한다",
-             "expected_effect": "파드 종료 순간의 연결 끊김(5xx) 감소가 기대돼요"},
-        ][:payload.max_proposals]
+            out.append({
+                "title": "readinessProbe 추가", "type": "manifest_patch", "deployment": name, "container": cname,
+                "patch": {"spec": {"template": {"spec": {"containers": [
+                    {"name": cname, "readinessProbe": {"tcpSocket": {"port": int(port)},
+                                                       "periodSeconds": 2, "failureThreshold": 2}}]}}}},
+                "rationale": "장애 구간에서 준비되지 않은 파드가 Ready로 남아 요청을 받으면 오류가 늘어난다 — "
+                             "준비 상태를 확인해 트래픽에서 빨리 뺀다",
+                "expected_effect": "파드 교체 중 오류 응답 감소와 회복 시간 단축이 기대돼요",
+            })
+
+        for caller_name, caller in workloads.items():
+            for c in ((((caller.get("spec") or {}).get("template") or {}).get("spec") or {})
+                      .get("containers") or []):
+                env = {e.get("name"): str(e.get("value", "")) for e in (c.get("env") or []) if isinstance(e, dict)}
+                if "UPSTREAM_RETRIES" in env and name in env.get("UPSTREAMS", "") and env["UPSTREAM_RETRIES"] == "0":
+                    out.append({
+                        "title": f"{caller_name} → {name} 호출 재시도 0 → 2회", "type": "deployment_env",
+                        "deployment": caller_name, "container": c.get("name") or "app",
+                        "key": "UPSTREAM_RETRIES", "value": "2",
+                        "rationale": f"{caller_name}는 {name} 호출이 한 번 실패하면 곧바로 오류로 응답한다 — "
+                                     "짧은 재시도로 파드 교체 순간의 일시적 실패를 흡수한다",
+                        "expected_effect": "장애 구간의 일시적 연결 실패가 오류 응답으로 번지지 않아요",
+                    })
+                    break
+
+        out.append({
+            "title": "종료 전 유예(preStop sleep)", "type": "manifest_patch", "deployment": name,
+            "container": cname,
+            "patch": {"spec": {"template": {"spec": {"containers": [{"name": cname, "lifecycle": {"preStop": {"sleep": {"seconds": 5}}}}]}}}},
+            "rationale": "파드 종료 신호와 서비스 엔드포인트 제거 사이의 시차 동안 들어온 요청이 끊긴다 — "
+                         "종료 전 잠시 기다려 진행 중 요청을 마무리한다",
+            "expected_effect": "파드 종료 순간의 연결 끊김(5xx) 감소가 기대돼요",
+        })
+        return out[:payload.max_proposals]
 
     def snapshot(self) -> dict:
         return {"model_name": "stub", "cli_version": "stub"}

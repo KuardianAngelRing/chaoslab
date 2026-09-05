@@ -75,13 +75,15 @@ def test_watch_improvements_ready_then_approve_and_edit(monkeypatch, client):
     run = repo.get_run(run_id)
     assert run.improvement_status == "ready"
     proposals = repo.list_proposals(run_id)
-    assert [p.title for p in proposals] == ["readinessProbe 추가", "종료 전 유예(preStop sleep)"]
+    assert [p.title for p in proposals] == [
+        "demo-api 파드 개수 1 → 3으로 증설", "readinessProbe 추가", "종료 전 유예(preStop sleep)"]
     assert all(p.status == "proposed" and p.experiment_id is not None for p in proposals)
-    probe_id, prestop_id = [p.id for p in proposals]
+    replicas_id, probe_id, prestop_id = [p.id for p in proposals]
     s.close()
 
     resp = client.get(f"/hypothesis/{run_id}?view=verify")
-    assert "AI 개선안 2개" in resp.text and "결정 필요" in resp.text
+    assert "AI 개선안 3개" in resp.text and "결정 필요" in resp.text
+    assert "spec.replicas" in resp.text                                 # replicas 1 → 3 미리보기
     assert "containers[server].readinessProbe.tcpSocket" in resp.text   # manifest에 probe 없음 → 추가 제안
     assert 'name="proposal_ids"' in resp.text and f'name="patch_{probe_id}"' in resp.text
     assert "data-hypothesis-regression-start disabled" in resp.text      # 미결 → 회귀 시작 잠금
@@ -104,14 +106,14 @@ def test_watch_improvements_ready_then_approve_and_edit(monkeypatch, client):
                        data={"proposal_ids": [str(probe_id)], f"patch_{probe_id}": json.dumps(edited)})
     assert resp.status_code == 200
     assert "승인됨" in resp.text and "제외됨" in resp.text and "편집됨" in resp.text
-    assert "승인 1건 · 제외 1건" in resp.text
+    assert "승인 1건 · 제외 2건" in resp.text
     assert "승인한 개선 1건" in resp.text
     assert "data-hypothesis-regression-start disabled" not in resp.text  # 결정 완료 → 시작 가능
     s = Session()
     by_id = {p.id: p for p in HypothesisRepository(s).list_proposals(run_id)}
     assert by_id[probe_id].status == "approved" and by_id[probe_id].source == "user_edit"
     assert by_id[probe_id].patch == edited
-    assert by_id[prestop_id].status == "rejected"
+    assert by_id[prestop_id].status == "rejected" and by_id[replicas_id].status == "rejected"
     s.close()
 
     # 다시 결정 → 전부 proposed(편집값 유지)
