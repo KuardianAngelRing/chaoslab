@@ -302,6 +302,15 @@
       </section>
 
       <section data-tab-content="verify" data-tab-group="workflow" class="{% if view == 'verify' %}active{% endif %} space-y-4">
+        {# EKS 앱은 단독 실험(2단계)까지 — 개선·최종 회귀는 범위 밖(설계 2026-09-07 §3). 안내 카드만 렌더 #}
+        {% set hyp_eks = hypothesis_run and hypothesis_run.app.env != "k3s" %}
+        {% if hyp_eks %}
+        <div class="tds-card p-8 text-center" data-eks-verify-notice>
+          <span class="tossface-lg">🚧</span>
+          <div class="flex items-center justify-center gap-2 mt-3"><span class="tds-badge badge-muted">EKS</span><h2 class="text-xl font-extrabold">EKS 앱은 단독 실험까지 지원해요</h2></div>
+          <p class="text-sm mt-2" style="color: var(--muted-foreground);">가설 수립과 단독 실험·R지수는 2단계에서 확인할 수 있어요.<br>개선안 제안과 개선 전후 최종 회귀 검증은 k3s 앱에서 사용할 수 있어요.</p>
+        </div>
+        {% else %}
         <div class="tds-card p-6">
           <div class="flex items-start justify-between gap-5">
             <div><div class="flex items-center gap-2"><span class="tds-badge badge-info">3단계</span><h2 class="text-xl font-extrabold">개선 전후 최종 회귀 실행</h2></div><p class="text-sm mt-2" style="color: var(--muted-foreground);" data-regression-message>{{ '개선 전후 최종 회귀 검증이 완료됐습니다' if scenario_run and scenario_run.status == 'completed' else ('최종 회귀 검증을 완료하지 못했습니다' if scenario_run and scenario_run.status == 'failed' else (scenario_run.progress.message if scenario_run else '최종 회귀 검증을 시작해 주세요')) }}</p></div>
@@ -382,6 +391,7 @@
 
         <div class="tds-card p-4 hidden" style="border-color: var(--danger);" data-regression-error></div>
         <div class="flex justify-end"><button type="button" class="tds-btn-primary disabled:opacity-40 disabled:cursor-not-allowed" data-regression-result {% if not scenario_run or scenario_run.status not in ["completed", "failed"] %}disabled{% endif %}>결과 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button></div>
+        {% endif %}
       </section>
 
       <section data-tab-content="result" data-tab-group="workflow" class="{% if view == 'result' %}active{% endif %} space-y-4">

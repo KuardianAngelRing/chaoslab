@@ -147,6 +147,14 @@ class K8sService(Protocol):
         """시스템 컴포넌트 상태 (Prometheus/Grafana/Loki/Chaos Mesh/ArgoCD)."""
         ...
 
+    def dump_workloads(self, namespace: str) -> str:
+        """지정 ns의 Deployment·Service를 멀티 문서 YAML로 덤프 (노이즈 제거).
+
+        가설 조립기가 EKS 앱의 manifest 자리에 넣는다(설계 2026-09-07 §1).
+        Deployment `spec.selector.matchLabels`는 주입 selector의 근거이므로 반드시 보존.
+        실패 시 예외 — 호출자가 처리."""
+        ...
+
 
 class TunnelService(Protocol):
     """SSH 터널 생명주기 — 로컬 k3s API(localhost:6443) 접근 경로를 앱이 소유.

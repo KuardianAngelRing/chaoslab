@@ -19,7 +19,7 @@ from app.deps import make_chaos, make_k3s_workload, make_prometheus
 from app.rendering import render_page
 from app.services.chaos_specs import validate_params
 from app.services.live_traffic import TrafficGenerator
-from app.services.metrics_collector import collect_experiment_metrics
+from app.services.metrics_collector import collect_experiment_metrics, observed_workload_name
 from app.services.regression import observation_for_app, workload_selector  # 순수 함수
 
 router = APIRouter()
@@ -78,12 +78,14 @@ def create_experiment(
 
 
 def start_experiment(session: Session, app, chaos_type: str, params: dict,
-                     candidate_id: int | None = None) -> Experiment:
+                     candidate_id: int | None = None,
+                     target_selector: dict[str, str] | None = None) -> Experiment:
     """실험 생성 + 환경 분기 — 폼 라우트와 가설 detailing 워처가 공유.
 
-    k3s(ADR-0009): 전용 ns 예약 + deploying (배포→주입은 워처).
-    eks: 즉시 주입 — 실패 시 inject-failed. 반환 exp.status가
-    deploying/running이면 호출자가 _watch_experiment를 스케줄해야 한다.
+    k3s(ADR-0009): 전용 ns 예약 + deploying (배포→주입은 워처 — selector도 워처가 계산).
+    eks: 즉시 주입 — target_selector(가설 경로: 클러스터 덤프의 matchLabels)가 있으면
+    그 파드만 겨냥, 없으면 기존 `app:` 라벨(폼 직접 경로). 실패 시 inject-failed.
+    반환 exp.status가 deploying/running이면 호출자가 _watch_experiment를 스케줄해야 한다.
     """
     exp = ExperimentRepository(session).create(
         app_id=app.id, chaos_type=chaos_type, params=params, status="pending",
@@ -98,7 +100,8 @@ def start_experiment(session: Session, app, chaos_type: str, params: dict,
 
     try:
         crd = make_chaos(app.env, settings.sut_namespace).inject(
-            settings.sut_namespace, app.name, chaos_type, params)
+            settings.sut_namespace, app.name, chaos_type, params,
+            target_selector=target_selector)
         exp.crd_name = crd
         exp.status = "running"
         session.commit()
@@ -304,7 +307,8 @@ async def experiment_metrics_stream(exp_id: int, request: Request):
                 exp = s.get(Experiment, exp_id)
                 status = exp.status if exp else None
                 namespace = (exp.namespace or exp.app.namespace) if exp else ""
-                app_name = exp.app.name if exp else ""
+                # 가설 후보 대상 우선(다중 서비스 SUT) — R지수 집계와 같은 워크로드 해석
+                app_name = observed_workload_name(s, exp) if exp else ""
                 if prom is None:
                     prom = make_prometheus(exp.app.env if exp else "eks")
             finally:

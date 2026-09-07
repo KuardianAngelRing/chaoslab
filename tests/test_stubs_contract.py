@@ -204,3 +204,20 @@ def test_real_k3s_apply_deployment_env_treats_name_only_env_as_empty(monkeypatch
     assert change["before"] == "" and change["after"] == "payment-api" and len(patches) == 1
     with pytest.raises(ValueError):
         svc.apply_deployment_env("ns", "order-api", "app", "FROM_SECRET", "x")   # valueFrom은 거부
+
+
+def test_stub_k8s_dump_workloads_contract():
+    """설계 2026-09-07 §1 — 파싱 가능한 멀티 문서 YAML, matchLabels는 규약 비의존 값."""
+    import yaml
+
+    from app.services.regression import workload_selector
+
+    dump = stubs.StubK8s().dump_workloads("sut")
+    docs = list(yaml.safe_load_all(dump))
+    kinds = [d["kind"] for d in docs]
+    assert kinds.count("Deployment") == 2 and "Service" in kinds
+    assert all(d["metadata"]["namespace"] == "sut" for d in docs)
+    # 주입 selector의 근거 — 덤프에서 그대로 해석돼야 한다
+    assert workload_selector(dump, "frontend") == {"app": "frontend"}
+    assert workload_selector(dump, "cartservice") == {"app": "cartservice"}
+    assert workload_selector(dump, "ghost") is None

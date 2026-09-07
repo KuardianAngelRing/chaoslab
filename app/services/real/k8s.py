@@ -1,10 +1,33 @@
 """RealK8s — 클러스터 조회/쓰기 (운영, use_real_services=true).
 
 k8s SDK는 메서드 안에서 lazy import → stub/테스트는 의존성 불필요.
+strip_dump_noise는 순수 함수 — SDK 없이 단위 테스트 가능.
 """
 from __future__ import annotations
 
 from app.services.real.kube import load_kube
+
+# 덤프에서 제거할 서버 관리 필드 (설계 2026-09-07 §1) — spec은 통째로 보존
+_NOISE_METADATA_KEYS = ("managedFields", "creationTimestamp", "resourceVersion",
+                        "uid", "generation", "ownerReferences")
+_NOISE_ANNOTATIONS = ("kubectl.kubernetes.io/last-applied-configuration",)
+
+
+def strip_dump_noise(obj: dict) -> dict:
+    """sanitize_for_serialization 결과에서 status·서버 관리 metadata를 제거한다."""
+    obj = dict(obj)
+    obj.pop("status", None)
+    metadata = dict(obj.get("metadata") or {})
+    for key in _NOISE_METADATA_KEYS:
+        metadata.pop(key, None)
+    annotations = {k: v for k, v in (metadata.get("annotations") or {}).items()
+                   if k not in _NOISE_ANNOTATIONS}
+    if annotations:
+        metadata["annotations"] = annotations
+    else:
+        metadata.pop("annotations", None)
+    obj["metadata"] = metadata
+    return obj
 
 
 class RealK8s:
@@ -95,3 +118,22 @@ class RealK8s:
                 healthy = False
             out.append({"name": display, "status": "Healthy" if healthy else "Down"})
         return out
+
+    def dump_workloads(self, namespace: str) -> str:
+        """sut ns의 Deployment·Service를 정식 K8s YAML(멀티 문서)로 덤프.
+
+        sanitize_for_serialization으로 snake_case SDK 모델 → camelCase K8s JSON 변환 후
+        노이즈 제거. apiVersion/kind는 list 응답 항목에 비어 있어 직접 채운다."""
+        import yaml
+        from kubernetes import client  # lazy
+
+        load_kube(self.s)
+        serialize = client.ApiClient().sanitize_for_serialization
+        docs = []
+        for d in client.AppsV1Api().list_namespaced_deployment(namespace).items:
+            docs.append({"apiVersion": "apps/v1", "kind": "Deployment",
+                         **strip_dump_noise(serialize(d))})
+        for svc in client.CoreV1Api().list_namespaced_service(namespace).items:
+            docs.append({"apiVersion": "v1", "kind": "Service",
+                         **strip_dump_noise(serialize(svc))})
+        return yaml.safe_dump_all(docs, allow_unicode=True, sort_keys=False)

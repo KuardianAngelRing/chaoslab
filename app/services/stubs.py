@@ -235,6 +235,71 @@ class StubK8s:
         names = ["Prometheus", "Grafana", "Loki", "Chaos Mesh", "ArgoCD"]
         return [{"name": n, "status": "Healthy"} for n in names]
 
+    def dump_workloads(self, namespace: str) -> str:
+        """결정적 샘플 덤프 — frontend(약점: replicas 1·probe 없음·limits 없음)가 findings에
+        잡혀 Stub 후보 대상이 되고, matchLabels는 의도적으로 `app.kubernetes.io/*` 규약을
+        따르지 않는다(라벨 규약 가정 금지 검증용, 설계 2026-09-07 §1)."""
+        return f"""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: {namespace}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: server
+          image: frontend:stub
+          ports:
+            - containerPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartservice
+  namespace: {namespace}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cartservice
+  template:
+    metadata:
+      labels:
+        app: cartservice
+    spec:
+      containers:
+        - name: server
+          image: cartservice:stub
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: {namespace}
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 8080
+"""
+
 
 _PHASE_SUMMARY_SAMPLES: dict[str, dict] = {
     "baseline": {

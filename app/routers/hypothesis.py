@@ -13,10 +13,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Re
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import settings
 from app.db.database import SessionLocal, get_session
 from app.db.models import HypothesisRun
 from app.db.repositories import AppRepository, HypothesisRepository, ScenarioRunRepository
-from app.deps import make_hypothesis_agent
+from app.deps import make_hypothesis_agent, make_k8s
 from app.rendering import render_page
 from app.routers.experiments import _watch_experiment, start_experiment
 from app.services.agent.hypothesis_assembler import assemble_hypothesis_input
@@ -29,8 +30,8 @@ from app.services.agent.hypothesis_validation import (
 )
 from app.services.agent.improvement_assembler import assemble_improvement_input
 from app.services.chaos_specs import CHAOS_SPECS
-from app.services.improvement_specs import preview_rows, validate_improvement
-from app.services.regression import DEFAULT_CRITERIA
+from app.services.improvement_specs import manifest_workloads, preview_rows, validate_improvement
+from app.services.regression import DEFAULT_CRITERIA, workload_selector
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -123,15 +124,25 @@ def create_run(
     app = AppRepository(session).get(app_id)
     if app is None:
         raise HTTPException(status_code=404, detail="app not found")
-    if app.env != "k3s":
-        # k3s 먼저 — 저장 manifest 기반이라 조립이 결정적. EKS 조립기는 추후.
-        raise HTTPException(status_code=400,
-                            detail="가설 수립은 아직 k3s 앱만 지원해요 (EKS는 추후)")
     try:
         count = int(max_candidates)
     except (TypeError, ValueError):
         count = 5
-    payload = assemble_hypothesis_input(session, app, objective.strip(), count)
+    # EKS는 manifest가 없다(GitOps 배포) — 클러스터 덤프를 manifest 자리에 스냅샷(설계 2026-09-07 §2).
+    # 덤프의 matchLabels가 주입 selector의 근거이므로 주입 대상과 같은 ns(sut_namespace)에서 읽는다.
+    manifest_yaml = None
+    if app.env != "k3s":
+        try:
+            manifest_yaml = make_k8s().dump_workloads(settings.sut_namespace)
+        except Exception as e:
+            logger.exception("workload dump failed (app %s)", app.name)
+            raise HTTPException(status_code=502,
+                                detail=f"클러스터에서 워크로드를 읽지 못했습니다: {e}") from e
+        if not manifest_workloads(manifest_yaml):
+            raise HTTPException(status_code=422,
+                                detail=f"네임스페이스 {settings.sut_namespace}에 Deployment가 없습니다")
+    payload = assemble_hypothesis_input(session, app, objective.strip(), count,
+                                        manifest_yaml=manifest_yaml)
     run = HypothesisRepository(session).create_run(
         app_id=app.id, goal_text=payload.goal_text,
         candidate_count=payload.candidate_count,
@@ -217,6 +228,10 @@ def propose_improvements(
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="hypothesis run not found")
+    if run.app.env != "k3s":
+        # 개선·최종 회귀는 EKS 범위 밖(설계 2026-09-07 §3) — 빈 manifest로 조립되는 것을 막는다
+        raise HTTPException(status_code=422,
+                            detail="EKS 앱은 단독 실험까지 지원해요 — 개선·최종 회귀는 k3s 앱에서")
     experiment = repo.experiment_for_run(run.id)
     if experiment is None or experiment.status not in _TERMINAL_EXPERIMENT:
         raise HTTPException(status_code=409, detail="실험이 끝난 뒤에 개선안을 만들 수 있어요")
@@ -396,10 +411,22 @@ def _watch_detailing(candidate_id: int) -> None:
                     if e.status in ("pending", "deploying", "running")]
             if busy:
                 raise RuntimeError("이 앱에 진행 중인 실험이 있어요 — 종료 후 다시 선택해 주세요")
+            # EKS 즉시 주입은 조립 시 클러스터에서 읽은 실제 matchLabels로 겨냥한다(설계 2026-09-07 §4).
+            # 못 찾으면 fail-fast — `{"app": 이름}` 폴백은 0개 파드 선택(Selected=False)으로
+            # 5분 타임아웃만 태우는 침묵 실패(09/05 실증)라 금지. (k3s selector는 워처가 계산)
+            target_selector = None
+            if app.env != "k3s":
+                target_selector = workload_selector(payload.manifest_yaml,
+                                                    candidate.target_workload)
+                if target_selector is None:
+                    raise RuntimeError(
+                        f"대상 워크로드 {candidate.target_workload}의 selector를 "
+                        "클러스터 덤프에서 찾지 못했습니다 — 다른 후보를 선택해 주세요")
             repo.set_candidate_detail(candidate, "detailed",
                                       params=params, rationale=rationale)
             exp = start_experiment(s, app, candidate.chaos_type, params,
-                                   candidate_id=candidate.id)
+                                   candidate_id=candidate.id,
+                                   target_selector=target_selector)
             if exp.status in ("deploying", "running"):
                 exp_id = exp.id
         except Exception as e:
