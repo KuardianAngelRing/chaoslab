@@ -207,12 +207,15 @@ def _watch_experiment(exp_id: int) -> None:
 
         exp = s.get(Experiment, exp_id)
         if exp and exp.status in ("deploying", "running"):  # stop이 먼저면 덮어쓰지 않음
-            exp.status = status
             exp.finished_at = datetime.now(timezone.utc)
-            s.commit()
             if status == "completed":
-                # 실측 3구간 소급 집계 + R지수 (실패해도 실험 상태 불변)
+                # 실측 3구간 소급 집계 + R지수 — 상태를 completed로 바꾸기 **전에**. status SSE가 completed를 보고
+                # 카드를 다시 받아올 때 R지수·요약 표가 이미 저장돼 있어야 한다(먼저 커밋하면 "산정 불가"가 잠깐 보였다).
+                # 집계 실패는 경고로 격리되어 실험 상태에 영향 없음.
                 collect_experiment_metrics(s, exp, make_prometheus(exp.app.env))
+            if exp.status in ("deploying", "running"):     # 집계 중 stop이 먼저면 덮어쓰지 않음
+                exp.status = status
+                s.commit()
     finally:
         s.close()
 

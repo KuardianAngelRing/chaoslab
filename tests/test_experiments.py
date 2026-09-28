@@ -671,3 +671,23 @@ def test_watch_k3s_skips_live_traffic_when_service_unknown(monkeypatch, caplog):
     s = Session()
     assert ExperimentRepository(s).get(exp_id).status == "completed"
     s.close()
+
+
+def test_watch_collects_metrics_before_marking_completed(monkeypatch):
+    """status SSE가 completed를 보고 카드를 다시 받아올 때 R지수가 이미 있어야 한다 — 집계가 상태 전환보다 먼저."""
+    mod, Session, exp_id, calls = _k3s_watch_fixture(monkeypatch, observe_service="checkout-api")
+    seen = []
+
+    def _spy_collect(session, exp, prometheus):
+        seen.append(exp.status)          # 집계 시점의 상태
+        exp.r_index = 0.42
+        session.commit()
+
+    monkeypatch.setattr(mod, "collect_experiment_metrics", _spy_collect)
+    mod._watch_experiment(exp_id)
+
+    assert seen == ["running"]
+    s = Session()
+    exp = ExperimentRepository(s).get(exp_id)
+    assert exp.status == "completed" and exp.r_index == 0.42 and exp.finished_at is not None
+    s.close()

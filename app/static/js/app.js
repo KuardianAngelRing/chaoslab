@@ -1016,6 +1016,7 @@ document.body.addEventListener('htmx:afterSwap', watchHypothesis);
 // 화면에 실행 카드는 1개 — 전역 스트림 1개만 유지, 스왑으로 요소가 바뀌면 이전 스트림을 닫고 다시 구독.
 let _liveMetricsStream = null;
 let _liveCharts = [];  // 테마 토글 시 update() 대상 — window._charts(initCharts가 스왑마다 파기)와 분리
+const _liveHistory = {};  // exp id → 수신 틱(최근 WINDOW개). 상태 전환·완료 시 status SSE가 카드를 다시 받아와도 차트를 복원한다
 function watchLiveMetrics() {
   const el = document.querySelector('[data-live-metrics]');
   if (_liveMetricsStream) {
@@ -1023,7 +1024,11 @@ function watchLiveMetrics() {
     _liveMetricsStream.close(); _liveMetricsStream = null;
   }
   _liveCharts.forEach(c => c && c.destroy()); _liveCharts = [];
-  if (!el || el.dataset.liveMetricsFinal === 'true' || typeof Chart === 'undefined') return;
+  if (!el || typeof Chart === 'undefined') return;
+  const expId = el.dataset.liveMetrics;
+  const isFinal = el.dataset.liveMetricsFinal === 'true';
+  const history = _liveHistory[expId] = _liveHistory[expId] || [];
+  if (isFinal && !history.length) return;   // 새로고침 등으로 틱 기억이 없으면 서버 렌더 요약 표만
 
   // 색은 스크립터블 옵션으로 매 렌더마다 CSS 변수를 다시 읽는다 → 다크 토글 시 update()만으로 반영
   const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -1057,12 +1062,7 @@ function watchLiveMetrics() {
     chart.update();
   };
   const pods = el.querySelector('[data-live-metrics-pods]');
-
-  const es = new EventSource(`/experiments/${el.dataset.liveMetrics}/metrics/stream`);
-  es._el = el;
-  es.addEventListener('metric', (e) => {
-    let m = {};
-    try { m = JSON.parse(e.data); } catch (err) { return; }
+  const render = (m) => {
     const label = (m.ts || '').slice(11, 19);
     push(ready, [m.ready_pods], label);
     push(latency, [m.p95_ms, m.p99_ms], label);
@@ -1070,6 +1070,18 @@ function watchLiveMetrics() {
     if (pods) pods.textContent = m.ready_pods == null ? '-' : m.ready_pods;
     // Ready 파드는 오는데 HTTP 지표가 전부 null이면 앱이 메트릭을 노출하지 않는 것(k3s nginx 샘플 등) — 안내만 보여준다
     if (note) note.hidden = !(m.ready_pods != null && m.rps == null && m.p95_ms == null);
+  };
+  history.forEach(render);   // 재렌더(스왑) 시 지금까지의 틱 복원 — 완료 후에도 "마지막 스냅샷 유지"가 실제로 유지된다
+  if (isFinal) return;
+
+  const es = new EventSource(`/experiments/${expId}/metrics/stream`);
+  es._el = el;
+  es.addEventListener('metric', (e) => {
+    let m = {};
+    try { m = JSON.parse(e.data); } catch (err) { return; }
+    history.push(m);
+    if (history.length > WINDOW) history.shift();
+    render(m);
   });
   // completed 이후 화면 재요청은 watchExperiments(status 스트림)가 담당 — 여기선 스트림만 닫고 차트를 남긴다.
   es.addEventListener('completed', () => { es.close(); if (_liveMetricsStream === es) _liveMetricsStream = null; });
