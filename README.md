@@ -327,7 +327,7 @@ Claude CLI는 서버를 실행하는 사용자 계정에서 설치·로그인이
 
 #### 6.2. 시연 영상
 
-URL 삽입 예정
+[ChaosLab 시연 영상 보기](https://www.youtube.com/watch?v=3pqyrm2TV4I)
 
 ### 7. 팀 구성
 
