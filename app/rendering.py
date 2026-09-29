@@ -1,4 +1,6 @@
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
@@ -16,6 +18,20 @@ EXPERIMENT_STATUS_LABELS: dict[str, tuple[str, str]] = {
     "stopped": ("중지됨", "badge-muted"),
 }
 templates.env.globals["exp_status_labels"] = EXPERIMENT_STATUS_LABELS
+
+KST = ZoneInfo("Asia/Seoul")
+
+
+def to_kst(dt: datetime | None, fmt: str = "%m/%d %H:%M") -> str:
+    """DB의 naive UTC(또는 aware) datetime을 한국 시간 문자열로. 화면 시각 표기는 전부 이 필터 한 곳."""
+    if dt is None:
+        return "-"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(KST).strftime(fmt)
+
+
+templates.env.filters["kst"] = to_kst
 
 
 def resolve_layout(headers: dict) -> str:

@@ -95,8 +95,8 @@
 
   <div class="grid grid-cols-3 gap-3 mb-4">
     <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">장애 유형</div><div class="text-base font-extrabold mt-1">{{ chaos_labels.get(exp.chaos_type, exp.chaos_type) }}</div></div>
-    <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">시작</div><div class="text-base font-extrabold mt-1 mono">{{ exp.started_at.strftime("%m/%d %H:%M") if exp.started_at else "-" }}</div></div>
-    <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">종료</div><div class="text-base font-extrabold mt-1 mono">{{ exp.finished_at.strftime("%m/%d %H:%M") if exp.finished_at else "진행 중" }}</div></div>
+    <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">시작</div><div class="text-base font-extrabold mt-1 mono">{{ exp.started_at|kst if exp.started_at else "-" }}</div></div>
+    <div class="p-4 rounded-2xl" style="background: var(--muted);"><div class="text-[11px] font-bold" style="color: var(--muted-foreground);">종료</div><div class="text-base font-extrabold mt-1 mono">{{ exp.finished_at|kst if exp.finished_at else "진행 중" }}</div></div>
   </div>
 
   <div class="rounded-2xl border p-4" style="border-color: var(--border);">

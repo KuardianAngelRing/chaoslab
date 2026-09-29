@@ -9,7 +9,7 @@
         <code class="mono font-bold">{{ d.image_tag[:8] }}</code>
       </div>
       <div class="flex items-center gap-4" style="color: var(--muted-foreground);">
-        <span>{{ (d.finished_at or d.started_at).strftime("%m/%d %H:%M") }}</span>
+        <span>{{ (d.finished_at or d.started_at)|kst }}</span>
         <span>{{ ago(d.finished_at or d.started_at) }}</span>
       </div>
     </div>
