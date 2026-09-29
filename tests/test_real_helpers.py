@@ -367,3 +367,15 @@ def test_strip_dump_noise_drops_empty_annotations():
     obj = {"metadata": {"name": "svc", "annotations":
            {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "spec": {}}
     assert "annotations" not in strip_dump_noise(obj)["metadata"]
+
+
+def test_eks_workload_never_deploys_or_tears_down():
+    """in-place 워크로드 서비스(설계 2026-09-29 §1 가드 1) — 실제 SUT ns를 배포·삭제하지 않는다 (SDK 미접속)."""
+    import pytest
+
+    from app.services.real.eks_workload import RealEksWorkload
+
+    workload = RealEksWorkload(settings=object())
+    assert workload.teardown("online-boutique") is None
+    with pytest.raises(NotImplementedError):
+        workload.deploy("online-boutique", "kind: Deployment")

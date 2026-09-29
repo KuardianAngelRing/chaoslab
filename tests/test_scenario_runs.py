@@ -565,7 +565,7 @@ def test_regression_rolls_back_improvements_after_final_round(monkeypatch, clien
             patches.append(patch)
             return super().patch_deployment(namespace, deployment, patch, timeout_s)
     shared = _Recording()
-    monkeypatch.setattr("app.services.regression.make_k3s_workload", lambda: shared)
+    monkeypatch.setattr("app.services.regression.make_workload", lambda env: shared)
 
     def _override():
         s = Session()
@@ -600,3 +600,160 @@ def test_observation_for_app_resolves_registered_then_inferred_service():
     assert observation_for_app(app) == {"service": "checkout-api", "path": "/orders", "expected_status": 200}
     multi = single + "---\nkind: Service\nmetadata:\n  name: api\n"
     assert observation_for_app(App(name="demo", env="k3s", manifest=multi, observe_service="")) is None
+
+
+# ── EKS in-place 회귀 (설계 2026-09-29 §3) — 매니페스트 원천은 run의 클러스터 덤프 ──
+
+def _eks_hypothesis_fixture(Session, target="frontend"):
+    """EKS 앱(manifest 없음) + 덤프 스냅샷 run + detailed 후보 + in-place ready 세션(ns=sut)."""
+    from app.services.stubs import StubK8s
+
+    session = Session()
+    app = App(name="shop", repo_url="https://github.com/demo/shop", framework="go", env="eks",
+              health_path="/", status="healthy")
+    session.add(app)
+    session.commit()
+    preparation = ExperimentSession(app_id=app.id, status="ready", namespace="sut")
+    session.add(preparation)
+    session.commit()
+    repo = HypothesisRepository(session)
+    run = repo.create_run(app_id=app.id, goal_text="frontend 파드 손실", candidate_count=1,
+                          input_payload={"manifest_yaml": StubK8s().dump_workloads("sut")}, status="ready")
+    [cand] = repo.add_candidates(run.id, [CandidateProposal(
+        title="frontend 파드 강제 종료", chaos_type="pod-kill", target_workload=target,
+        hypothesis="h", expected_impact="i")])
+    repo.set_candidate_detail(cand, "detailed", params={"action": "pod-kill"}, rationale="r")
+    ids = (app.id, run.id, preparation.id, cand.id)
+    session.close()
+    return ids
+
+
+def test_scenario_snapshot_from_hypothesis_reads_eks_dump_for_selector_and_service():
+    import yaml
+    from app.services.stubs import StubK8s
+
+    Session = _session_factory()
+    _, run_id, _, cand_id = _eks_hypothesis_fixture(Session)
+    session = Session()
+    run = HypothesisRepository(session).get_run(run_id)
+    scenario = scenario_snapshot_from_hypothesis(run, run.app)
+    [spec] = scenario["experiments"]
+    assert spec["target_selector"] == {"app": "frontend"}          # 덤프 matchLabels (라벨 규약 가정 없음)
+    services = [d["metadata"]["name"] for d in yaml.safe_load_all(StubK8s().dump_workloads("sut"))
+                if d and d.get("kind") == "Service"]
+    assert len(services) == 1 and scenario["observation"]["service"] == services[0]   # 단일 Service 추론
+    session.close()
+
+
+def test_scenario_snapshot_from_hypothesis_eks_fails_fast_without_selector():
+    """EKS(in-place)는 selector를 못 찾으면 ns 전체 주입 폴백 대신 조립을 거부한다."""
+    import pytest
+
+    Session = _session_factory()
+    _, run_id, _, _ = _eks_hypothesis_fixture(Session, target="ghost")
+    session = Session()
+    run = HypothesisRepository(session).get_run(run_id)
+    with pytest.raises(ValueError, match="selector"):
+        scenario_snapshot_from_hypothesis(run, run.app)
+    session.close()
+
+
+def _override(client, Session):
+    from app.db.database import get_session
+    from app.main import app as fastapi_app
+
+    def _gen():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    fastapi_app.dependency_overrides[get_session] = _gen
+
+
+class _RecordingWorkload:
+    """StubK3sWorkload + patch_deployment 호출 기록 (EKS in-place 회귀의 적용→롤백 순서 검증)."""
+
+    def __init__(self):
+        from app.services.stubs import StubK3sWorkload
+
+        self.inner = StubK3sWorkload()
+        self.patches = []
+        self.torn_down = []
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def patch_deployment(self, namespace, deployment, patch, timeout_s=180):
+        self.patches.append((namespace, patch))
+        return self.inner.patch_deployment(namespace, deployment, patch, timeout_s)
+
+    def teardown(self, namespace):
+        self.torn_down.append(namespace)
+
+
+def test_eks_regression_runs_in_place_and_rolls_back_after_final(monkeypatch, client):
+    Session = _session_factory()
+    _, run_id, session_id, _ = _eks_hypothesis_fixture(Session)
+    _add_proposals(Session, run_id, ["approved", "rejected"])
+    monkeypatch.setattr("app.services.regression.SessionLocal", Session)
+    monkeypatch.setattr("app.services.regression.time.sleep", lambda _seconds: None)
+    injected = []
+
+    class _Chaos:
+        def inject(self, namespace, app_name, chaos_type, params, target_selector=None):
+            injected.append((namespace, target_selector))
+            return "crd-1"
+
+        def phase(self, chaos_type, crd_name):
+            return "recovered"
+
+        def delete(self, chaos_type, crd_name):
+            return None
+
+    workload = _RecordingWorkload()
+    monkeypatch.setattr("app.services.regression.make_chaos", lambda *args: _Chaos())
+    monkeypatch.setattr("app.services.regression.make_workload", lambda env: workload)
+    _override(client, Session)
+
+    resp = client.post("/scenario-runs", data={"session_id": session_id, "hypothesis_run_id": run_id})
+    assert resp.status_code == 201, resp.text
+    session = Session()
+    saved = session.get(ScenarioRun, resp.json()["id"])
+    assert saved.status == "completed"
+    assert injected and all(ns == "sut" and sel == {"app": "frontend"} for ns, sel in injected)
+    assert len(saved.improvement_changes) == 1
+    assert [ns for ns, _ in workload.patches] == ["sut", "sut"]           # 적용 1회 + 롤백 1회, 실제 ns
+    assert workload.patches[1][1] == saved.improvement_changes[0]["before"]
+    assert workload.torn_down == []                                        # in-place: ns 삭제 없음
+    session.close()
+
+
+def test_eks_regression_rolls_back_improvements_when_final_round_fails(monkeypatch, client):
+    """final 라운드 예외로 끝나도 적용 개선을 남기지 않는다(라이브 SUT 보호, 설계 2026-09-29 §3)."""
+    Session = _session_factory()
+    _, run_id, session_id, _ = _eks_hypothesis_fixture(Session)
+    _add_proposals(Session, run_id, ["approved", "approved"])
+    monkeypatch.setattr("app.services.regression.SessionLocal", Session)
+    monkeypatch.setattr("app.services.regression.time.sleep", lambda _seconds: None)
+    workload = _RecordingWorkload()
+    monkeypatch.setattr("app.services.regression.make_workload", lambda env: workload)
+
+    def _suite(session, run, experiments, wl, round_name):
+        if round_name == "final":
+            raise RuntimeError("chaos-mesh unavailable")
+        return []
+    monkeypatch.setattr("app.services.regression._run_suite", _suite)
+    _override(client, Session)
+
+    resp = client.post("/scenario-runs", data={"session_id": session_id, "hypothesis_run_id": run_id})
+    assert resp.status_code == 201, resp.text
+    session = Session()
+    saved = session.get(ScenarioRun, resp.json()["id"])
+    assert saved.status == "failed" and "chaos-mesh unavailable" in saved.error
+    assert len(saved.improvement_changes) == 2
+    applied = [patch for _, patch in workload.patches[:2]]
+    assert applied == [_PROBE_PATCH, _PRESTOP_PATCH]
+    assert [patch for _, patch in workload.patches[2:]] == [
+        saved.improvement_changes[1]["before"], saved.improvement_changes[0]["before"]]   # 역순 롤백
+    session.close()

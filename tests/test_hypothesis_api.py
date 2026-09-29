@@ -453,11 +453,12 @@ def test_watch_detailing_eks_unknown_workload_fails_fast(monkeypatch):
     s.close()
 
 
-def test_eks_run_verify_stage_shows_notice_and_blocks_improvements(monkeypatch, client):
-    """EKS run의 3단계 = 안내 카드만(개선 패널·회귀 조립 카드 없음) · improvements POST는 422(설계 §3)."""
+def test_eks_run_verify_stage_renders_in_place_regression_and_allows_improvements(monkeypatch, client):
+    """EKS run의 3단계(설계 2026-09-29 §4·§5) = k3s와 같은 개선 패널·회귀 조립 카드(in-place 문구) ·
+    improvements POST 200 → Stub 제안이 덤프의 대상(frontend)을 겨냥한다."""
     from app.db.database import get_session
     from app.main import app as fastapi_app
-    from app.routers.hypothesis import _watch_detailing
+    from app.routers.hypothesis import _watch_detailing, _watch_improvements
 
     Session = _engine_session()
     run_id, cand_id = _make_eks_run(Session)
@@ -476,11 +477,18 @@ def test_eks_run_verify_stage_shows_notice_and_blocks_improvements(monkeypatch, 
     fastapi_app.dependency_overrides[get_session] = _override
 
     html = client.get(f"/hypothesis/{run_id}?view=verify").text
-    assert "data-eks-verify-notice" in html and "EKS 앱은 단독 실험까지 지원해요" in html
-    assert "data-hypothesis-regression-start" not in html   # 회귀 조립 카드 없음
-    assert "개선안 생성" not in html                          # 개선 패널 없음
-    assert "data-preparation-panel" not in html
+    assert "data-eks-verify-notice" not in html
+    assert "data-hypothesis-regression-start" in html and "data-preparation-panel" in html
+    assert "실제 네임스페이스에서 그대로(in-place)" in html and "실제 네임스페이스 사용(배포 없음)" in html
+    assert "개선안 생성" in html
 
     resp = client.post(f"/hypothesis/{run_id}/improvements")
-    assert resp.status_code == 422
-    assert "EKS 앱은 단독 실험까지 지원해요" in resp.json()["detail"]
+    assert resp.status_code == 200, resp.text
+    _watch_improvements(run_id)
+    s = Session()
+    run = HypothesisRepository(s).get_run(run_id)
+    assert run.improvement_status == "ready", run.improvement_error
+    assert run.proposals and run.proposals[0].deployment == "frontend"   # 덤프 기반 제안(replicas 1 → 증설 등)
+    s.close()
+    html = client.get(f"/hypothesis/{run_id}?view=verify").text
+    assert "현재(manifest)" in html and "결정 필요" in html
