@@ -336,3 +336,46 @@ def test_live_queries_use_istio_selector_and_pod_pattern():
     assert "histogram_quantile(0.95" in qs["p95_ms"] and "histogram_quantile(0.99" in qs["p99_ms"]
     assert 'pod=~"demo-[a-z0-9]+-[a-z0-9]+"' in qs["ready_pods"]
     assert 'namespace="sut"' in qs["ready_pods"]
+
+
+def test_strip_dump_noise_removes_server_fields():
+    from app.services.real.k8s import strip_dump_noise
+
+    obj = {
+        "metadata": {
+            "name": "web", "labels": {"app": "web"},
+            "managedFields": [{"manager": "kubectl"}], "resourceVersion": "42",
+            "uid": "u-1", "creationTimestamp": "2026-01-01T00:00:00Z", "generation": 3,
+            "ownerReferences": [{"kind": "ReplicaSet"}],
+            "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}",
+                            "prometheus.io/scrape": "true"},
+        },
+        "spec": {"selector": {"matchLabels": {"app": "web"}}},
+        "status": {"replicas": 1},
+    }
+    out = strip_dump_noise(obj)
+    assert "status" not in out
+    assert out["metadata"] == {"name": "web", "labels": {"app": "web"},
+                               "annotations": {"prometheus.io/scrape": "true"}}
+    assert out["spec"]["selector"]["matchLabels"] == {"app": "web"}
+    assert "status" in obj and "managedFields" in obj["metadata"]   # 원본 불변
+
+
+def test_strip_dump_noise_drops_empty_annotations():
+    from app.services.real.k8s import strip_dump_noise
+
+    obj = {"metadata": {"name": "svc", "annotations":
+           {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "spec": {}}
+    assert "annotations" not in strip_dump_noise(obj)["metadata"]
+
+
+def test_eks_workload_never_deploys_or_tears_down():
+    """in-place 워크로드 서비스(설계 2026-09-29 §1 가드 1) — 실제 SUT ns를 배포·삭제하지 않는다 (SDK 미접속)."""
+    import pytest
+
+    from app.services.real.eks_workload import RealEksWorkload
+
+    workload = RealEksWorkload(settings=object())
+    assert workload.teardown("online-boutique") is None
+    with pytest.raises(NotImplementedError):
+        workload.deploy("online-boutique", "kind: Deployment")

@@ -24,3 +24,17 @@ def test_make_prometheus_routes_k3s_by_local_kubeconfig(monkeypatch):
     monkeypatch.setattr(settings, "local_kubeconfig", "/tmp/k3s.yaml")
     assert isinstance(make_prometheus("k3s"), LocalPrometheus)
     assert isinstance(make_prometheus("eks"), StubPrometheus)   # eks는 여전히 use_real_services 게이트
+
+
+def test_make_workload_routes_by_env(monkeypatch):
+    """회귀·준비 세션 워크로드 팩토리(설계 2026-09-29 §1) — k3s는 local_kubeconfig 게이트, eks는 use_real_services 게이트."""
+    from app.deps import make_workload
+    from app.services.stubs import StubK3sWorkload
+
+    assert isinstance(make_workload("k3s"), StubK3sWorkload)
+    assert isinstance(make_workload("eks"), StubK3sWorkload)
+    monkeypatch.setattr(settings, "use_real_services", True)
+    from app.services.real.eks_workload import RealEksWorkload
+
+    assert isinstance(make_workload("eks"), RealEksWorkload)
+    assert isinstance(make_workload("k3s"), StubK3sWorkload)   # k3s는 여전히 local_kubeconfig 게이트

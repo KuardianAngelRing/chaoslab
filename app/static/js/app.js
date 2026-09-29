@@ -1063,7 +1063,7 @@ function watchLiveMetrics() {
   };
   const pods = el.querySelector('[data-live-metrics-pods]');
   const render = (m) => {
-    const label = (m.ts || '').slice(11, 19);
+    const label = m.ts ? new Date(m.ts).toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' }) : '';  // 서버 ts는 UTC ISO → 화면은 KST
     push(ready, [m.ready_pods], label);
     push(latency, [m.p95_ms, m.p99_ms], label);
     push(traffic, [m.rps, m.error_rate_pct], label);

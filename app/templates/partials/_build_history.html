@@ -13,7 +13,7 @@
         <code class="mono font-bold">{{ b.image_tag or "—" }}</code>
       </div>
       <div class="flex items-center gap-4" style="color: var(--muted-foreground);">
-        <span>{{ b.started_at.strftime("%m/%d %H:%M") }}</span>
+        <span>{{ b.started_at|kst }}</span>
         <span>{{ duration(b.started_at, b.finished_at) }}</span>
         <code class="mono truncate max-w-[160px]">{{ b.workflow_name or "—" }}</code>
       </div>

@@ -90,3 +90,59 @@ def test_prepare_environment_persists_readiness(monkeypatch):
     assert row.status == "ready"
     assert row.progress["pods_ready"] == 10
     s.close()
+
+
+def _eks_app(session):
+    app = App(name="online-boutique", repo_url="https://github.com/demo/boutique",
+              framework="go", env="eks")
+    session.add(app)
+    session.commit()
+    return app
+
+
+def test_eks_preparation_is_ready_in_place_and_never_schedules_teardown(monkeypatch):
+    """EKS 준비 세션(설계 2026-09-29 §2): manifest 없이 즉시 ready · ns=SUT_NAMESPACE · 이전 ready 세션을 닫아도
+    실제 ns 정리 태스크는 만들지 않는다(가드 2) · start는 멱등."""
+    from app.config import settings
+    from app.routers.preparations import create_preparation, start_preparation
+
+    monkeypatch.setattr(settings, "sut_namespace", "online-boutique")
+    Session = _session_factory()
+    s = Session()
+    app = _eks_app(s)
+    previous = ExperimentSession(app_id=app.id, status="ready", namespace="online-boutique")
+    s.add(previous)
+    s.commit()
+    background = BackgroundTasks()
+
+    payload = create_preparation(background, app.id, "", s)
+
+    assert payload["status"] == "ready" and payload["namespace"] == "online-boutique"
+    assert payload["progress"]["stage"] == "in_place"
+    assert payload["progress"]["pods_total"] == 10           # Stub readiness 스냅샷이 준비 패널에 실린다
+    assert s.get(ExperimentSession, previous.id).status == "cancelled"
+    assert len(background.tasks) == 0                        # 실제 ns teardown 없음
+    assert start_preparation(payload["id"], BackgroundTasks(), s)["status"] == "ready"
+    s.close()
+
+
+def test_teardown_session_skips_in_place_eks_namespace(monkeypatch):
+    from app.routers import preparations
+
+    Session = _session_factory()
+    s = Session()
+    app = _eks_app(s)
+    row = ExperimentSession(app_id=app.id, status="cancelled", namespace="online-boutique")
+    s.add(row)
+    s.commit()
+    calls = []
+
+    class Workload:
+        def teardown(self, namespace):
+            calls.append(namespace)
+
+    monkeypatch.setattr(preparations, "SessionLocal", Session)
+    monkeypatch.setattr(preparations, "make_k3s_workload", lambda: Workload())
+    preparations._teardown_session(row.id)
+    assert calls == []
+    s.close()

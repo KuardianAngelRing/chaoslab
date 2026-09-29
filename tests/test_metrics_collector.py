@@ -63,3 +63,40 @@ def test_collect_queries_experiment_namespace_when_set(db_session):
     seen.clear()
     collect_experiment_metrics(db_session, exp2, Recording())
     assert seen == [exp2.app.namespace] * 3
+
+
+def test_collect_queries_candidate_target_workload(db_session):
+    """가설 후보가 있으면 R지수 집계는 app.name이 아니라 후보의 target_workload로 조회한다.
+
+    다중 서비스 SUT(부띠끄=online-boutique 앱, 실제 장애 대상=adservice) — app.name으로
+    Istio를 조회하면 매칭이 안 돼 R지수가 비는 09/07 라이브 발견의 회귀 가드."""
+    from app.db.repositories import HypothesisRepository
+    from app.services.agent.hypothesis_schema import CandidateProposal
+
+    exp = _completed_exp(db_session)                     # app_id=1 = online-boutique
+    repo = HypothesisRepository(db_session)
+    run = repo.create_run(app_id=1, goal_text="t", candidate_count=1,
+                          input_payload={}, status="ready")
+    [cand] = repo.add_candidates(run.id, [CandidateProposal(
+        title="adservice 파드 강제 종료 검증", chaos_type="pod-kill",
+        target_workload="adservice", hypothesis="파드가 죽으면 실패할 것이다",
+        expected_impact="오류율 상승 예상")])
+    exp.candidate_id = cand.id
+    db_session.commit()
+    seen = []
+
+    class Recording(StubPrometheus):
+        def phase_summary(self, namespace, app_name, phase, start, end):
+            seen.append(app_name)
+            return super().phase_summary(namespace, app_name, phase, start, end)
+
+    collect_experiment_metrics(db_session, exp, Recording())
+    assert seen == ["adservice"] * 3                     # app.name(online-boutique)이 아니라 후보 대상
+
+
+def test_observed_workload_name_falls_back_to_app_name(db_session):
+    """후보 없는 폼 직접 경로는 app.name 유지(k3s·기존 EKS 폼 경로 회귀 없음)."""
+    from app.services.metrics_collector import observed_workload_name
+
+    exp = _completed_exp(db_session)                     # candidate_id 없음
+    assert observed_workload_name(db_session, exp) == exp.app.name

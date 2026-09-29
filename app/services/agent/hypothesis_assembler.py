@@ -70,7 +70,12 @@ def allowed_chaos_list() -> list[AllowedChaos]:
 
 
 def assemble_hypothesis_input(session: Session, app: App, goal_text: str = "",
-                              candidate_count: int = 5) -> HypothesisInputPayload:
+                              candidate_count: int = 5,
+                              manifest_yaml: str | None = None) -> HypothesisInputPayload:
+    """manifest_yaml=None이면 저장 manifest(k3s). EKS는 호출자(라우터)가 클러스터 덤프
+    (`K8sService.dump_workloads`)를 넘긴다 — 조립기는 순수 함수 유지(설계 2026-09-07 §2)."""
+    if manifest_yaml is None:
+        manifest_yaml = app.manifest or ""
     count = max(1, min(int(candidate_count if candidate_count is not None else 5), 10))
     past = [
         PastExperimentSummary(chaos_type=e.chaos_type, params=e.params,
@@ -80,8 +85,8 @@ def assemble_hypothesis_input(session: Session, app: App, goal_text: str = "",
     return HypothesisInputPayload(
         app={"name": app.name, "env": app.env, "port": app.port,
              "health_path": app.health_path},
-        manifest_yaml=app.manifest or "",
-        manifest_findings=analyze_manifest(app.manifest or ""),
+        manifest_yaml=manifest_yaml,
+        manifest_findings=analyze_manifest(manifest_yaml),
         allowed_chaos=allowed_chaos_list(),
         goal_text=goal_text or "",
         past_experiments=past,

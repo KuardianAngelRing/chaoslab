@@ -43,3 +43,19 @@ def test_analyze_manifest_empty_and_broken():
     assert analyze_manifest("") == []
     broken = analyze_manifest("a: [1,")
     assert broken and "파싱 실패" in broken[0].finding
+
+
+def test_assemble_with_injected_dump_for_eks(db_session):
+    """EKS: 라우터가 넘긴 클러스터 덤프가 manifest 자리에 실리고 findings도 덤프 기반(설계 2026-09-07 §2)."""
+    from app.services.stubs import StubK8s
+
+    seed_data(db_session)
+    app = next(a for a in AppRepository(db_session).list_all() if a.name == "online-boutique")
+    dump = StubK8s().dump_workloads("sut")
+    payload = assemble_hypothesis_input(db_session, app, "", 5, manifest_yaml=dump)
+    assert payload.manifest_yaml == dump
+    assert payload.manifest_findings
+    assert all(f.workload == "frontend" for f in payload.manifest_findings)  # 약점은 frontend에만
+    # 미주입(기본)이면 기존 그대로 — EKS 앱의 저장 manifest는 빈 문자열
+    default = assemble_hypothesis_input(db_session, app, "", 5)
+    assert default.manifest_yaml == "" and default.manifest_findings == []

@@ -11,7 +11,7 @@ import yaml
 
 from app.db.database import SessionLocal
 from app.db.models import App, Experiment, HypothesisRun, ScenarioRun
-from app.deps import make_chaos, make_k3s_workload
+from app.deps import make_chaos, make_workload
 from app.services.chaos_specs import validate_params
 from app.services.improvement_specs import validate_improvement
 from app.services.observations import summarize, take_sample
@@ -92,13 +92,20 @@ def entry_service(manifest_yaml: str, app_name: str) -> str | None:
     return None
 
 
-def observation_for_app(app: App) -> dict | None:
+def manifest_for(run: HypothesisRun, app: App) -> str:
+    """가설 run의 매니페스트 원천 — run 생성 시 스냅샷(EKS는 클러스터 덤프, 설계 09/07 §2) 우선,
+    없으면 앱 저장 manifest. selector·관측 Service·개선안 미리보기가 모두 이 값을 본다."""
+    return (run.input_payload or {}).get("manifest_yaml") or app.manifest or ""
+
+
+def observation_for_app(app: App, manifest_yaml: str | None = None) -> dict | None:
     """앱의 관측 요청 대상(회귀 `take_sample`·단독 실험 트래픽 공용) — 한 곳 원칙.
 
-    service=`App.observe_service`(등록 정보) 우선, 없으면 manifest에서 `entry_service` 추론.
-    path=`App.health_path or "/"`. Service를 알 수 없으면 None — 호출자가 422/스킵을 정한다.
+    service=`App.observe_service`(등록 정보) 우선, 없으면 manifest(인자가 없으면 앱 저장분)에서
+    `entry_service` 추론. path=`App.health_path or "/"`. Service를 알 수 없으면 None — 호출자가 422/스킵을 정한다.
     """
-    service = app.observe_service or entry_service(app.manifest, app.name)
+    manifest = app.manifest if manifest_yaml is None else manifest_yaml
+    service = app.observe_service or entry_service(manifest, app.name)
     if not service:
         return None
     return {"service": service, "path": app.health_path or "/", "expected_status": 200}
@@ -114,6 +121,8 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
     approved = [c for c in run.candidates if c.detail_status == "detailed" and c.params]
     if not approved:
         raise ValueError("승인(구체화 완료)된 후보가 없어 최종 회귀를 조립할 수 없습니다")
+    manifest = manifest_for(run, app)
+    in_place = app.env != "k3s"   # EKS: 실제 SUT ns — selector 없이(ns 전체) 주입하면 무관한 파드가 죽는다
     experiments = []
     for candidate in approved:
         params, errors = validate_params(candidate.chaos_type, candidate.params)
@@ -121,15 +130,20 @@ def scenario_snapshot_from_hypothesis(run: HypothesisRun, app: App) -> dict:
             raise ValueError(" / ".join(errors))
         if not candidate.target_workload:
             raise ValueError("후보의 대상 워크로드가 비어 있습니다")
+        selector = workload_selector(manifest, candidate.target_workload)
+        if selector is None and in_place:
+            raise ValueError(
+                f"대상 워크로드 {candidate.target_workload}의 selector를 클러스터 덤프에서 찾지 못했습니다 — "
+                "실제 네임스페이스 전체에는 주입하지 않으므로 회귀를 조립하지 않습니다")
         experiments.append({
             "id": f"cand-{candidate.id}",
             "title": candidate.title,
             "chaos_type": candidate.chaos_type,
             "params": params,
-            "target_selector": workload_selector(app.manifest, candidate.target_workload),
+            "target_selector": selector,
             "criteria": dict(DEFAULT_CRITERIA),
         })
-    observation = observation_for_app(app)
+    observation = observation_for_app(app, manifest)
     if observation is None:
         raise ValueError(
             "검증 요청을 보낼 Service를 알 수 없습니다 — manifest에 앱명과 같은 Service가 없고 Service가 "
@@ -192,6 +206,8 @@ def _snapshot_from_yaml(app_name: str, selected_ids: list[str]) -> dict:
 def run_regression(run_id: int) -> None:
     """개선 전과 개선 후에 동일한 시나리오를 실행하고 비교 스냅샷을 저장한다."""
     session = SessionLocal()
+    workload = None
+    rolled_back = False
     try:
         run = session.get(ScenarioRun, run_id)
         if run is None or run.status != "queued":
@@ -200,7 +216,7 @@ def run_regression(run_id: int) -> None:
         run.started_at = datetime.now(timezone.utc)
         session.commit()
 
-        workload = make_k3s_workload()
+        workload = make_workload(run.app.env)   # k3s=전용 ns 배포본 · eks=실제 SUT ns in-place
         experiments = (run.scenario or {}).get("experiments") or []
         run.baseline_results = _run_suite(session, run, experiments, workload, "baseline")
         session.commit()
@@ -208,6 +224,7 @@ def run_regression(run_id: int) -> None:
         session.commit()
         run.results = _run_suite(session, run, experiments, workload, "final")
         _rollback_improvements(run, workload)   # 보고서에 전후가 남으므로 세션 ns는 manifest 상태로 되돌린다
+        rolled_back = True
         run.comparison = compare_runs(run.baseline_results or [], run.results or [],
                                       run.improvement_changes or [])
         run.report_content = write_report({
@@ -225,6 +242,9 @@ def run_regression(run_id: int) -> None:
         logger.exception("final regression failed (run %s)", run_id)
         run = session.get(ScenarioRun, run_id)
         if run is not None:
+            if not rolled_back and workload is not None and run.improvement_changes:
+                # 실패로 끝나도 적용 개선을 남기지 않는다 — in-place(eks)는 라이브 SUT라 특히 중요 (best-effort)
+                _rollback_improvements(run, workload)
             run.status = "failed"
             run.error = str(exc)
             _finish(session, run, "최종 회귀 검증을 완료하지 못했습니다")
