@@ -15,17 +15,18 @@ from app.routers import (apps, builds, experiments, handoffs, hypothesis, pages,
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 테스트처럼 DB dependency가 교체된 경우 전역 파일 DB를 초기화하지 않는다.
+    # 테스트처럼 DB dependency가 교체된 경우 전역 파일 DB를 초기화·seed하지 않는다
+    # (테스트 fixture가 in-memory DB를 직접 seed — 파일 DB가 비어 있으면 seed 조회가 no such table).
     if get_session not in app.dependency_overrides:
         init_db()
-    # mock seed는 stub 모드 전용 — real 모드는 실제 등록 데이터만 표시
-    if not settings.use_real_services:
-        session = SessionLocal()
-        try:
-            if not AppRepository(session).list_all():
-                seed_data(session)
-        finally:
-            session.close()
+        # mock seed는 stub 모드 전용 — real 모드는 실제 등록 데이터만 표시
+        if not settings.use_real_services:
+            session = SessionLocal()
+            try:
+                if not AppRepository(session).list_all():
+                    seed_data(session)
+            finally:
+                session.close()
     tunnel = make_tunnel()
     await tunnel.start()
     try:

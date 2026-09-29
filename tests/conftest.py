@@ -32,9 +32,22 @@ def _reset_sse_app_status():
     AppStatus.should_exit_event = None
 
 
+# 전역 SessionLocal(파일 DB)을 직접 쓰는 모듈 — 백그라운드 워처·SSE·워처 훅. client fixture가 전부
+# "테이블만 있는 빈 in-memory DB"로 바꾼다: 요청은 seed된 DB를, 워처는 빈 DB를 보므로 워처가 행을 못 찾고
+# 즉시 종료한다(파일 chaoslab.db에 테이블만 있고 테스트 행은 없던 예전 동작을 파일 없이 재현 — 없으면
+# no such table, 있으면 오염). 워처가 데이터를 봐야 하는 테스트는 해당 모듈의 SessionLocal을 직접 monkeypatch한다.
+_SESSIONLOCAL_MODULES = (
+    "app.db.database", "app.routers.apps", "app.routers.builds", "app.routers.experiments",
+    "app.routers.hypothesis", "app.routers.preparations", "app.routers.scenario_runs",
+    "app.services.regression",
+)
+
+
 @pytest.fixture
-def client():
+def client(monkeypatch):
     """앱과 분리된 in-memory DB를 seed해서 주입 (hermetic — 파일 DB에 의존하지 않음)."""
+    import importlib
+
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -42,6 +55,11 @@ def client():
     )
     Base.metadata.create_all(bind=engine)
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    watcher_engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=watcher_engine)
+    WatcherSessionLocal = sessionmaker(bind=watcher_engine, autoflush=False, expire_on_commit=False)
+    for name in _SESSIONLOCAL_MODULES:
+        monkeypatch.setattr(importlib.import_module(name), "SessionLocal", WatcherSessionLocal)
 
     seed_session = TestingSessionLocal()
     seed_data(seed_session)
