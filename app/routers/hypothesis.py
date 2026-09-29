@@ -31,7 +31,7 @@ from app.services.agent.hypothesis_validation import (
 from app.services.agent.improvement_assembler import assemble_improvement_input
 from app.services.chaos_specs import CHAOS_SPECS
 from app.services.improvement_specs import manifest_workloads, preview_rows, validate_improvement
-from app.services.regression import DEFAULT_CRITERIA, workload_selector
+from app.services.regression import DEFAULT_CRITERIA, manifest_for, workload_selector
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -94,7 +94,8 @@ def _page(request: Request, session: Session, run: HypothesisRun,
          "experiment": experiment, "experiment_candidate": experiment_candidate,
          "hypothesis_active": _stream_active(run, candidates, experiment),
          # 개선 단계(설계 09/05 §7) — 3단계 상단 패널
-         "improvement_cards": _improvement_cards(proposals, run.app.manifest or "",
+         # 미리보기 "현재값"은 run의 매니페스트 원천(EKS=클러스터 덤프, 설계 2026-09-29 §4)
+         "improvement_cards": _improvement_cards(proposals, manifest_for(run, run.app),
                                                   improvement_form_errors),
          "improvement_undecided": any(p.status == "proposed" for p in proposals),
          "improvement_approved": sum(p.status == "approved" for p in proposals),
@@ -228,10 +229,6 @@ def propose_improvements(
     run = repo.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="hypothesis run not found")
-    if run.app.env != "k3s":
-        # 개선·최종 회귀는 EKS 범위 밖(설계 2026-09-07 §3) — 빈 manifest로 조립되는 것을 막는다
-        raise HTTPException(status_code=422,
-                            detail="EKS 앱은 단독 실험까지 지원해요 — 개선·최종 회귀는 k3s 앱에서")
     experiment = repo.experiment_for_run(run.id)
     if experiment is None or experiment.status not in _TERMINAL_EXPERIMENT:
         raise HTTPException(status_code=409, detail="실험이 끝난 뒤에 개선안을 만들 수 있어요")

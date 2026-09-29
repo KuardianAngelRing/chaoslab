@@ -12,10 +12,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Re
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import settings
 from app.db.database import SessionLocal, get_session
 from app.db.models import ExperimentSession
 from app.db.repositories import AppRepository, ExperimentSessionRepository, ScenarioRunRepository
-from app.deps import make_k3s_workload
+from app.deps import make_k3s_workload, make_workload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -55,9 +56,9 @@ def create_preparation(
     app = AppRepository(session).get(app_id)
     if app is None:
         raise HTTPException(status_code=404, detail="app not found")
-    if app.env != "k3s":
-        raise HTTPException(status_code=422, detail="로컬 환경 준비는 k3s 앱에만 필요합니다")
-    if not (app.manifest or "").strip():
+    # EKS 등 비-k3s 앱은 실제 SUT ns에서 그대로 검증(in-place, 설계 2026-09-29 §2) — 배포·manifest 불필요
+    in_place = app.env != "k3s"
+    if not in_place and not (app.manifest or "").strip():
         raise HTTPException(status_code=422, detail="앱 manifest가 없어 환경을 준비할 수 없습니다")
 
     repo = ExperimentSessionRepository(session)
@@ -74,15 +75,30 @@ def create_preparation(
                 status="cancelled")
     if previous_ready:
         session.commit()
-        for previous in previous_ready:
-            background.add_task(_teardown_session, previous.id)
+        if not in_place:   # in-place 세션의 ns는 실제 SUT — 정리 대상이 아니다(가드 2)
+            for previous in previous_ready:
+                background.add_task(_teardown_session, previous.id)
 
     row = repo.create(app_id=app.id, objective=objective.strip(), status="queued",
                       progress={"stage": "starting", "message": "실험 환경 준비를 시작합니다"})
-    row.namespace = _namespace(app.name, row.id)
+    row.namespace = settings.sut_namespace if in_place else _namespace(app.name, row.id)
     row.updated_at = datetime.now(timezone.utc)
+    if in_place:
+        # 배포 없이 즉시 ready — 스트림이 곧바로 completed를 흘려 JS의 waitPreparation→startScenarioRun이 이어진다
+        _update(row, stage="in_place", status="ready",
+                message=f"{row.namespace} 네임스페이스에서 그대로 검증해요 — 개선은 회귀가 끝나면 원래대로 롤백돼요",
+                snapshot=_readiness_snapshot(app.env, row.namespace))
     session.commit()
     return _payload(row)
+
+
+def _readiness_snapshot(env: str, namespace: str) -> dict:
+    """in-place 세션의 준비 패널용 파드 스냅샷 — 조회 실패는 세션 ready에 영향을 주지 않는다."""
+    try:
+        return make_workload(env).readiness(namespace)
+    except Exception:
+        logger.warning("readiness snapshot failed (%s)", namespace, exc_info=True)
+        return {}
 
 
 @router.post("/experiment-sessions/{session_id}/start")
@@ -94,6 +110,8 @@ def start_preparation(
     row = ExperimentSessionRepository(session).get(session_id)
     if row is None:
         raise HTTPException(status_code=404, detail="experiment session not found")
+    if row.status == "ready" and row.app.env != "k3s":
+        return _payload(row)   # in-place 세션은 생성 시 이미 ready — start는 멱등(기존 JS 흐름 무수정)
     if row.status != "queued":
         raise HTTPException(status_code=409, detail="시작할 수 없는 환경 상태입니다")
     _update(row, stage="starting", message="실험 환경 준비를 시작합니다")
@@ -155,7 +173,7 @@ def _teardown_session(session_id: int) -> None:
     s = SessionLocal()
     try:
         row = s.get(ExperimentSession, session_id)
-        if row and row.namespace:
+        if row and row.namespace and row.app.env == "k3s":   # in-place(eks) 세션의 실제 ns는 절대 삭제하지 않는다
             make_k3s_workload().teardown(row.namespace)
     except Exception:
         logger.exception("environment teardown failed (session %s)", session_id)

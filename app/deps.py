@@ -55,6 +55,17 @@ def make_k3s_workload() -> interfaces.K3sWorkloadService:
     return stubs.StubK3sWorkload()
 
 
+def make_workload(env: str) -> interfaces.K3sWorkloadService:
+    """회귀·준비 세션의 워크로드 서비스(설계 2026-09-29 §1) — k3s는 기존(전용 ns 배포),
+    그 외(eks)는 실제 SUT ns in-place(배포·삭제 없음). eks Real 게이트는 use_real_services."""
+    if env == "k3s":
+        return make_k3s_workload()
+    if settings.use_real_services:
+        from app.services.real.eks_workload import RealEksWorkload  # lazy: k8s SDK
+        return RealEksWorkload(settings)
+    return stubs.StubK3sWorkload()
+
+
 _tunnel: interfaces.TunnelService | None = None
 
 

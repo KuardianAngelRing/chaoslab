@@ -22,7 +22,7 @@
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2 flex-wrap"><h3 class="font-extrabold">AI 개선안 제안</h3><span class="tds-badge badge-info">휴먼인더루프</span></div>
       <p class="text-xs mt-1" style="color: var(--muted-foreground);">
-        실험 결과를 근거로 Deployment 설정(probe·preStop·resources·replicas·환경변수) 개선안을 제안받고, 승인한 항목만 최종 회귀의 baseline 뒤에 적용해요. 개선은 검증 전용 namespace에만 적용되고 앱의 저장 manifest는 바뀌지 않아요.
+        실험 결과를 근거로 Deployment 설정(probe·preStop·resources·replicas·환경변수) 개선안을 제안받고, 승인한 항목만 최종 회귀의 baseline 뒤에 적용해요. {% if hrun.app.env != "k3s" %}개선은 실제 네임스페이스의 Deployment에 적용되고 회귀가 끝나면 원래대로 롤백돼요.{% else %}개선은 검증 전용 namespace에만 적용되고 앱의 저장 manifest는 바뀌지 않아요.{% endif %}
       </p>
       {% if experiment and (fm or rm) %}
       <p class="text-xs mt-2 mono" style="color: var(--muted-foreground);">실험 #{{ experiment.id }} · 장애 구간 오류율 피크 {{ fm.get("error_rate_peak", "-") }}% · 최소 Ready {{ fm.get("min_ready_pods", "-") }} · 회복 {{ rm.get("recovery_seconds", "-") }}s</p>

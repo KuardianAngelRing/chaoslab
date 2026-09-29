@@ -302,15 +302,7 @@
       </section>
 
       <section data-tab-content="verify" data-tab-group="workflow" class="{% if view == 'verify' %}active{% endif %} space-y-4">
-        {# EKS 앱은 단독 실험(2단계)까지 — 개선·최종 회귀는 범위 밖(설계 2026-09-07 §3). 안내 카드만 렌더 #}
-        {% set hyp_eks = hypothesis_run and hypothesis_run.app.env != "k3s" %}
-        {% if hyp_eks %}
-        <div class="tds-card p-8 text-center" data-eks-verify-notice>
-          <span class="tossface-lg">🚧</span>
-          <div class="flex items-center justify-center gap-2 mt-3"><span class="tds-badge badge-muted">EKS</span><h2 class="text-xl font-extrabold">EKS 앱은 단독 실험까지 지원해요</h2></div>
-          <p class="text-sm mt-2" style="color: var(--muted-foreground);">가설 수립과 단독 실험·R지수는 2단계에서 확인할 수 있어요.<br>개선안 제안과 개선 전후 최종 회귀 검증은 k3s 앱에서 사용할 수 있어요.</p>
-        </div>
-        {% else %}
+        {% set in_place = hypothesis_run and hypothesis_run.app.env != "k3s" %}
         <div class="tds-card p-6">
           <div class="flex items-start justify-between gap-5">
             <div><div class="flex items-center gap-2"><span class="tds-badge badge-info">3단계</span><h2 class="text-xl font-extrabold">개선 전후 최종 회귀 실행</h2></div><p class="text-sm mt-2" style="color: var(--muted-foreground);" data-regression-message>{{ '개선 전후 최종 회귀 검증이 완료됐습니다' if scenario_run and scenario_run.status == 'completed' else ('최종 회귀 검증을 완료하지 못했습니다' if scenario_run and scenario_run.status == 'failed' else (scenario_run.progress.message if scenario_run else '최종 회귀 검증을 시작해 주세요')) }}</p></div>
@@ -328,7 +320,7 @@
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
               <h3 class="font-extrabold">승인 후보로 최종 회귀 조립</h3>
-              <p class="text-xs mt-1" style="color: var(--muted-foreground);">전용 namespace에 앱을 다시 준비한 뒤, 아래 실험을 개선 전·후 두 라운드로 실행해요.
+              <p class="text-xs mt-1" style="color: var(--muted-foreground);">{% if in_place %}실제 네임스페이스에서 그대로(in-place) 실행해요 — 개선은 회귀가 끝나면 원래대로 롤백돼요.{% else %}전용 namespace에 앱을 다시 준비한 뒤, 아래 실험을 개선 전·후 두 라운드로 실행해요.{% endif %}
                 {% if improvement_approved %}baseline 라운드 뒤에 승인한 개선 {{ improvement_approved }}건을 적용하고 rollout Ready를 확인한 다음 final 라운드가 돌아요.
                 {% else %}적용할 개선이 없으면 두 라운드가 같은 조건으로 돌고 보고서에는 "적용된 개선 없음"으로 정직하게 표시돼요.{% endif %}</p>
             </div>
@@ -360,7 +352,7 @@
               <iconify-icon icon="solar:alt-arrow-down-linear" width="14" style="color: var(--muted-foreground);"></iconify-icon>
             </summary>
             <div class="px-4 pb-3 divide-y border-t" style="border-color: var(--border);">
-              <div class="py-3 flex items-center gap-3 text-xs"><iconify-icon icon="solar:box-minimalistic-bold" width="17" style="color: var(--primary);"></iconify-icon><span class="flex-1">전용 namespace 생성 및 manifest 적용</span><span class="mono" style="color: var(--muted-foreground);" data-prepare-namespace></span></div>
+              <div class="py-3 flex items-center gap-3 text-xs"><iconify-icon icon="solar:box-minimalistic-bold" width="17" style="color: var(--primary);"></iconify-icon><span class="flex-1">{% if in_place %}실제 네임스페이스 사용(배포 없음){% else %}전용 namespace 생성 및 manifest 적용{% endif %}</span><span class="mono" style="color: var(--muted-foreground);" data-prepare-namespace></span></div>
               <div class="py-3 flex items-center gap-3 text-xs"><iconify-icon icon="solar:check-circle-bold" width="17" style="color: var(--primary);"></iconify-icon><span class="flex-1">Deployment와 Pod Ready 확인</span><span class="mono" style="color: var(--muted-foreground);" data-prepare-pods></span></div>
               <div class="hidden py-3 text-xs" style="color: var(--warning);" data-prepare-blockers></div>
               <div class="hidden py-3 text-xs" style="color: var(--danger);" data-prepare-error></div>
@@ -391,7 +383,6 @@
 
         <div class="tds-card p-4 hidden" style="border-color: var(--danger);" data-regression-error></div>
         <div class="flex justify-end"><button type="button" class="tds-btn-primary disabled:opacity-40 disabled:cursor-not-allowed" data-regression-result {% if not scenario_run or scenario_run.status not in ["completed", "failed"] %}disabled{% endif %}>결과 보기<iconify-icon icon="solar:alt-arrow-right-linear" width="16"></iconify-icon></button></div>
-        {% endif %}
       </section>
 
       <section data-tab-content="result" data-tab-group="workflow" class="{% if view == 'result' %}active{% endif %} space-y-4">
